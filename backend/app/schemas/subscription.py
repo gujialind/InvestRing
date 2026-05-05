@@ -1,0 +1,38 @@
+from pydantic import BaseModel
+from typing import Optional
+from datetime import date, datetime
+
+
+class SubscriptionBase(BaseModel):
+    portfolio_code: str
+    investor_code: str
+    sub_type: str  # subscribe/redeem
+    amount: Optional[float] = None
+    shares: Optional[float] = None
+    unit_price: Optional[float] = None
+    apply_date: date
+    confirm_date: Optional[date] = None
+    status: str = "pending"
+    notes: Optional[str] = None
+
+
+class SubscriptionCreate(SubscriptionBase):
+    pass
+
+
+class SubscriptionUpdate(BaseModel):
+    amount: Optional[float] = None
+    shares: Optional[float] = None
+    unit_price: Optional[float] = None
+    confirm_date: Optional[date] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SubscriptionResponse(SubscriptionBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

@@ -1,0 +1,43 @@
+export interface Position {
+  id: number;
+  portfolio_code: string;
+  product_code: string;
+  market?: string;
+  platform_code?: string;
+  shares?: number;
+  frozen_shares?: number;
+  cost_price?: number;
+  unit_price?: number;
+  market_value?: number;
+  amount?: number;
+  frozen_amount?: number;
+  snapshot_date: string;
+  created_at?: string;
+}
+
+export interface PositionCreate {
+  portfolio_code: string;
+  product_code: string;
+  market?: string;
+  platform_code?: string;
+  shares?: number;
+  frozen_shares?: number;
+  cost_price?: number;
+  unit_price?: number;
+  market_value?: number;
+  amount?: number;
+  frozen_amount?: number;
+  snapshot_date: string;
+}
+
+export interface PositionUpdate {
+  platform_code?: string;
+  shares?: number;
+  frozen_shares?: number;
+  cost_price?: number;
+  unit_price?: number;
+  market_value?: number;
+  amount?: number;
+  frozen_amount?: number;
+  snapshot_date?: string;
+}

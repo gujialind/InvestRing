@@ -1,0 +1,31 @@
+from sqlalchemy import Column, String, Text, Numeric, Date, DateTime, Integer, ForeignKey, ForeignKeyConstraint, func
+from app.database import Base
+
+
+class Trade(Base):
+    __tablename__ = "trade"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
+    platform_code = Column(String(20), ForeignKey("platform.code"))
+    product_code = Column(String(10), nullable=False)
+    market = Column(String(20))
+    trade_type = Column(String(10), nullable=False)
+    shares = Column(Numeric(15, 4))
+    amount = Column(Numeric(15, 4), nullable=False)
+    price = Column(Numeric(10, 4))
+    fee = Column(Numeric(15, 4), default=0)
+    actual_amount = Column(Numeric(15, 4))
+    trade_date = Column(Date, nullable=False)
+    confirm_date = Column(Date)
+    status = Column(String(20), default="pending")
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["product_code", "market"],
+            ["product.code", "product.market"]
+        ),
+    )

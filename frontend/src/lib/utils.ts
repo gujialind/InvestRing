@@ -1,0 +1,241 @@
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+/**
+ * 合并 Tailwind CSS 类名
+ * 结合 clsx 和 tailwind-merge 实现条件类名合并
+ */
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+// ==================== 日期格式化 ====================
+
+/**
+ * 格式化日期为 YYYY-MM-DD
+ */
+export function formatDate(date: string | Date | number): string {
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "--";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * 格式化日期为 YYYY-MM-DD HH:mm:ss
+ */
+export function formatDateTime(date: string | Date | number): string {
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "--";
+  const dateStr = formatDate(d);
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  const seconds = String(d.getSeconds()).padStart(2, "0");
+  return `${dateStr} ${hours}:${minutes}:${seconds}`;
+}
+
+/**
+ * 格式化日期为相对时间（今天、昨天、N天前）
+ */
+export function formatRelativeDate(date: string | Date | number): string {
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "--";
+
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  if (diffDays < 7) return `${diffDays} 天前`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)} 周前`;
+  if (diffDays < 365) return `${Math.floor(diffDays / 30)} 个月前`;
+  return `${Math.floor(diffDays / 365)} 年前`;
+}
+
+// ==================== 金额格式化 ====================
+
+/**
+ * 格式化数字（千分位 + 小数位）
+ * @param num 数字
+ * @param decimals 小数位数（默认 2）
+ * @param fallback 无效值时的回显（默认 "--"）
+ */
+export function formatNumber(
+  num: number | string | undefined | null,
+  decimals: number = 2,
+  fallback: string = "--"
+): string {
+  if (num === undefined || num === null || num === "" || Number.isNaN(Number(num))) {
+    return fallback;
+  }
+  const n = typeof num === "string" ? parseFloat(num) : num;
+  return n.toLocaleString("zh-CN", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/**
+ * 格式化金额（人民币，带 ¥ 符号）
+ */
+export function formatCurrency(
+  num: number | string | undefined | null,
+  decimals: number = 2,
+  fallback: string = "--"
+): string {
+  if (num === undefined || num === null || num === "" || Number.isNaN(Number(num))) {
+    return fallback;
+  }
+  return `¥${formatNumber(num, decimals, fallback)}`;
+}
+
+/**
+ * 格式化金额（简化显示，大于万显示为 X.XX 万）
+ */
+export function formatCompactCurrency(
+  num: number | string | undefined | null,
+  fallback: string = "--"
+): string {
+  if (num === undefined || num === null || num === "" || Number.isNaN(Number(num))) {
+    return fallback;
+  }
+  const n = typeof num === "string" ? parseFloat(num) : num;
+  if (Math.abs(n) >= 100000000) {
+    return `¥${(n / 100000000).toFixed(2)} 亿`;
+  }
+  if (Math.abs(n) >= 10000) {
+    return `¥${(n / 10000).toFixed(2)} 万`;
+  }
+  return formatCurrency(n, 2, fallback);
+}
+
+/**
+ * 格式化百分比
+ * @param num 小数形式（如 0.0523 表示 5.23%）
+ * @param decimals 小数位数（默认 2）
+ * @param showSign 是否显示正负号（默认 true）
+ */
+export function formatPercent(
+  num: number | string | undefined | null,
+  decimals: number = 2,
+  showSign: boolean = true,
+  fallback: string = "--"
+): string {
+  if (num === undefined || num === null || num === "" || Number.isNaN(Number(num))) {
+    return fallback;
+  }
+  const n = typeof num === "string" ? parseFloat(num) : num;
+  const percent = n * 100;
+  const sign = showSign && percent > 0 ? "+" : "";
+  return `${sign}${percent.toFixed(decimals)}%`;
+}
+
+/**
+ * 格式化收益率（直接传入百分比数值，如 5.23 表示 5.23%）
+ */
+export function formatReturnRate(
+  num: number | string | undefined | null,
+  decimals: number = 2,
+  showSign: boolean = true,
+  fallback: string = "--"
+): string {
+  if (num === undefined || num === null || num === "" || Number.isNaN(Number(num))) {
+    return fallback;
+  }
+  const n = typeof num === "string" ? parseFloat(num) : num;
+  const sign = showSign && n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(decimals)}%`;
+}
+
+// ==================== 收益率颜色判断 ====================
+
+/**
+ * 根据收益率/涨跌值获取对应的颜色类名
+ * @param value 数值
+ * @returns Tailwind CSS 颜色类名
+ */
+export function getReturnColorClass(value: number | string | undefined | null): string {
+  if (value === undefined || value === null || value === "" || Number.isNaN(Number(value))) {
+    return "text-muted-foreground";
+  }
+  const n = typeof value === "string" ? parseFloat(value) : value;
+  if (n > 0) return "text-red-600";
+  if (n < 0) return "text-green-600";
+  return "text-muted-foreground";
+}
+
+/**
+ * 根据收益率/涨跌值获取对应背景色类名
+ */
+export function getReturnBgClass(value: number | string | undefined | null): string {
+  if (value === undefined || value === null || value === "" || Number.isNaN(Number(value))) {
+    return "bg-muted";
+  }
+  const n = typeof value === "string" ? parseFloat(value) : value;
+  if (n > 0) return "bg-red-50";
+  if (n < 0) return "bg-green-50";
+  return "bg-muted";
+}
+
+/**
+ * 获取带符号的收益率字符串（自动着色）
+ * 用于需要同时显示符号和颜色的场景
+ */
+export function getSignedReturn(
+  value: number | string | undefined | null,
+  decimals: number = 2
+): { text: string; colorClass: string } {
+  if (value === undefined || value === null || value === "" || Number.isNaN(Number(value))) {
+    return { text: "--", colorClass: "text-muted-foreground" };
+  }
+  const n = typeof value === "string" ? parseFloat(value) : value;
+  const sign = n > 0 ? "+" : "";
+  return {
+    text: `${sign}${n.toFixed(decimals)}%`,
+    colorClass: getReturnColorClass(n),
+  };
+}
+
+// ==================== 其他工具函数 ====================
+
+/**
+ * 延迟函数
+ */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 生成唯一 ID
+ */
+export function generateId(prefix?: string): string {
+  const id = Math.random().toString(36).substring(2, 9);
+  return prefix ? `${prefix}-${id}` : id;
+}
+
+/**
+ * 截断文本
+ */
+export function truncateText(text: string, maxLength: number): string {
+  if (!text || text.length <= maxLength) return text;
+  return `${text.substring(0, maxLength)}...`;
+}
+
+/**
+ * 深拷贝
+ */
+export function deepClone<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+/**
+ * 判断是否为交易日（简单判断，非节假日）
+ * 实际应调用后端 API 查询 trading_calendar
+ */
+export function isWeekend(date: Date = new Date()): boolean {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+}
