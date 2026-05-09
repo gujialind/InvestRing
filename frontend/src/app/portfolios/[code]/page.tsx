@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { formatCurrency, formatReturnRate, formatNumber, getReturnColorClass } from "@/lib/utils";
-import { TrendingUp, Users, Wallet, ArrowLeft, Loader2, PowerOff, Power, Trash2, Plus } from "lucide-react";
+import { TrendingUp, Users, Wallet, ArrowLeft, Loader2, PowerOff, Power, Trash2, Plus, ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
 import { usePortfolio, useLatestSnapshot, usePortfolioInvestors, useClosePortfolio, useActivatePortfolio, useDeletePortfolio } from "@/hooks/usePortfolio";
 import { usePositionList } from "@/hooks/usePortfolio";
@@ -116,10 +116,24 @@ export default function PortfolioDetailPage() {
                 </>
               )}
               {isActive && (
-                <Button variant="outline" onClick={handleClose} disabled={closePortfolio.isPending}>
-                  <PowerOff className="mr-2 h-4 w-4 text-red-500" />
-                  关闭组合
-                </Button>
+                <>
+                  <Link href={`/portfolios/${code}/subscriptions`}>
+                    <Button>
+                      <Plus className="mr-2 h-4 w-4" />
+                      申购赎回
+                    </Button>
+                  </Link>
+                  <Link href={`/portfolios/${code}/trades`}>
+                    <Button variant="outline">
+                      <ArrowRightLeft className="mr-2 h-4 w-4" />
+                      调仓交易
+                    </Button>
+                  </Link>
+                  <Button variant="outline" onClick={handleClose} disabled={closePortfolio.isPending}>
+                    <PowerOff className="mr-2 h-4 w-4 text-red-500" />
+                    关闭组合
+                  </Button>
+                </>
               )}
               {isClosed && (
                 <Button variant="outline" onClick={handleActivate} disabled={activatePortfolio.isPending}>
