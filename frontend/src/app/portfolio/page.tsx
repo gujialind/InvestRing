@@ -59,7 +59,7 @@ export default function PortfoliosPage() {
       onSuccess: (data) => {
         setIsDialogOpen(false);
         setFormData({ code: "", name: "", description: "" });
-        router.push(`/portfolios/${data.code}`);
+        router.push(`/portfolio/${data.code}`);
       },
     });
   };
@@ -222,7 +222,7 @@ export default function PortfoliosPage() {
                     </div>
                   )}
                   <div className="flex gap-2 pt-2">
-                    <Link href={`/portfolios/${portfolio.code}`} className="flex-1">
+                    <Link href={`/portfolio/${portfolio.code}`} className="flex-1">
                       <Button variant="outline" className="w-full">
                         <Eye className="mr-2 h-4 w-4" />
                         详情

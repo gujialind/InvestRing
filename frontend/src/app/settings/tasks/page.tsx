@@ -29,6 +29,14 @@ export default function TasksPage() {
 
   const tasks = ((tasksData as any)?.items) as any[] || [];
 
+  const { data: executionsData, isLoading: execLoading } = useQuery({
+    queryKey: ["tasks", "executions"],
+    queryFn: () => taskApi.executionHistory(),
+    staleTime: 10 * 1000,
+  });
+
+  const executions = ((executionsData as any)?.items) as any[] || [];
+
   const runTask = useMutation({
     mutationFn: (code: string) => taskApi.run(code),
     onSuccess: (_, code) => {
@@ -163,6 +171,63 @@ export default function TasksPage() {
             {tasks.length === 0 && (
               <div className="text-center text-muted-foreground py-8">
                 暂无定时任务
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>执行历史</CardTitle>
+            <CardDescription>
+              最近的任务执行记录
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {execLoading ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                加载中...
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>任务</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead className="text-right">执行耗时</TableHead>
+                    <TableHead>开始时间</TableHead>
+                    <TableHead>结束时间</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {executions.map((exec: any) => (
+                    <TableRow key={exec.id}>
+                      <TableCell className="font-medium">{exec.task_code}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          exec.status === "success"
+                            ? "bg-green-100 text-green-800"
+                            : exec.status === "failed"
+                            ? "bg-red-100 text-red-800"
+                            : "bg-yellow-100 text-yellow-800"
+                        }`}>
+                          {exec.status === "success" ? "成功" : exec.status === "failed" ? "失败" : "运行中"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {exec.duration_ms ? `${(exec.duration_ms / 1000).toFixed(1)}s` : "--"}
+                      </TableCell>
+                      <TableCell>{exec.started_at ? formatDate(exec.started_at) : "--"}</TableCell>
+                      <TableCell>{exec.completed_at ? formatDate(exec.completed_at) : "--"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            {!execLoading && executions.length === 0 && (
+              <div className="text-center text-muted-foreground py-8">
+                暂无执行记录
               </div>
             )}
           </CardContent>

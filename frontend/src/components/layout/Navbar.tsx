@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/stores/auth";
+import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,7 +18,6 @@ export default function Navbar() {
 
   const handleLogout = () => {
     logout();
-    localStorage.removeItem("token");
     router.push("/login");
   };
 

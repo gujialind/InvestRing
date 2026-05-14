@@ -29,17 +29,17 @@ import {
 const adminNavItems = [
   { href: "/dashboard", label: "首页", icon: LayoutDashboard },
   { href: "/investors", label: "投资人", icon: Users },
-  { href: "/portfolios", label: "组合", icon: Briefcase },
+  { href: "/portfolio", label: "组合", icon: Briefcase },
   { href: "/products", label: "产品", icon: Package },
   { href: "/platforms", label: "平台", icon: Building2 },
-  { href: "/logs", label: "日志", icon: FileText },
-  { href: "/tasks", label: "任务", icon: PlayCircle },
+  { href: "/settings/logs", label: "日志", icon: FileText },
+  { href: "/settings/tasks", label: "任务", icon: PlayCircle },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
 const viewerNavItems = [
   { href: "/dashboard", label: "首页", icon: LayoutDashboard },
-  { href: "/portfolios", label: "组合", icon: Briefcase },
+  { href: "/portfolio", label: "组合", icon: Briefcase },
 ];
 
 export default function Sidebar() {

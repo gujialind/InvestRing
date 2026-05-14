@@ -398,6 +398,9 @@ export const logApi = {
 
   errorLogs: (params?: { page?: number; page_size?: number }) =>
     request<any[]>({ method: "GET", url: "/system/logs/error", params }),
+
+  taskLogs: (params?: { page?: number; page_size?: number }) =>
+    request<any[]>({ method: "GET", url: "/system/logs/task", params }),
 };
 
 export const taskApi = {
@@ -413,8 +416,8 @@ export const taskApi = {
   disable: (code: string) =>
     request<{ message: string }>({ method: "POST", url: `/system/tasks/${code}/disable` }),
 
-  getLogs: (code: string, params?: { page?: number; page_size?: number }) =>
-    request<any[]>({ method: "GET", url: `/system/tasks/${code}/logs`, params }),
+  executionHistory: (params?: { task_code?: string; page?: number; page_size?: number }) =>
+    request<any[]>({ method: "GET", url: "/system/tasks/executions", params }),
 };
 
 export const notificationApi = {

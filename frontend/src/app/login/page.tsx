@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
-import { useAuthStore } from "@/stores/auth";
+import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import { Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { setAuth } = useAuthStore();
+  const { login } = useAuthStore();
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -27,8 +27,7 @@ export default function LoginPage() {
     try {
       const response = await api.post("/auth/login", { code, password });
       const { token, user } = response.data;
-      setAuth(token, user);
-      localStorage.setItem("token", token);
+      login(token, user);
       router.push("/dashboard");
     } catch (err: any) {
       setError(err.response?.data?.message || "登录失败");
