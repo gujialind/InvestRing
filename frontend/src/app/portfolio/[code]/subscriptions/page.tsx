@@ -75,7 +75,7 @@ export default function SubscriptionsPage() {
         setIsDialogOpen(false);
         setFormData({ investor_code: "", amount: "", shares: "", apply_date: new Date().toISOString().split("T")[0] });
         if (isDraft) {
-          router.push(`/portfolios/${code}`);
+          router.push(`/portfolio/${code}`);
         }
       },
     });
@@ -115,7 +115,7 @@ export default function SubscriptionsPage() {
         )}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href={`/portfolios/${code}`}>
+            <Link href={`/portfolio/${code}`}>
               <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4" />
               </Button>

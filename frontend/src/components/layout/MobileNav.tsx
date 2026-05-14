@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuthStore } from "@/stores/auth";
+import { useAuthStore } from "@/stores/authStore";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -15,14 +15,14 @@ import {
 const adminNavItems = [
   { href: "/dashboard", label: "首页", icon: LayoutDashboard },
   { href: "/investors", label: "投资人", icon: Users },
-  { href: "/portfolios", label: "组合", icon: Briefcase },
+  { href: "/portfolio", label: "组合", icon: Briefcase },
   { href: "/products", label: "产品", icon: Package },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
 const viewerNavItems = [
   { href: "/dashboard", label: "首页", icon: LayoutDashboard },
-  { href: "/portfolios", label: "组合", icon: Briefcase },
+  { href: "/portfolio", label: "组合", icon: Briefcase },
 ];
 
 export default function MobileNav() {

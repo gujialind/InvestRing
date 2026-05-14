@@ -26,10 +26,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatNumber, formatReturnRate } from "@/lib/utils";
-import { Plus, ArrowLeft, TrendingUp, TrendingDown, Loader2 } from "lucide-react";
+import { Plus, ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { tradeApi } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
+import { usePositionList } from "@/hooks/usePosition";
 
 interface Position {
   id: number;
@@ -39,7 +40,7 @@ interface Position {
   shares?: number;
   amount?: number;
   cost_price?: number;
-  current_price?: number;
+  unit_price?: number;
   market_value?: number;
   profit_loss?: number;
   profit_loss_percent?: number;
@@ -51,11 +52,8 @@ export default function PositionsPage() {
   const queryClient = useQueryClient();
   const addToast = useUIStore((state) => state.addToast);
 
-  const [positions, setPositions] = useState<Position[]>([
-    { id: 1, product_code: "510300", product_name: "沪深300ETF", market: "CN_EXCHANGE", shares: 10000, cost_price: 4.5, current_price: 4.8, market_value: 48000, profit_loss: 3000, profit_loss_percent: 6.67 },
-    { id: 2, product_code: "000001", product_name: "华夏成长", market: "CN_OTC", shares: 5000, cost_price: 2.0, current_price: 2.1, market_value: 10500, profit_loss: 500, profit_loss_percent: 5.0 },
-    { id: 3, product_code: "CASH", product_name: "现金", amount: 50000, market_value: 50000, profit_loss: 0, profit_loss_percent: 0 },
-  ]);
+  const { data: positionsData, isLoading } = usePositionList(code);
+  const positions = ((positionsData as any)?.items) as Position[] || [];
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [tradeType, setTradeType] = useState<"buy" | "sell">("buy");
@@ -144,7 +142,7 @@ export default function PositionsPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href={`/portfolios/${code}`}>
+            <Link href={`/portfolio/${code}`}>
               <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -252,83 +250,97 @@ export default function PositionsPage() {
             <CardDescription>当前组合持仓及收益情况</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-2xl font-bold">{formatCurrency(totalMarketValue)}</div>
-                  <p className="text-sm text-muted-foreground">总市值</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-2xl font-bold">{formatCurrency(totalCost)}</div>
-                  <p className="text-sm text-muted-foreground">总成本</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className={`text-2xl font-bold ${totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}>
-                    {formatCurrency(totalProfitLoss)}
-                  </div>
-                  <p className="text-sm text-muted-foreground">总收益</p>
-                </CardContent>
-              </Card>
-            </div>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                加载中...
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-2xl font-bold">{formatCurrency(totalMarketValue)}</div>
+                      <p className="text-sm text-muted-foreground">总市值</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-2xl font-bold">{formatCurrency(totalCost)}</div>
+                      <p className="text-sm text-muted-foreground">总成本</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className={`text-2xl font-bold ${totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {formatCurrency(totalProfitLoss)}
+                      </div>
+                      <p className="text-sm text-muted-foreground">总收益</p>
+                    </CardContent>
+                  </Card>
+                </div>
 
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>产品代码</TableHead>
-                  <TableHead>产品名称</TableHead>
-                  <TableHead>市场</TableHead>
-                  <TableHead className="text-right">持仓份额</TableHead>
-                  <TableHead className="text-right">成本价</TableHead>
-                  <TableHead className="text-right">当前价</TableHead>
-                  <TableHead className="text-right">市值</TableHead>
-                  <TableHead className="text-right">盈亏</TableHead>
-                  <TableHead className="text-right">收益率</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {positions.map((position) => (
-                  <TableRow key={position.id}>
-                    <TableCell className="font-medium">{position.product_code}</TableCell>
-                    <TableCell>{position.product_name}</TableCell>
-                    <TableCell>{position.market}</TableCell>
-                    <TableCell className="text-right">
-                      {position.shares ? formatNumber(position.shares) : "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {position.cost_price ? formatCurrency(position.cost_price) : "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {position.current_price ? formatCurrency(position.current_price) : "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {position.market_value ? formatCurrency(position.market_value) : "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {position.profit_loss !== undefined && position.profit_loss !== null ? (
-                        <span className={position.profit_loss >= 0 ? "text-green-600" : "text-red-600"}>
-                          {formatCurrency(position.profit_loss)}
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {position.profit_loss_percent !== undefined && position.profit_loss_percent !== null ? (
-                        <span className={position.profit_loss_percent >= 0 ? "text-green-600" : "text-red-600"}>
-                          {formatReturnRate(position.profit_loss_percent)}
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>产品代码</TableHead>
+                      <TableHead>产品名称</TableHead>
+                      <TableHead>市场</TableHead>
+                      <TableHead className="text-right">持仓份额</TableHead>
+                      <TableHead className="text-right">成本价</TableHead>
+                      <TableHead className="text-right">当前价</TableHead>
+                      <TableHead className="text-right">市值</TableHead>
+                      <TableHead className="text-right">盈亏</TableHead>
+                      <TableHead className="text-right">收益率</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {positions.map((position) => (
+                      <TableRow key={position.id}>
+                        <TableCell className="font-medium">{position.product_code}</TableCell>
+                        <TableCell>{position.product_name}</TableCell>
+                        <TableCell>{position.market || "--"}</TableCell>
+                        <TableCell className="text-right">
+                          {position.shares ? formatNumber(position.shares) : "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {position.cost_price ? formatCurrency(position.cost_price) : "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {position.unit_price ? formatCurrency(position.unit_price) : "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {position.market_value ? formatCurrency(position.market_value) : "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {position.profit_loss !== undefined && position.profit_loss !== null ? (
+                            <span className={position.profit_loss >= 0 ? "text-green-600" : "text-red-600"}>
+                              {formatCurrency(position.profit_loss)}
+                            </span>
+                          ) : (
+                            "-"
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {position.profit_loss_percent !== undefined && position.profit_loss_percent !== null ? (
+                            <span className={position.profit_loss_percent >= 0 ? "text-green-600" : "text-red-600"}>
+                              {formatReturnRate(position.profit_loss_percent)}
+                            </span>
+                          ) : (
+                            "-"
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {positions.length === 0 && (
+                  <div className="text-center text-muted-foreground py-8">
+                    暂无持仓数据
+                  </div>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

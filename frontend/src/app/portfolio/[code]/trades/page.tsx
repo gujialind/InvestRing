@@ -103,7 +103,7 @@ export default function TradesPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href={`/portfolios/${code}`}>
+            <Link href={`/portfolio/${code}`}>
               <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4" />
               </Button>

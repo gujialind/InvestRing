@@ -142,7 +142,7 @@ export default function DashboardPage() {
                 {activePortfolios.map((portfolio) => (
                   <Link
                     key={portfolio.code}
-                    href={`/portfolios/${portfolio.code}`}
+                    href={`/portfolio/${portfolio.code}`}
                     className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent transition-colors"
                   >
                     <div>

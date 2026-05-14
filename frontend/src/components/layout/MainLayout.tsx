@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/stores/auth";
+import { useAuthStore } from "@/stores/authStore";
 import Navbar from "./Navbar";
 import Sidebar from "./Sidebar";
 import MobileNav from "./MobileNav";

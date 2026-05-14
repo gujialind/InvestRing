@@ -1,17 +1,27 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
+import { useState } from "react";
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatCurrency, formatReturnRate, formatNumber, getReturnColorClass } from "@/lib/utils";
-import { TrendingUp, Users, Wallet, ArrowLeft, Loader2, PowerOff, Power, Trash2, Plus, ArrowRightLeft } from "lucide-react";
+import { TrendingUp, Users, Wallet, ArrowLeft, Loader2, PowerOff, Power, Trash2, Plus, ArrowRightLeft, History } from "lucide-react";
 import Link from "next/link";
 import { usePortfolio, useLatestSnapshot, usePortfolioInvestors, useClosePortfolio, useActivatePortfolio, useDeletePortfolio } from "@/hooks/usePortfolio";
 import { usePositionList } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
+import NavCurve from "@/components/charts/NavCurve";
 
 export default function PortfolioDetailPage() {
   const params = useParams();
@@ -30,6 +40,9 @@ export default function PortfolioDetailPage() {
   const positions = positionsData?.items || [];
   const isLoading = portfolioLoading || snapshotLoading || investorsLoading || positionsLoading;
 
+  const [showCloseDialog, setShowCloseDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
   if (isLoading) {
     return (
       <MainLayout>
@@ -45,7 +58,7 @@ export default function PortfolioDetailPage() {
       <MainLayout>
         <div className="text-center py-12">
           <p className="text-muted-foreground">组合不存在</p>
-          <Link href="/portfolios">
+          <Link href="/portfolio">
             <Button variant="outline" className="mt-4">
               <ArrowLeft className="mr-2 h-4 w-4" />
               返回列表
@@ -65,9 +78,9 @@ export default function PortfolioDetailPage() {
   const isClosed = portfolio.status === "closed";
 
   const handleClose = () => {
-    if (confirm("确定要关闭该组合吗？关闭后无法再进行申购/赎回/调仓操作。")) {
-      closePortfolio.mutate(code);
-    }
+    closePortfolio.mutate(code, {
+      onSuccess: () => setShowCloseDialog(false),
+    });
   };
 
   const handleActivate = () => {
@@ -77,11 +90,12 @@ export default function PortfolioDetailPage() {
   };
 
   const handleDelete = () => {
-    if (confirm("确定要删除该组合吗？删除后不可恢复。")) {
-      deletePortfolio.mutate(code, {
-        onSuccess: () => router.push("/portfolios"),
-      });
-    }
+    deletePortfolio.mutate(code, {
+      onSuccess: () => {
+        setShowDeleteDialog(false);
+        router.push("/portfolio");
+      },
+    });
   };
 
   return (
@@ -89,7 +103,7 @@ export default function PortfolioDetailPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/portfolios">
+            <Link href="/portfolio">
               <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -103,13 +117,13 @@ export default function PortfolioDetailPage() {
             <div className="flex gap-2">
               {isDraft && (
                 <>
-                  <Link href={`/portfolios/${code}/subscriptions`}>
+                  <Link href={`/portfolio/${code}/subscriptions`}>
                     <Button>
                       <Plus className="mr-2 h-4 w-4" />
                       首次申购激活
                     </Button>
                   </Link>
-                  <Button variant="outline" onClick={handleDelete} disabled={deletePortfolio.isPending}>
+                  <Button variant="outline" onClick={() => setShowDeleteDialog(true)} disabled={deletePortfolio.isPending}>
                     <Trash2 className="mr-2 h-4 w-4 text-red-500" />
                     删除组合
                   </Button>
@@ -117,19 +131,25 @@ export default function PortfolioDetailPage() {
               )}
               {isActive && (
                 <>
-                  <Link href={`/portfolios/${code}/subscriptions`}>
+                  <Link href={`/portfolio/${code}/subscriptions`}>
                     <Button>
                       <Plus className="mr-2 h-4 w-4" />
                       申购赎回
                     </Button>
                   </Link>
-                  <Link href={`/portfolios/${code}/trades`}>
+                  <Link href={`/portfolio/${code}/trades`}>
                     <Button variant="outline">
                       <ArrowRightLeft className="mr-2 h-4 w-4" />
                       调仓交易
                     </Button>
                   </Link>
-                  <Button variant="outline" onClick={handleClose} disabled={closePortfolio.isPending}>
+                  <Link href={`/portfolio/${code}/positions`}>
+                    <Button variant="outline">
+                      <History className="mr-2 h-4 w-4" />
+                      份额变动
+                    </Button>
+                  </Link>
+                  <Button variant="outline" onClick={() => setShowCloseDialog(true)} disabled={closePortfolio.isPending}>
                     <PowerOff className="mr-2 h-4 w-4 text-red-500" />
                     关闭组合
                   </Button>
@@ -320,14 +340,87 @@ export default function PortfolioDetailPage() {
                 <CardDescription>组合净值走势</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                  净值曲线图将在此处显示
-                </div>
+                {snapshot ? (
+                  <NavCurve
+                    data={[{
+                      date: snapshot.snapshot_date,
+                      nav: snapshot.unit_price
+                    }]}
+                    initialNav={1.0000}
+                  />
+                ) : (
+                  <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                    暂无净值数据
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={showCloseDialog} onOpenChange={setShowCloseDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>关闭组合</DialogTitle>
+            <DialogDescription>
+              关闭组合前请确认以下事项：
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            {positions.length > 0 && (
+              <p className="text-yellow-600">
+                当前仍有 {positions.length} 个持仓，关闭后持仓数据将被保留但不可操作
+              </p>
+            )}
+            {investors && investors.length > 0 && (
+              <p className="text-yellow-600">
+                当前有 {investors.length} 位投资人持有份额
+              </p>
+            )}
+            <p className="text-red-500">
+              关闭后无法再进行申购/赎回/调仓操作
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCloseDialog(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleClose}
+              disabled={closePortfolio.isPending}
+            >
+              {closePortfolio.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除组合</DialogTitle>
+            <DialogDescription>
+              此操作不可恢复，请确认后继续
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deletePortfolio.isPending}
+            >
+              {deletePortfolio.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 }
