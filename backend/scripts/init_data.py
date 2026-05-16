@@ -43,21 +43,21 @@ def init_scheduled_tasks(session):
             'code': 'nav_sync',
             'name': '净值同步',
             'description': '每个交易日07:00同步净值数据。增量同步：从每只基金最后同步日期的下一天到昨天',
-            'cron_expression': '0 7 * * 1-5',
+            'cron_expr': '0 7 * * 1-5',
             'is_enabled': True
         },
         {
             'code': 'trading_calendar_sync',
             'name': '交易日历同步',
             'description': '每年1月1日02:00同步新年交易日历',
-            'cron_expression': '0 2 1 1 *',
+            'cron_expr': '0 2 1 1 *',
             'is_enabled': True
         },
         {
             'code': 'log_cleanup',
             'name': '日志清理',
             'description': '每周日04:00清理过期日志',
-            'cron_expression': '0 4 * * 0',
+            'cron_expr': '0 4 * * 0',
             'is_enabled': True
         }
     ]

@@ -50,7 +50,7 @@ def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     # 3. 验证密码
     if not investor or not verify_password(body.password, investor.password_hash):
         is_now_locked, new_locked_until = record_login_failure(body.code)
-        record_login_log(db, body.code, "failed", ip_address, user_agent)
+        record_login_log(db, body.code, "login_failed", "failed", ip_address, user_agent)
 
         if is_now_locked:
             raise HTTPException(
