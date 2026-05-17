@@ -4,7 +4,12 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "sqlite:///./investring.db"
+    db_host: str = "localhost"
+    db_port: int = 3306
+    db_user: str = "root"
+    db_password: str = ""
+    db_name: str = "investring"
+    database_url: str = ""
     
     # Security
     secret_key: str = "your-secret-key-change-in-production"
@@ -19,6 +24,11 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.database_url:
+            self.database_url = f"mysql+pymysql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
 
 
 @lru_cache()
