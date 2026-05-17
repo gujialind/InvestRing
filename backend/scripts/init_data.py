@@ -97,7 +97,7 @@ def init_products(session):
     """初始化产品数据"""
     products = [
         # 4.1 现金类产品
-        {'code': 'CASH', 'market': None, 'name': '现金类资产', 'product_type': 'CASH', 'asset_class_code': 'CASH', 'confirm_days': 0, 'is_qdii': False},
+        {'code': 'CASH', 'market': '', 'name': '现金类资产', 'product_type': 'CASH', 'asset_class_code': 'CASH', 'confirm_days': 0, 'is_qdii': False},
         
         # 4.2 ETF基金（场内，T+0确认）
         {'code': '515180.SH', 'market': 'CN_EXCHANGE', 'name': '易方达中证红利ETF', 'product_type': 'ETF', 'asset_class_code': 'STOCK_CN_VALUE', 'confirm_days': 0, 'is_qdii': False},

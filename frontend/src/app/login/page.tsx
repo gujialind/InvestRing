@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import api from "@/lib/api";
+import { authApi, ApiException } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,12 +25,18 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await api.post("/auth/login", { code, password });
-      const { token, user } = response.data;
+      const response = await authApi.login({ code, password });
+      const { token, user } = response;
       login(token, user);
       router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.response?.data?.message || "登录失败");
+    } catch (err) {
+      if (err instanceof ApiException) {
+        setError(err.message);
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("登录失败");
+      }
     } finally {
       setLoading(false);
     }
