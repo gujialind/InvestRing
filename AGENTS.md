@@ -233,7 +233,7 @@
 12. **组合份额仅因申购赎回变化**：分红再投资只影响成分基金份额
 13. **投资人不支持物理删除**：只能从组合中移除（份额需为 0）
 14. **组合列表默认显示活跃组合**：已关闭组合通过筛选器访问
-15. **SQLite 单线程执行器**：`max_workers=1`，避免并发写入冲突
+15. **MySQL 连接池配置**：使用 QueuePool 连接池，连接复用和自动回收
 16. **快照生成固定顺序**：`portfolio_position` → `portfolio_value_snapshot` → `investor_holding`
 17. **幂等性缓存 24 小时过期**：批量调仓使用 `Idempotency-Key`
 18. **任务执行必须记录日志**：创建 `task_execution_log` 记录，更新状态
@@ -248,7 +248,7 @@
 
 | 文档路径 | 内容 |
 |----------|------|
-| `docs/02-数据库设计.md` | 21 张表完整结构、索引定义、外键约束、SQLite WAL 配置 |
+| `docs/02-数据库设计.md` | 21 张表完整结构、索引定义、外键约束、MySQL 连接池配置 |
 | `docs/03-业务流程设计.md` | 详细业务流程图、状态机、每日计算流程 |
 | `docs/04-后端开发.md` | 89 个 API 接口完整规范、枚举值定义、错误码、分页规范 |
 | `docs/05-前端开发.md` | 前端架构、组件策略、页面设计、路由规则 |
@@ -369,22 +369,30 @@
 
 **说明**：所有实体均采用 RESTRICT 策略，通过业务流程（关闭/停用）来管理生命周期，保留历史数据。
 
-### F. SQLite WAL 配置
+### F. MySQL 连接池配置
 
 ```python
-@event.listens_for(engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")      # 写前日志模式
-    cursor.execute("PRAGMA busy_timeout=30000")    # 30秒锁等待超时
-    cursor.execute("PRAGMA synchronous=NORMAL")    # 同步模式（性能优化）
-    cursor.close()
+# SQLAlchemy MySQL 连接配置
+from sqlalchemy import create_engine
+from sqlalchemy.pool import QueuePool
+
+DATABASE_URL = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}?charset=utf8mb4"
+
+engine = create_engine(
+    DATABASE_URL,
+    poolclass=QueuePool,
+    pool_size=10,              # 连接池大小
+    max_overflow=20,           # 最大溢出连接数
+    pool_pre_ping=True,        # 连接前检测连接有效性
+    pool_recycle=3600,         # 连接回收时间（秒）
+    pool_timeout=30,           # 获取连接超时时间（秒）
+)
 ```
 
 **配置要点**：
-- WAL 模式支持读写并发
-- 单线程执行器：`max_workers=1`，避免并发写入冲突
-- 适用场景：读多写少
+- 连接池支持更好的并发性能
+- 自动检测失效连接并重新建立
+- 适用场景：读多写少的企业应用
 
 ### G. 核心计算公式
 
