@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 
@@ -118,12 +119,11 @@ export default function TradeForm({ portfolioCode, onSubmit, isSubmitting }: Tra
           )}
           <div className="space-y-2">
             <Label htmlFor="trade_date">交易日期</Label>
-            <Input
-              id="trade_date"
-              type="date"
-              value={formData.trade_date}
-              onChange={(e) => setFormData({ ...formData, trade_date: e.target.value })}
-              required
+            <DatePicker
+              date={formData.trade_date ? new Date(formData.trade_date) : undefined}
+              onSelect={(date) => {
+                setFormData({ ...formData, trade_date: date ? date.toISOString().split("T")[0] : "" })
+              }}
             />
           </div>
           <Button type="submit" className="w-full" disabled={isSubmitting}>

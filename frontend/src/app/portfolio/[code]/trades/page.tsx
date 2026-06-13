@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Table,
   TableBody,
@@ -25,10 +26,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatNumber, formatMarketName } from "@/lib/utils";
-import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import Link from "next/link";
-import { useTradeList, useCreateTrade, useConfirmTrade, useCancelTrade } from "@/hooks/useTrade";
+import { useTradeList, useCreateTrade, useConfirmTrade, useCancelTrade, useDeleteTrade } from "@/hooks/useTrade";
 import { useProductList } from "@/hooks/useProduct";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function TradesPage() {
   const params = useParams();
@@ -38,6 +51,8 @@ export default function TradesPage() {
   const createTrade = useCreateTrade();
   const confirmTrade = useConfirmTrade();
   const cancelTrade = useCancelTrade();
+  const deleteTradeMutation = useDeleteTrade();
+  const queryClient = useQueryClient();
   const { data: productsData } = useProductList({ page_size: 100 });
 
   const trades = data?.items || [];
@@ -91,6 +106,18 @@ export default function TradesPage() {
     if (confirm("确定要取消该交易吗？")) {
       cancelTrade.mutate(id);
     }
+  };
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [tradeToDelete, setTradeToDelete] = useState<number | null>(null);
+
+  const handleEdit = () => {
+    toast.info("已确认的交易不可直接修改，请先取消确认");
+  };
+
+  const handleDelete = (id: number) => {
+    setTradeToDelete(id);
+    setDeleteDialogOpen(true);
   };
 
   if (isLoading) {
@@ -214,12 +241,11 @@ export default function TradesPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="trade_date">交易日期</Label>
-                    <Input
-                      id="trade_date"
-                      type="date"
-                      value={formData.trade_date}
-                      onChange={(e) => setFormData({ ...formData, trade_date: e.target.value })}
-                      required
+                    <DatePicker
+                      date={formData.trade_date ? new Date(formData.trade_date) : undefined}
+                      onSelect={(date) => {
+                        setFormData({ ...formData, trade_date: date ? date.toISOString().split("T")[0] : "" })
+                      }}
                     />
                   </div>
                 </div>
@@ -311,6 +337,27 @@ export default function TradesPage() {
                           </Button>
                         </>
                       )}
+                      {/* 新增：已确认交易的操作按钮 */}
+                      {trade.status === "confirmed" && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEdit()}
+                            title="修改（需先取消确认）"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(trade.id)}
+                            title="删除（需先取消确认）"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -323,6 +370,26 @@ export default function TradesPage() {
             )}
           </CardContent>
         </Card>
+
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>确认删除</AlertDialogTitle>
+              <AlertDialogDescription>
+                删除后将影响后续快照数据，建议先取消确认再删除。是否继续？
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => tradeToDelete && deleteTradeMutation.mutate(tradeToDelete)}
+                disabled={deleteTradeMutation.isPending}
+              >
+                确认删除
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </MainLayout>
   );

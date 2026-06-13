@@ -351,6 +351,15 @@ def update_subscription(
     if not db_subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
+    if db_subscription.status == "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "CANNOT_MODIFY_CONFIRMED",
+                "message": "已确认的申购赎回事件不可直接修改，请先取消确认后再修改"
+            }
+        )
+
     for field, value in subscription.dict(exclude_unset=True).items():
         setattr(db_subscription, field, value)
 
@@ -368,6 +377,15 @@ def delete_subscription(
     subscription = db.query(Subscription).filter(Subscription.id == id).first()
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
+
+    if subscription.status == "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "CANNOT_DELETE_CONFIRMED",
+                "message": "已确认的申购赎回事件不可直接删除，请先取消确认后再删除"
+            }
+        )
 
     db.delete(subscription)
     db.commit()

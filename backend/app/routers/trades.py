@@ -543,6 +543,15 @@ def update_trade(
     if not db_trade:
         raise HTTPException(status_code=404, detail="Trade not found")
 
+    if db_trade.status == "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "CANNOT_MODIFY_CONFIRMED",
+                "message": "已确认的交易不可直接修改，请先取消确认后再修改"
+            }
+        )
+
     for field, value in trade.dict(exclude_unset=True).items():
         setattr(db_trade, field, value)
 
@@ -560,6 +569,15 @@ def delete_trade(
     trade = db.query(Trade).filter(Trade.id == id).first()
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
+
+    if trade.status == "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "CANNOT_DELETE_CONFIRMED",
+                "message": "已确认的交易不可直接删除，请先取消确认后再删除"
+            }
+        )
 
     db.delete(trade)
     db.commit()

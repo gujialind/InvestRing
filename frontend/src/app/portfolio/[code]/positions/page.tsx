@@ -25,12 +25,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import {
   Table,
   TableBody,
   TableCell,
@@ -38,14 +32,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatNumber, formatReturnRate, cn } from "@/lib/utils";
-import { Plus, ArrowLeft, Loader2, RefreshCw, CalendarIcon } from "lucide-react";
+import { formatCurrency, formatNumber, formatReturnRate } from "@/lib/utils";
+import { Plus, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { tradeApi, positionApi, platformApi } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 import { usePositionList } from "@/hooks/usePosition";
-import { format } from "date-fns";
-import { zhCN } from "date-fns/locale";
+import { DatePicker } from "@/components/ui/date-picker";
 
 interface Position {
   id: number;
@@ -381,29 +374,11 @@ export default function PositionsPage() {
                   {/* 日期选择 */}
                   <div className="space-y-2">
                     <Label>更新日期（可选，默认为今天）</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-full justify-start text-left font-normal",
-                            !selectedDate && "text-muted-foreground"
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {selectedDate ? format(selectedDate, "yyyy-MM-dd") : "选择日期"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" side="bottom" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={selectedDate}
-                          onSelect={setSelectedDate}
-                          locale={zhCN}
-                          disabled={(date) => date > new Date()}
-                        />
-                      </PopoverContent>
-                    </Popover>
+                    <DatePicker
+                      date={selectedDate}
+                      onSelect={setSelectedDate}
+                      placeholder="选择日期"
+                    />
                     <p className="text-xs text-muted-foreground">
                       提示：只能选择交易日，非交易日将无法更新
                     </p>

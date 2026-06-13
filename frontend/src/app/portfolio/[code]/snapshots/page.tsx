@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { useState } from "react";
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,15 +19,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { DatePicker } from "@/components/ui/date-picker";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { Calendar as CalendarIcon, Loader2, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Trash2 } from "lucide-react";
+import { Loader2, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Trash2, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useSnapshotStatus,
@@ -148,6 +144,14 @@ export default function PortfolioSnapshotsPage() {
     <MainLayout>
       <div className="container mx-auto px-4 py-6">
         <div className="mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Link href={`/portfolio/${portfolioCode}`}>
+              <Button variant="ghost" size="sm">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                返回
+              </Button>
+            </Link>
+          </div>
           <h1 className="text-3xl font-bold">快照管理</h1>
           <p className="text-muted-foreground mt-1">
             管理组合历史快照数据，支持手动生成和区间重算
@@ -306,28 +310,11 @@ export default function PortfolioSnapshotsPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>目标日期</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !singleDate && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {singleDate ? format(singleDate, "yyyy-MM-dd") : "选择日期"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar
-                    mode="single"
-                    selected={singleDate}
-                    onSelect={setSingleDate}
-                    locale={zhCN}
-                  />
-                </PopoverContent>
-              </Popover>
+              <DatePicker
+                date={singleDate}
+                onSelect={setSingleDate}
+                placeholder="选择日期"
+              />
             </div>
 
             {validationResult && (
@@ -424,54 +411,20 @@ export default function PortfolioSnapshotsPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>起始日期</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !startDate && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {startDate ? format(startDate, "yyyy-MM-dd") : "选择起始日期"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar
-                    mode="single"
-                    selected={startDate}
-                    onSelect={setStartDate}
-                    locale={zhCN}
-                  />
-                </PopoverContent>
-              </Popover>
+              <DatePicker
+                date={startDate}
+                onSelect={setStartDate}
+                placeholder="起始日期"
+              />
             </div>
 
             <div className="space-y-2">
               <Label>结束日期</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !endDate && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {endDate ? format(endDate, "yyyy-MM-dd") : "选择结束日期"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar
-                    mode="single"
-                    selected={endDate}
-                    onSelect={setEndDate}
-                    locale={zhCN}
-                  />
-                </PopoverContent>
-              </Popover>
+              <DatePicker
+                date={endDate}
+                onSelect={setEndDate}
+                placeholder="结束日期"
+              />
             </div>
 
             <div className="flex items-center space-x-2">

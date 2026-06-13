@@ -8,10 +8,18 @@
 - [backend/app/models/portfolio_value_snapshot.py](file://backend/app/models/portfolio_value_snapshot.py)
 - [backend/app/models/portfolio_position.py](file://backend/app/models/portfolio_position.py)
 - [backend/app/models/investor_holding.py](file://backend/app/models/investor_holding.py)
-- [backend/app/routers/portfolios.py](file://backend/app/routers/portfolios.py)
 - [frontend/src/hooks/useSnapshot.ts](file://frontend/src/hooks/useSnapshot.ts)
 - [frontend/src/lib/api.ts](file://frontend/src/lib/api.ts)
+- [frontend/src/app/portfolio/[code]/snapshots/page.tsx](file://frontend/src/app/portfolio/[code]/snapshots/page.tsx)
 </cite>
+
+## 更新摘要
+**变更内容**
+- 新增完整的快照管理系统架构
+- 添加手动快照生成、批量重算、依赖验证功能
+- 新增状态监控与缺失日期检测
+- 更新前端集成与用户界面
+- 完善错误处理与权限控制机制
 
 ## 目录
 1. [简介](#简介)
@@ -34,6 +42,7 @@
 - 数据模型：三类快照表（持仓、市值、投资人份额）及其字段语义
 - 权限控制：管理员与普通用户的访问边界
 - 性能与一致性：生成流程、冻结份额计算、校验策略与事务保障
+- 状态监控：缺失日期检测与组合快照状态查询
 
 ## 项目结构
 快照系统由三层组成：
@@ -48,6 +57,7 @@ R1["/snapshots<br/>生成/重算/校验/删除"]
 R2["/portfolios/{code}/nav-history<br/>净值序列"]
 R3["/portfolios/{code}/returns<br/>收益统计"]
 R4["/portfolios/{code}/cash-flow<br/>现金流统计"]
+R5["/snapshots/portfolios/{code}/status<br/>快照状态查询"]
 end
 subgraph "服务层"
 S1["快照服务<br/>生成/重算/校验/冻结计算"]
@@ -61,23 +71,22 @@ R1 --> S1
 R2 --> S1
 R3 --> S1
 R4 --> S1
+R5 --> S1
 S1 --> M1
 S1 --> M2
 S1 --> M3
 ```
 
-图表来源
+**图表来源**
 - [backend/app/routers/snapshots.py:1-188](file://backend/app/routers/snapshots.py#L1-L188)
-- [backend/app/routers/portfolios.py:159-276](file://backend/app/routers/portfolios.py#L159-L276)
-- [backend/app/services/snapshot_service.py:24-789](file://backend/app/services/snapshot_service.py#L24-L789)
+- [backend/app/services/snapshot_service.py:1-789](file://backend/app/services/snapshot_service.py#L1-L789)
 - [backend/app/models/portfolio_position.py:1-34](file://backend/app/models/portfolio_position.py#L1-L34)
 - [backend/app/models/portfolio_value_snapshot.py:1-20](file://backend/app/models/portfolio_value_snapshot.py#L1-L20)
 - [backend/app/models/investor_holding.py:1-20](file://backend/app/models/investor_holding.py#L1-L20)
 
-章节来源
+**章节来源**
 - [backend/app/routers/snapshots.py:1-188](file://backend/app/routers/snapshots.py#L1-L188)
-- [backend/app/routers/portfolios.py:159-276](file://backend/app/routers/portfolios.py#L159-L276)
-- [backend/app/services/snapshot_service.py:24-789](file://backend/app/services/snapshot_service.py#L24-L789)
+- [backend/app/services/snapshot_service.py:1-789](file://backend/app/services/snapshot_service.py#L1-L789)
 - [backend/app/models/portfolio_position.py:1-34](file://backend/app/models/portfolio_position.py#L1-L34)
 - [backend/app/models/portfolio_value_snapshot.py:1-20](file://backend/app/models/portfolio_value_snapshot.py#L1-L20)
 - [backend/app/models/investor_holding.py:1-20](file://backend/app/models/investor_holding.py#L1-L20)
@@ -86,8 +95,9 @@ S1 --> M3
 - 路由模块：提供快照生成、重算、校验、删除与组合快照状态查询接口
 - 服务模块：实现三表生成顺序、依赖校验、冻结份额计算、区间重算与事务回滚
 - 模型模块：定义三类快照表的字段、主外键与唯一约束
+- 前端模块：提供快照管理界面、实时状态监控与用户交互
 
-章节来源
+**章节来源**
 - [backend/app/routers/snapshots.py:25-188](file://backend/app/routers/snapshots.py#L25-L188)
 - [backend/app/services/snapshot_service.py:24-789](file://backend/app/services/snapshot_service.py#L24-L789)
 - [backend/app/models/portfolio_position.py:5-34](file://backend/app/models/portfolio_position.py#L5-L34)
@@ -95,7 +105,7 @@ S1 --> M3
 - [backend/app/models/investor_holding.py:5-20](file://backend/app/models/investor_holding.py#L5-L20)
 
 ## 架构概览
-快照生成遵循“先删除旧快照，再按序生成”的严格顺序，确保数据一致性：
+快照生成遵循"先删除旧快照，再按序生成"的严格顺序，确保数据一致性：
 1) 删除同日三表旧记录
 2) 生成持仓快照（基于前一日快照与交易流水）
 3) 生成市值快照（总值/总份额/单位净值/冻结份额）
@@ -118,7 +128,7 @@ SV-->>RT : 返回生成结果
 RT-->>C : 200 成功
 ```
 
-图表来源
+**图表来源**
 - [backend/app/routers/snapshots.py:28-56](file://backend/app/routers/snapshots.py#L28-L56)
 - [backend/app/services/snapshot_service.py:24-94](file://backend/app/services/snapshot_service.py#L24-L94)
 
@@ -148,7 +158,7 @@ RT-->>C : 200 成功
   - 权限：管理员
   - 响应体：success, message
 
-章节来源
+**章节来源**
 - [backend/app/routers/snapshots.py:28-188](file://backend/app/routers/snapshots.py#L28-L188)
 - [backend/app/schemas/snapshot.py:7-69](file://backend/app/schemas/snapshot.py#L7-L69)
 
@@ -169,11 +179,11 @@ Commit --> Done(["结束"])
 Err --> Done
 ```
 
-图表来源
+**图表来源**
 - [backend/app/services/snapshot_service.py:24-94](file://backend/app/services/snapshot_service.py#L24-L94)
 - [backend/app/services/snapshot_service.py:187-217](file://backend/app/services/snapshot_service.py#L187-L217)
 
-章节来源
+**章节来源**
 - [backend/app/services/snapshot_service.py:24-94](file://backend/app/services/snapshot_service.py#L24-L94)
 
 ### 区间重算流程
@@ -189,10 +199,10 @@ Next --> |未超限| Lp
 Next --> |超限| Done2["汇总结果并返回"]
 ```
 
-图表来源
+**图表来源**
 - [backend/app/services/snapshot_service.py:96-184](file://backend/app/services/snapshot_service.py#L96-L184)
 
-章节来源
+**章节来源**
 - [backend/app/services/snapshot_service.py:96-184](file://backend/app/services/snapshot_service.py#L96-L184)
 
 ### 依赖校验项
@@ -201,7 +211,7 @@ Next --> |超限| Done2["汇总结果并返回"]
 - 净值数据完整性：根据持仓最新日期的产品清单，检查普通基金当日净值与QDII T-1日净值
 - 份额变动事件：存在未确认的份额变动事件将给出警告
 
-章节来源
+**章节来源**
 - [backend/app/services/snapshot_service.py:187-217](file://backend/app/services/snapshot_service.py#L187-L217)
 - [backend/app/services/snapshot_service.py:580-714](file://backend/app/services/snapshot_service.py#L580-L714)
 
@@ -210,7 +220,7 @@ Next --> |超限| Done2["汇总结果并返回"]
 - 组合冻结份额：针对组合的待赎回申赎（pending）求和
 - 投资人冻结份额：针对投资人的待赎回申赎（pending）求和
 
-章节来源
+**章节来源**
 - [backend/app/services/snapshot_service.py:719-773](file://backend/app/services/snapshot_service.py#L719-L773)
 
 ### 组合快照查询与收益统计
@@ -218,7 +228,7 @@ Next --> |超限| Done2["汇总结果并返回"]
 - 收益统计：计算累计收益百分比与年化收益率
 - 现金流统计：统计确认状态下的申购/赎回金额流入/流出与净额
 
-章节来源
+**章节来源**
 - [backend/app/routers/portfolios.py:159-241](file://backend/app/routers/portfolios.py#L159-L241)
 - [backend/app/routers/portfolios.py:244-276](file://backend/app/routers/portfolios.py#L244-L276)
 
@@ -233,7 +243,7 @@ Next --> |超限| Done2["汇总结果并返回"]
   - 关键字段：portfolio_code, investor_code, shares, frozen_shares, cost_per_share, snapshot_date
   - 约束：组合、投资人与日期唯一索引
 
-章节来源
+**章节来源**
 - [backend/app/models/portfolio_position.py:5-34](file://backend/app/models/portfolio_position.py#L5-L34)
 - [backend/app/models/portfolio_value_snapshot.py:5-20](file://backend/app/models/portfolio_value_snapshot.py#L5-L20)
 - [backend/app/models/investor_holding.py:5-20](file://backend/app/models/investor_holding.py#L5-L20)
@@ -241,10 +251,12 @@ Next --> |超限| Done2["汇总结果并返回"]
 ### 前端集成要点
 - 使用 React Query Hook 触发生成、重算、校验与删除操作，并在成功后刷新查询缓存
 - 错误统一通过响应拦截器转换为可读提示
+- 提供直观的用户界面用于快照管理操作
 
-章节来源
+**章节来源**
 - [frontend/src/hooks/useSnapshot.ts:1-124](file://frontend/src/hooks/useSnapshot.ts#L1-L124)
 - [frontend/src/lib/api.ts:67-107](file://frontend/src/lib/api.ts#L67-L107)
+- [frontend/src/app/portfolio/[code]/snapshots/page.tsx:1-530](file://frontend/src/app/portfolio/[code]/snapshots/page.tsx#L1-L530)
 
 ## 依赖分析
 - 路由层依赖服务层进行业务处理，同时依赖权限依赖注入（管理员/当前用户）
@@ -260,7 +272,7 @@ SV --> MD2["portfolio_value_snapshot"]
 SV --> MD3["investor_holding"]
 ```
 
-图表来源
+**图表来源**
 - [frontend/src/hooks/useSnapshot.ts:1-124](file://frontend/src/hooks/useSnapshot.ts#L1-L124)
 - [frontend/src/lib/api.ts:1-200](file://frontend/src/lib/api.ts#L1-L200)
 - [backend/app/routers/snapshots.py:1-188](file://backend/app/routers/snapshots.py#L1-L188)
@@ -289,7 +301,7 @@ SV --> MD3["investor_holding"]
   - 现象：返回500，包含错误码与消息
   - 排查：确认目标快照是否存在；检查事务回滚原因
 
-章节来源
+**章节来源**
 - [backend/app/routers/snapshots.py:46-55](file://backend/app/routers/snapshots.py#L46-L55)
 - [backend/app/routers/snapshots.py:78-87](file://backend/app/routers/snapshots.py#L78-L87)
 - [backend/app/routers/snapshots.py:182-187](file://backend/app/routers/snapshots.py#L182-L187)
@@ -338,7 +350,7 @@ SV --> MD3["investor_holding"]
 - 组合现金流统计（GET /portfolios/{code}/cash-flow）
   - 响应体字段：portfolio_code, total_inflow, total_outflow, net_inflow
 
-章节来源
+**章节来源**
 - [backend/app/routers/snapshots.py:28-188](file://backend/app/routers/snapshots.py#L28-L188)
-- [backend/app/routers/portfolios.py:159-276](file://backend/app/routers/portfolios.py#L159-L276)
 - [backend/app/schemas/snapshot.py:7-69](file://backend/app/schemas/snapshot.py#L7-L69)
+- [frontend/src/lib/api.ts:486-534](file://frontend/src/lib/api.ts#L486-L534)
