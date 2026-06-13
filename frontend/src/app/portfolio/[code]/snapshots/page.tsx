@@ -236,7 +236,6 @@ export default function PortfolioSnapshotsPage() {
                   </>
                 ) : (
                   <>
-                    <CalendarIcon className="mr-2 h-4 w-4" />
                     选择日期生成
                   </>
                 )}
