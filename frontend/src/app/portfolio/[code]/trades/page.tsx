@@ -27,20 +27,10 @@ import {
 } from "@/components/ui/table";
 import { formatCurrency, formatNumber, formatMarketName } from "@/lib/utils";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2 } from "lucide-react";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from "@/components/ui/alert-dialog";
 import Link from "next/link";
 import { useTradeList, useCreateTrade, useConfirmTrade, useCancelTrade, useDeleteTrade } from "@/hooks/useTrade";
 import { useProductList } from "@/hooks/useProduct";
-import { toast } from "sonner";
+
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function TradesPage() {
@@ -108,16 +98,16 @@ export default function TradesPage() {
     }
   };
 
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [tradeToDelete, setTradeToDelete] = useState<number | null>(null);
+
 
   const handleEdit = () => {
-    toast.info("已确认的交易不可直接修改，请先取消确认");
+    alert("已确认的交易不可直接修改，请先取消确认");
   };
 
-  const handleDelete = (id: number) => {
-    setTradeToDelete(id);
-    setDeleteDialogOpen(true);
+  const handleDeleteClick = (id: number) => {
+    if (confirm("删除后将影响后续快照数据，建议先取消确认再删除。是否继续？")) {
+      deleteTradeMutation.mutate(id);
+    }
   };
 
   if (isLoading) {
@@ -351,7 +341,7 @@ export default function TradesPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(trade.id)}
+                            onClick={() => handleDeleteClick(trade.id)}
                             title="删除（需先取消确认）"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -371,25 +361,7 @@ export default function TradesPage() {
           </CardContent>
         </Card>
 
-        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>确认删除</AlertDialogTitle>
-              <AlertDialogDescription>
-                删除后将影响后续快照数据，建议先取消确认再删除。是否继续？
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>取消</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => tradeToDelete && deleteTradeMutation.mutate(tradeToDelete)}
-                disabled={deleteTradeMutation.isPending}
-              >
-                确认删除
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        
       </div>
     </MainLayout>
   );

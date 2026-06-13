@@ -65,7 +65,6 @@ export function DatePicker({
             setOpen(false)
           }}
           locale={zhCN}
-          initialFocus
         />
       </PopoverContent>
     </Popover>
