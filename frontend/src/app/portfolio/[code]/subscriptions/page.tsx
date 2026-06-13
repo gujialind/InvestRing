@@ -15,8 +15,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Table,
   TableBody,
@@ -26,7 +37,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatNumber } from "@/lib/utils";
-import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { subscriptionApi } from "@/lib/api";
+import { toast } from "sonner";
+import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useSubscriptionList, useCreateSubscription, useConfirmSubscription, useCancelSubscription } from "@/hooks/useTrade";
 import { useInvestorList } from "@/hooks/useInvestor";
@@ -35,7 +49,11 @@ import { usePortfolio } from "@/hooks/usePortfolio";
 export default function SubscriptionsPage() {
   const params = useParams();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const code = params.code as string;
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [subscriptionToDelete, setSubscriptionToDelete] = useState<number | null>(null);
 
   const { data, isLoading, refetch } = useSubscriptionList({ portfolio_code: code, page_size: 100 });
   const createSubscription = useCreateSubscription();
@@ -91,6 +109,33 @@ export default function SubscriptionsPage() {
     if (confirm("确定要取消该申请吗？")) {
       cancelSubscription.mutate(id);
     }
+  };
+
+  const deleteSubscriptionMutation = useMutation({
+    mutationFn: (id: number) => subscriptionApi.delete(id),
+    onSuccess: () => {
+      toast.success("申购赎回事件删除成功");
+      queryClient.invalidateQueries({ queryKey: ["subscriptions", code] });
+      setDeleteDialogOpen(false);
+      // 提示用户进行快照重算
+      toast.info(
+        "申购赎回数据已变更，建议前往快照管理页面重算相关日期的快照以保持数据一致性",
+        { duration: 5000 }
+      );
+    },
+    onError: (error: any) => {
+      const message = error.response?.data?.detail?.message || "删除失败";
+      toast.error(message);
+    },
+  });
+
+  const handleEdit = (sub: Subscription) => {
+    toast.info("已确认的申购赎回事件不可直接修改，请先取消确认");
+  };
+
+  const handleDelete = (id: number) => {
+    setSubscriptionToDelete(id);
+    setDeleteDialogOpen(true);
   };
 
   if (isLoading) {
@@ -201,12 +246,11 @@ export default function SubscriptionsPage() {
                   )}
                   <div className="space-y-2">
                     <Label htmlFor="apply_date">申请日期</Label>
-                    <Input
-                      id="apply_date"
-                      type="date"
-                      value={formData.apply_date}
-                      onChange={(e) => setFormData({ ...formData, apply_date: e.target.value })}
-                      required
+                    <DatePicker
+                      date={formData.apply_date ? new Date(formData.apply_date) : undefined}
+                      onSelect={(date) => {
+                        setFormData({ ...formData, apply_date: date ? date.toISOString().split("T")[0] : "" })
+                      }}
                     />
                   </div>
                 </div>
@@ -291,6 +335,27 @@ export default function SubscriptionsPage() {
                           </Button>
                         </>
                       )}
+                      {/* 新增：已确认交易的操作按钮 */}
+                      {sub.status === "confirmed" && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEdit(sub)}
+                            title="修改（需先取消确认）"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(sub.id)}
+                            title="删除（需先取消确认）"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -303,6 +368,26 @@ export default function SubscriptionsPage() {
             )}
           </CardContent>
         </Card>
+
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>确认删除</AlertDialogTitle>
+              <AlertDialogDescription>
+                删除后将影响后续快照数据，建议先取消确认再删除。是否继续？
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => subscriptionToDelete && deleteSubscriptionMutation.mutate(subscriptionToDelete)}
+                disabled={deleteSubscriptionMutation.isPending}
+              >
+                确认删除
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </MainLayout>
   );

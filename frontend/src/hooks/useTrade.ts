@@ -164,6 +164,18 @@ export function useCancelTrade() {
   });
 }
 
+// 删除交易 Hook
+export function useDeleteTrade() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) => tradeApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [TRADE_QUERY_KEY, "list"] });
+    },
+  });
+}
+
 // 批量调仓 Hook
 export function useBatchRebalance() {
   const queryClient = useQueryClient();

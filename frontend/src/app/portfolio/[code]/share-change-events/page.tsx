@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Select,
   SelectContent,
@@ -243,22 +244,20 @@ export default function ShareChangeEventsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="event_date">事件日期</Label>
-                      <Input
-                        id="event_date"
-                        type="date"
-                        value={formData.event_date}
-                        onChange={(e) => setFormData({ ...formData, event_date: e.target.value })}
-                        required
+                      <DatePicker
+                        date={formData.event_date ? new Date(formData.event_date) : undefined}
+                        onSelect={(date) => {
+                          setFormData({ ...formData, event_date: date ? date.toISOString().split("T")[0] : "" })
+                        }}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="entitlement_date">权益登记日</Label>
-                      <Input
-                        id="entitlement_date"
-                        type="date"
-                        value={formData.entitlement_date}
-                        onChange={(e) => setFormData({ ...formData, entitlement_date: e.target.value })}
-                        required
+                      <DatePicker
+                        date={formData.entitlement_date ? new Date(formData.entitlement_date) : undefined}
+                        onSelect={(date) => {
+                          setFormData({ ...formData, entitlement_date: date ? date.toISOString().split("T")[0] : "" })
+                        }}
                       />
                     </div>
                   </div>

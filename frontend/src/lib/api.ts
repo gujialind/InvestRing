@@ -232,6 +232,12 @@ export const subscriptionApi = {
   create: (data: SubscriptionCreate) =>
     request<Subscription>({ method: "POST", url: "/subscriptions", data }),
 
+  update: (id: number, data: SubscriptionUpdate) =>
+    request<Subscription>({ method: "PUT", url: `/subscriptions/${id}`, data }),
+
+  delete: (id: number) =>
+    request<void>({ method: "DELETE", url: `/subscriptions/${id}` }),
+
   confirm: (id: number, data?: { confirm_date?: string; unit_price?: number }) =>
     request<Subscription>({ method: "POST", url: `/subscriptions/${id}/confirm`, data }),
 
@@ -252,6 +258,9 @@ export const tradeApi = {
 
   update: (id: number, data: TradeUpdate) =>
     request<Trade>({ method: "PUT", url: `/trades/${id}`, data }),
+
+  delete: (id: number) =>
+    request<void>({ method: "DELETE", url: `/trades/${id}` }),
 
   confirm: (id: number, data?: { confirm_date?: string; price?: number }) =>
     request<Trade>({ method: "POST", url: `/trades/${id}/confirm`, data }),
