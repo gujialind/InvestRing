@@ -174,6 +174,8 @@
 | 买入金额 > 可用现金 | 拒绝 |
 | 买入金额为 0 | 拒绝 |
 | 买入金额 > 已有现金 + 卖出 pending 金额 | 拒绝（卖出 pending 不增加可用现金） |
+| 更新非净值资产缺少平台 | 拒绝，平台为必填项 |
+| 更新日期不是交易日 | 拒绝，必须在交易日进行 |
 
 **金额计算**：
 - 买入：`amount = actual_amount - fee`，`shares = amount / price`
@@ -225,7 +227,10 @@
 4. **赎回按申请日净值**：不是确认日净值
 5. **LOF 拆分为两条记录**：场内/场外分别处理
 6. **首次申购净值固定 1.0000**：无需获取净值数据
-7. **QDII 净值延迟**：最多向前查找 3 个交易日
+7. **QDII 净值处理规则**：
+   - 调仓交易确认：必须使用T日净值，若未同步则拒绝确认（禁止向前查找）
+   - 快照生成/市值计算：使用T-1日（前一交易日）净值
+   - 数据校验：QDII检查T-1日净值是否存在
 8. **所有用户必须设置密码**：无免密登录
 9. **所有资产人民币计价**：无汇率换算
 10. **移动端优先**：前端路由 `/m/` 前缀
@@ -239,6 +244,7 @@
 18. **任务执行必须记录日志**：创建 `task_execution_log` 记录，更新状态
 19. **组合关闭前检查**：pending交易、投资人份额、持仓状态
 20. **移除投资人创建特殊快照**：shares=0，标记已退出，后续快照跳过
+21. **非净值资产更新必须指定平台**：更新现金等非净值型资产时，platform_code 为必填项，同一组合可在不同平台分别持有现金
 
 ---
 
@@ -369,6 +375,10 @@
 
 **说明**：所有实体均采用 RESTRICT 策略，通过业务流程（关闭/停用）来管理生命周期，保留历史数据。
 
+**唯一约束说明**：
+- `portfolio_position` 表唯一约束：`(portfolio_code, product_code, market, platform_code, snapshot_date)`
+- 支持同一组合在同一天通过不同平台持有相同产品的多条记录
+
 ### F. MySQL 连接池配置
 
 ```python
@@ -407,15 +417,42 @@ engine = create_engine(
 - 净流入 = 资金流入 - 资金流出
 
 **QDII净值获取**：
+
 ```python
-def get_nav(product_code, target_date):
+# 场景1：调仓交易确认时获取QDII净值
+def get_nav_for_trade_confirmation(product_code, trade_date):
+    """
+    调仓交易确认：必须使用T日净值，禁止向前查找
+    """
+    if not is_qdii(product_code):
+        return query_price(product_code, trade_date)
+    
+    # QDII：必须取T日净值
+    nav = query_price(product_code, trade_date)
+    if not nav:
+        raise ValueError(
+            f"QDII产品{product_code}在T={trade_date}的净值尚未同步，"
+            f"请等待T+2日后重试或手动指定净值"
+        )
+    return nav
+
+
+# 场景2：快照生成/市值计算时获取QDII净值
+def get_nav_for_portfolio_valuation(product_code, target_date):
+    """
+    快照生成：使用T-1日净值
+    """
     if not is_qdii(product_code):
         return query_price(product_code, target_date)
-    for offset in range(4):  # 最多向前查找3个交易日
-        date = prev_trading_day(target_date, offset)
-        nav = query_price(product_code, date)
-        if nav: return nav
-    raise ValueError(f"无法获取QDII产品{product_code}的有效净值")
+    
+    # QDII：取前一交易日净值
+    prev_date = prev_trading_day(target_date, 1)
+    nav = query_price(product_code, prev_date)
+    if not nav:
+        raise ValueError(
+            f"QDII产品{product_code}在T-1={prev_date}无净值数据"
+        )
+    return nav
 ```
 
 ### H. 权限控制矩阵

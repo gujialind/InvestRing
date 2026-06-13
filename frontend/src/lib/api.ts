@@ -207,6 +207,13 @@ export const positionApi = {
   update: (id: number, data: PositionUpdate) =>
     request<Position>({ method: "PUT", url: `/positions/${id}`, data }),
 
+  updateCashPosition: (portfolioCode: string, amount: number, platformCode: string, updateDate?: string) =>
+    request<{ success: boolean; message: string; portfolio_code: string; platform_code: string; amount: number; update_date: string }>({
+      method: "POST",
+      url: `/positions/portfolio/${portfolioCode}/cash-position`,
+      data: { amount, platform_code: platformCode, update_date: updateDate },
+    }),
+
   getAttribution: (portfolioCode: string) =>
     request<{ asset_type: string; value: number; weight: number }[]>({
       method: "GET",
@@ -429,6 +436,191 @@ export const notificationApi = {
 
   markAllAsRead: () =>
     request<{ message: string }>({ method: "POST", url: "/system/notifications/read-all" }),
+};
+
+// 快照管理 API
+export interface SnapshotValidationCheck {
+  check_type: string;
+  status: "passed" | "failed" | "warning";
+  message: string;
+}
+
+export interface SnapshotValidationResult {
+  portfolio_code: string;
+  target_date: string;
+  is_valid: boolean;
+  checks: SnapshotValidationCheck[];
+}
+
+export interface SnapshotGenerationResult {
+  success: boolean;
+  message: string;
+  portfolio_code: string;
+  snapshot_date: string;
+  total_value?: number;
+  total_shares?: number;
+  unit_price?: number;
+}
+
+export interface RecalculationPortfolioResult {
+  portfolio_code: string;
+  processed_dates: string[];
+  total_processed: number;
+  errors: Array<{ date: string; error: string }>;
+}
+
+export interface RecalculationResult {
+  success: boolean;
+  message: string;
+  results: RecalculationPortfolioResult[];
+}
+
+export interface SnapshotStatusResponse {
+  portfolio_code: string;
+  latest_snapshot_date?: string;
+  total_snapshots: number;
+  first_snapshot_date?: string;
+  missing_dates: string[];
+}
+
+export const snapshotApi = {
+  // 单日生成
+  generate: (portfolioCode: string, targetDate: string) =>
+    request<SnapshotGenerationResult>({
+      method: "POST",
+      url: "/v1/snapshots/generate",
+      data: { portfolio_code: portfolioCode, target_date: targetDate },
+    }),
+
+  // 区间重算
+  recalculate: (
+    portfolioCode: string | null,
+    startDate: string,
+    endDate: string,
+    force: boolean = false
+  ) =>
+    request<RecalculationResult>({
+      method: "POST",
+      url: "/v1/snapshots/recalculate",
+      data: {
+        portfolio_code: portfolioCode,
+        start_date: startDate,
+        end_date: endDate,
+        force,
+      },
+    }),
+
+  // 预检验证
+  validate: (portfolioCode: string, targetDate: string) =>
+    request<SnapshotValidationResult>({
+      method: "GET",
+      url: "/v1/snapshots/validation",
+      params: { portfolio_code: portfolioCode, target_date: targetDate },
+    }),
+
+  // 查询状态
+  getStatus: (portfolioCode: string) =>
+    request<SnapshotStatusResponse>({
+      method: "GET",
+      url: `/v1/snapshots/portfolios/${portfolioCode}/status`,
+    }),
+
+  // 删除快照
+  delete: (portfolioCode: string, snapshotDate: string) =>
+    request<{ success: boolean; message: string }>({
+      method: "DELETE",
+      url: `/v1/snapshots/${portfolioCode}/${snapshotDate}`,
+    }),
+};
+
+// ==================== 份额变动事件管理 ====================
+export interface ShareChangeEvent {
+  id: number;
+  portfolio_code: string;
+  event_type: string; // cash_dividend/reinvest_dividend/share_split/share_merge/bonus_share/forced_adjustment
+  event_date: string;
+  entitlement_date: string;
+  product_code?: string;
+  market?: string;
+  shares_before?: number;
+  shares_change?: number;
+  shares_after?: number;
+  cash_change?: number;
+  div_cash?: number;
+  reinvest_nav?: number;
+  ratio?: number;
+  status: string; // pending/confirmed/cancelled
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ShareChangeEventCreate {
+  portfolio_code: string;
+  event_type: string;
+  event_date: string;
+  entitlement_date: string;
+  product_code?: string;
+  market?: string;
+  shares_before?: number;
+  shares_change?: number;
+  shares_after?: number;
+  cash_change?: number;
+  div_cash?: number;
+  reinvest_nav?: number;
+  ratio?: number;
+  status?: string;
+  notes?: string;
+}
+
+export interface ShareChangeEventUpdate {
+  event_date?: string;
+  entitlement_date?: string;
+  shares_before?: number;
+  shares_change?: number;
+  shares_after?: number;
+  cash_change?: number;
+  div_cash?: number;
+  reinvest_nav?: number;
+  ratio?: number;
+  status?: string;
+  notes?: string;
+}
+
+export const shareChangeEventApi = {
+  list: (params?: { page?: number; page_size?: number; portfolio_code?: string }) =>
+    request<PaginatedResponse<ShareChangeEvent>>({
+      method: "GET",
+      url: "/share-change-events",
+      params,
+    }),
+
+  get: (id: number) =>
+    request<ShareChangeEvent>({ method: "GET", url: `/share-change-events/${id}` }),
+
+  create: (data: ShareChangeEventCreate) =>
+    request<ShareChangeEvent>({ method: "POST", url: "/share-change-events", data }),
+
+  update: (id: number, data: ShareChangeEventUpdate) =>
+    request<ShareChangeEvent>({ method: "PUT", url: `/share-change-events/${id}`, data }),
+
+  confirm: (id: number) =>
+    request<{ message: string; event: ShareChangeEvent }>({
+      method: "POST",
+      url: `/share-change-events/${id}/confirm`,
+    }),
+
+  cancel: (id: number) =>
+    request<{ message: string }>({
+      method: "POST",
+      url: `/share-change-events/${id}/cancel`,
+    }),
+
+  delete: (id: number) =>
+    request<{ message: string }>({
+      method: "DELETE",
+      url: `/share-change-events/${id}`,
+    }),
 };
 
 export default api;

@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatReturnRate, formatNumber, getReturnColorClass } from "@/lib/utils";
-import { TrendingUp, Users, Wallet, ArrowLeft, Loader2, PowerOff, Power, Trash2, Plus, ArrowRightLeft, History } from "lucide-react";
+import { TrendingUp, Users, Wallet, ArrowLeft, Loader2, PowerOff, Power, Trash2, Plus, ArrowRightLeft, History, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { usePortfolio, useLatestSnapshot, usePortfolioInvestors, useClosePortfolio, useActivatePortfolio, useDeletePortfolio } from "@/hooks/usePortfolio";
 import { usePositionList } from "@/hooks/usePortfolio";
@@ -42,6 +42,7 @@ export default function PortfolioDetailPage() {
 
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [returnType, setReturnType] = useState<"cumulative" | "annualized" | "twr">("twr");
 
   if (isLoading) {
     return (
@@ -143,9 +144,9 @@ export default function PortfolioDetailPage() {
                       调仓交易
                     </Button>
                   </Link>
-                  <Link href={`/portfolio/${code}/positions`}>
+                  <Link href={`/portfolio/${code}/share-change-events`}>
                     <Button variant="outline">
-                      <History className="mr-2 h-4 w-4" />
+                      <RefreshCw className="mr-2 h-4 w-4" />
                       份额变动
                     </Button>
                   </Link>
@@ -174,47 +175,95 @@ export default function PortfolioDetailPage() {
         )}
 
         {!isDraft && (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">总资产</CardTitle>
-                <Wallet className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatCurrency(totalValue)}</div>
-              </CardContent>
-            </Card>
+          <div className="space-y-4">
+            {/* Stats Cards */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">总资产</CardTitle>
+                  <Wallet className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{formatCurrency(totalValue)}</div>
+                </CardContent>
+              </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">净值</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(unitPrice, 4)}</div>
-              </CardContent>
-            </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">净值</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{formatNumber(unitPrice, 4)}</div>
+                </CardContent>
+              </Card>
 
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">收益率</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-red-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className={`text-2xl font-bold ${getReturnColorClass(portfolio.cumulative_return || 0)}`}>
+                    {formatReturnRate(portfolio.cumulative_return || 0)}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">总份额</CardTitle>
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {formatNumber(totalShares, 2)}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Return Type Switcher */}
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">累计收益</CardTitle>
-                <TrendingUp className="h-4 w-4 text-green-500" />
-              </CardHeader>
-              <CardContent>
-                <div className={`text-2xl font-bold ${getReturnColorClass(portfolio.cumulative_return || 0)}`}>
-                  {formatReturnRate(portfolio.cumulative_return || 0)}
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-medium">收益率类型</span>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant={returnType === "cumulative" ? "default" : "outline"}
+                      onClick={() => setReturnType("cumulative")}
+                      className="text-xs"
+                    >
+                      累计收益
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={returnType === "annualized" ? "default" : "outline"}
+                      onClick={() => setReturnType("annualized")}
+                      className="text-xs"
+                    >
+                      年化收益
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={returnType === "twr" ? "default" : "outline"}
+                      onClick={() => setReturnType("twr")}
+                      className="text-xs"
+                    >
+                      时间加权
+                    </Button>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">总份额</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {formatNumber(totalShares, 2)}
+                <div className="text-center py-4">
+                  <div className={`text-3xl font-bold ${getReturnColorClass(portfolio.cumulative_return || 0)}`}>
+                    {formatReturnRate(portfolio.cumulative_return || 0)}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    {returnType === "cumulative" && "累计收益率：从组合成立至今的总收益"}
+                    {returnType === "annualized" && "年化收益率：按年计算的复合收益率"}
+                    {returnType === "twr" && "时间加权收益率：消除资金流影响的收益率（默认）"}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -227,6 +276,11 @@ export default function PortfolioDetailPage() {
             {!isDraft && <TabsTrigger value="positions">持仓</TabsTrigger>}
             {!isDraft && <TabsTrigger value="investors">投资人</TabsTrigger>}
             {!isDraft && <TabsTrigger value="nav">净值历史</TabsTrigger>}
+            {isAdmin && !isDraft && (
+              <Link href={`/portfolio/${code}/snapshots`}>
+                <TabsTrigger value="snapshots">快照管理</TabsTrigger>
+              </Link>
+            )}
           </TabsList>
 
           <TabsContent value="overview" className="space-y-4">
@@ -267,9 +321,19 @@ export default function PortfolioDetailPage() {
 
           <TabsContent value="positions" className="space-y-4">
             <Card>
-              <CardHeader>
-                <CardTitle>持仓列表</CardTitle>
-                <CardDescription>当前持仓明细</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>持仓列表</CardTitle>
+                  <CardDescription>当前持仓明细</CardDescription>
+                </div>
+                {isAdmin && !isDraft && (
+                  <Link href={`/portfolio/${code}/positions`}>
+                    <Button variant="outline" size="sm">
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      管理持仓
+                    </Button>
+                  </Link>
+                )}
               </CardHeader>
               <CardContent>
                 {positions.length === 0 ? (

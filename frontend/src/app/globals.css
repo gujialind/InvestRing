@@ -58,6 +58,19 @@
   }
 }
 
+/* Financial number display utilities */
+@layer utilities {
+  .number-cell {
+    @apply text-right font-mono tabular-nums;
+  }
+  .amount-large {
+    @apply text-2xl font-semibold tabular-nums;
+  }
+  .amount-small {
+    @apply text-sm text-muted-foreground tabular-nums;
+  }
+}
+
 @keyframes slideIn {
   from {
     transform: translateX(100%);

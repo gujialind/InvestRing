@@ -3,19 +3,21 @@
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, formatPercent, formatReturnRate, getReturnColorClass } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Wallet, Users, Briefcase, Loader2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, Users, Briefcase, Loader2, ArrowRightLeft } from "lucide-react";
 import { usePortfolioList } from "@/hooks/usePortfolio";
-import { useSubscriptionList } from "@/hooks/useTrade";
+import { useSubscriptionList, useTradeList } from "@/hooks/useTrade";
 import { useInvestorList } from "@/hooks/useInvestor";
 import Link from "next/link";
 
 export default function DashboardPage() {
   const { data: portfoliosData, isLoading: portfoliosLoading } = usePortfolioList({ page_size: 100 });
-  const { data: subscriptionsData, isLoading: subscriptionsLoading } = useSubscriptionList({ page_size: 5 });
+  const { data: subscriptionsData, isLoading: subscriptionsLoading } = useSubscriptionList({ page_size: 100 });
+  const { data: tradesData, isLoading: tradesLoading } = useTradeList({ page_size: 100 });
   const { data: investorsData, isLoading: investorsLoading } = useInvestorList({ page_size: 100 });
 
   const portfolios = portfoliosData?.items || [];
   const subscriptions = subscriptionsData?.items || [];
+  const trades = tradesData?.items || [];
   const investors = investorsData?.items || [];
 
   // 计算统计数据
@@ -31,7 +33,7 @@ export default function DashboardPage() {
     ? portfoliosWithReturn.reduce((sum, p) => sum + (p.cumulative_return || 0), 0) / portfoliosWithReturn.length
     : 0;
 
-  const isLoading = portfoliosLoading || subscriptionsLoading || investorsLoading;
+  const isLoading = portfoliosLoading || subscriptionsLoading || tradesLoading || investorsLoading;
 
   if (isLoading) {
     return (
@@ -77,7 +79,7 @@ export default function DashboardPage() {
               <CardTitle className="text-sm font-medium">
                 平均累计收益
               </CardTitle>
-              <TrendingUp className="h-4 w-4 text-green-500" />
+              <TrendingUp className="h-4 w-4 text-red-500" />
             </CardHeader>
             <CardContent>
               <div className={`text-2xl font-bold ${getReturnColorClass(avgReturn)}`}>
@@ -123,6 +125,74 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Pending Transactions Alerts */}
+        {subscriptions.filter(s => s.status === "pending").length > 0 && (
+          <Card className="bg-yellow-50 border-yellow-200">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-yellow-800 flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
+                待确认交易提醒
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {subscriptions.filter(s => s.status === "pending").slice(0, 3).map((sub) => (
+                  <div key={sub.id} className="flex items-center justify-between text-sm">
+                    <span className="text-yellow-800">
+                      {sub.sub_type === "subscribe" ? "申购" : "赎回"} - {sub.portfolio_code}
+                    </span>
+                    <span className="text-yellow-700 font-mono tabular-nums">
+                      {sub.sub_type === "subscribe" 
+                        ? formatCurrency(sub.amount || 0)
+                        : `${sub.shares?.toLocaleString() || 0} 份`
+                      }
+                    </span>
+                  </div>
+                ))}
+                {subscriptions.filter(s => s.status === "pending").length > 3 && (
+                  <p className="text-xs text-yellow-600 text-center">
+                    还有 {subscriptions.filter(s => s.status === "pending").length - 3} 笔待确认交易
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Pending Trades Alert */}
+        {trades.filter(t => t.status === "pending").length > 0 && (
+          <Card className="bg-blue-50 border-blue-200">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-blue-800 flex items-center gap-2">
+                <ArrowRightLeft className="h-4 w-4 text-blue-600" />
+                待确认调仓交易
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {trades.filter(t => t.status === "pending").slice(0, 3).map((trade) => (
+                  <div key={trade.id} className="flex items-center justify-between text-sm">
+                    <span className="text-blue-800">
+                      {trade.trade_type === "buy" ? "买入" : "卖出"} - {trade.product_code}
+                    </span>
+                    <span className="text-blue-700 font-mono tabular-nums">
+                      {trade.trade_type === "buy" 
+                        ? formatCurrency(trade.amount || 0)
+                        : `${trade.shares?.toLocaleString() || 0} 份`
+                      }
+                    </span>
+                  </div>
+                ))}
+                {trades.filter(t => t.status === "pending").length > 3 && (
+                  <p className="text-xs text-blue-600 text-center">
+                    还有 {trades.filter(t => t.status === "pending").length - 3} 笔待确认调仓
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Active Portfolios Table */}
         <Card>
