@@ -10,7 +10,7 @@ from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.subscription import Subscription
 from app.models.trade import Trade
 from app.models.product import Product
-from app.schemas.position import PositionCreate, PositionUpdate, PositionResponse
+from app.schemas.position import PositionCreate, PositionUpdate, PositionResponse, CashPositionUpdate
 from app.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
@@ -313,4 +313,97 @@ def get_available_shares(
         "product_code": product_code,
         "market": market,
         "available_shares": float(shares),
+    }
+
+
+@router.post("/portfolio/{portfolio_code}/cash-position")
+def update_cash_position(
+    portfolio_code: str,
+    request: CashPositionUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_admin),
+):
+    """
+    更新非净值型资产（现金）金额
+    
+    权限：仅admin
+    规则：
+    - 必须在交易日进行
+    - 必须指定平台代码
+    - 更新CASH产品的amount字段
+    - 如果不存在则创建，存在则更新
+    """
+    from app.models.portfolio import Portfolio
+    from app.models.platform import Platform
+    from app.models.trading_calendar import TradingCalendar
+    
+    # 检查组合是否存在
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "PORTFOLIO_NOT_FOUND", "message": f"组合 {portfolio_code} 不存在"}
+        )
+    
+    # 校验平台存在性
+    platform = db.query(Platform).filter(Platform.code == request.platform_code).first()
+    if not platform:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "PLATFORM_NOT_FOUND", "message": f"平台 {request.platform_code} 不存在"}
+        )
+    
+    # 确定更新日期（默认为今天）
+    update_date = request.update_date or date.today()
+    
+    # 校验是否为交易日
+    trading_day = db.query(TradingCalendar).filter(
+        TradingCalendar.date == update_date,
+        TradingCalendar.is_open == True
+    ).first()
+    
+    if not trading_day:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "NON_TRADING_DAY",
+                "message": "非交易日，请等待交易日再提交"
+            }
+        )
+    
+    # 查找或创建CASH持仓记录（包含platform_code）
+    cash_position = db.query(PortfolioPosition).filter(
+        PortfolioPosition.portfolio_code == portfolio_code,
+        PortfolioPosition.product_code == "CASH",
+        PortfolioPosition.market == "",
+        PortfolioPosition.platform_code == request.platform_code,
+        PortfolioPosition.snapshot_date == update_date
+    ).first()
+    
+    if cash_position:
+        # 更新现有记录
+        cash_position.amount = Decimal(str(request.amount))
+    else:
+        # 创建新记录（非净值型资产，shares 必须为 NULL）
+        cash_position = PortfolioPosition(
+            portfolio_code=portfolio_code,
+            product_code="CASH",
+            market="",
+            platform_code=request.platform_code,
+            amount=Decimal(str(request.amount)),
+            shares=None,  # 明确设置为 NULL，满足 check_nav_or_non_nav 约束
+            snapshot_date=update_date
+        )
+        db.add(cash_position)
+    
+    db.commit()
+    db.refresh(cash_position)
+    
+    return {
+        "success": True,
+        "message": "非净值资产更新成功",
+        "portfolio_code": portfolio_code,
+        "platform_code": request.platform_code,
+        "amount": float(cash_position.amount),
+        "update_date": update_date.isoformat()
     }

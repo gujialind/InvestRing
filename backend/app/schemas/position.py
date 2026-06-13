@@ -40,3 +40,10 @@ class PositionResponse(PositionBase):
 
     class Config:
         from_attributes = True
+
+
+class CashPositionUpdate(BaseModel):
+    """非净值型资产（现金）更新请求"""
+    amount: float
+    platform_code: str  # 必填：平台代码
+    update_date: Optional[date] = None  # 可选，默认为今天

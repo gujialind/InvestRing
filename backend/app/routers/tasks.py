@@ -196,11 +196,44 @@ def run_task(
             log.finished_at = datetime.now()
             db.commit()
 
+            # 净值同步完成后，自动触发当日快照生成
+            snapshots_generated = 0
+            if not failed_products:
+                try:
+                    from app.services.snapshot_service import generate_daily_snapshots
+                    from app.models import TradingCalendar
+                    
+                    today = datetime.now().date()
+                    
+                    # 检查今天是否为交易日
+                    cal = db.query(TradingCalendar).filter(
+                        TradingCalendar.date == today
+                    ).first()
+                    
+                    if cal and cal.is_open:
+                        active_portfolios = db.query(Portfolio).filter(
+                            Portfolio.status == "active"
+                        ).all()
+                        
+                        for portfolio in active_portfolios:
+                            try:
+                                generate_daily_snapshots(
+                                    db=db,
+                                    portfolio_code=portfolio.code,
+                                    target_date=today
+                                )
+                                snapshots_generated += 1
+                            except Exception as e:
+                                logger.error(f"组合 {portfolio.code} 快照生成失败: {str(e)}")
+                except Exception as e:
+                    logger.error(f"自动快照生成失败: {str(e)}")
+
             return {
                 "message": f"任务 {code} 执行完成",
                 "synced_count": total_synced,
                 "products_count": len(products),
                 "failed_products": failed_products,
+                "snapshots_generated": snapshots_generated,
             }
 
         elif code == "log_cleanup":

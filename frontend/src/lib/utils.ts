@@ -93,6 +93,14 @@ export function formatCurrency(
 }
 
 /**
+ * 获取数字显示的CSS类名（右对齐 + 等宽字体）
+ * 用于金融数字展示，确保对齐和可读性
+ */
+export function getNumberCellClass(): string {
+  return "text-right font-mono tabular-nums";
+}
+
+/**
  * 格式化金额（简化显示，大于万显示为 X.XX 万）
  */
 export function formatCompactCurrency(
@@ -154,6 +162,7 @@ export function formatReturnRate(
 
 /**
  * 根据收益率/涨跌值获取对应的颜色类名
+ * 中国市场惯例：红涨绿跌
  * @param value 数值
  * @returns Tailwind CSS 颜色类名
  */
@@ -162,21 +171,22 @@ export function getReturnColorClass(value: number | string | undefined | null): 
     return "text-muted-foreground";
   }
   const n = typeof value === "string" ? parseFloat(value) : value;
-  if (n > 0) return "text-red-600";
-  if (n < 0) return "text-green-600";
+  if (n > 0) return "text-red-600";   // 涨：红色
+  if (n < 0) return "text-green-600"; // 跌：绿色
   return "text-muted-foreground";
 }
 
 /**
  * 根据收益率/涨跌值获取对应背景色类名
+ * 中国市场惯例：红涨绿跌
  */
 export function getReturnBgClass(value: number | string | undefined | null): string {
   if (value === undefined || value === null || value === "" || Number.isNaN(Number(value))) {
     return "bg-muted";
   }
   const n = typeof value === "string" ? parseFloat(value) : value;
-  if (n > 0) return "bg-red-50";
-  if (n < 0) return "bg-green-50";
+  if (n > 0) return "bg-red-50";   // 涨：红色背景
+  if (n < 0) return "bg-green-50"; // 跌：绿色背景
   return "bg-muted";
 }
 
@@ -238,4 +248,22 @@ export function deepClone<T>(obj: T): T {
 export function isWeekend(date: Date = new Date()): boolean {
   const day = date.getDay();
   return day === 0 || day === 6;
+}
+
+// ==================== 市场/产品类型映射 ====================
+
+const MARKET_NAME_MAP: Record<string, string> = {
+  CN_EXCHANGE: "A股场内",
+  CN_OTC: "内地场外",
+  HK_MUTUAL: "香港互认",
+};
+
+/**
+ * 格式化市场名称为中文
+ * @param market 市场代码（如 CN_EXCHANGE）
+ * @returns 中文市场名称，未知市场返回 "--"
+ */
+export function formatMarketName(market: string | undefined | null): string {
+  if (!market) return "--";
+  return MARKET_NAME_MAP[market] || market;
 }

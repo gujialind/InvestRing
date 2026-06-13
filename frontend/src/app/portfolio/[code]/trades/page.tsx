@@ -24,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatNumber } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatMarketName } from "@/lib/utils";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useTradeList, useCreateTrade, useConfirmTrade, useCancelTrade } from "@/hooks/useTrade";
@@ -42,6 +42,11 @@ export default function TradesPage() {
 
   const trades = data?.items || [];
   const products = productsData?.items || [];
+
+  const getProductName = (productCode: string, market?: string) => {
+    const product = products.find(p => p.code === productCode && p.market === market);
+    return product?.name || productCode;
+  };
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [tradeType, setTradeType] = useState<"buy" | "sell">("buy");
@@ -239,6 +244,7 @@ export default function TradesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>产品</TableHead>
+                  <TableHead>市场</TableHead>
                   <TableHead>类型</TableHead>
                   <TableHead className="text-right">金额/份额</TableHead>
                   <TableHead className="text-right">价格</TableHead>
@@ -253,10 +259,11 @@ export default function TradesPage() {
                   <TableRow key={trade.id}>
                     <TableCell>
                       <div>
-                        <p className="font-medium">{trade.product_code}</p>
-                        <p className="text-sm text-muted-foreground">{trade.market || "--"}</p>
+                        <p className="font-medium">{getProductName(trade.product_code, trade.market)}</p>
+                        <p className="text-sm text-muted-foreground">{trade.product_code}</p>
                       </div>
                     </TableCell>
+                    <TableCell>{formatMarketName(trade.market)}</TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         trade.trade_type === "buy"

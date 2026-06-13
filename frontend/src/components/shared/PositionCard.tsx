@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { formatCurrency, formatNumber, formatReturnRate } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass } from "@/lib/utils";
 
 interface PositionCardProps {
   productCode: string;
@@ -42,7 +42,7 @@ export default function PositionCard({
           {profitLoss !== undefined && profitLoss !== null && (
             <span
               className={`text-sm font-medium ${
-                profitLoss >= 0 ? "text-green-600" : "text-red-500"
+                getReturnColorClass(profitLoss)
               }`}
             >
               {profitLoss >= 0 ? "+" : ""}
@@ -55,25 +55,25 @@ export default function PositionCard({
           {shares !== undefined && (
             <>
               <span className="text-muted-foreground">份额</span>
-              <span className="text-right">{formatNumber(shares)}</span>
+              <span className="text-right font-mono tabular-nums">{formatNumber(shares)}</span>
             </>
           )}
           {costPrice !== undefined && (
             <>
               <span className="text-muted-foreground">成本价</span>
-              <span className="text-right">{formatCurrency(costPrice)}</span>
+              <span className="text-right font-mono tabular-nums">{formatCurrency(costPrice)}</span>
             </>
           )}
           {currentPrice !== undefined && (
             <>
               <span className="text-muted-foreground">当前价</span>
-              <span className="text-right">{formatCurrency(currentPrice)}</span>
+              <span className="text-right font-mono tabular-nums">{formatCurrency(currentPrice)}</span>
             </>
           )}
           {marketValue !== undefined && (
             <>
               <span className="text-muted-foreground">市值</span>
-              <span className="text-right font-medium">{formatCurrency(marketValue)}</span>
+              <span className="text-right font-medium font-mono tabular-nums">{formatCurrency(marketValue)}</span>
             </>
           )}
         </div>
