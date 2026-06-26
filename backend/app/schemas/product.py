@@ -11,6 +11,7 @@ class ProductBase(BaseModel):
     asset_class_code: Optional[str] = None
     confirm_days: int = 1
     is_qdii: bool = False
+    data_source: Optional[str] = "tushare"
 
 
 class ProductCreate(ProductBase):

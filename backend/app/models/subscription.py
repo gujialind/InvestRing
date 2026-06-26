@@ -9,7 +9,7 @@ class Subscription(Base):
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
     investor_code = Column(String(20), ForeignKey("investor.code"), nullable=False)
     sub_type = Column(String(10), nullable=False)
-    amount = Column(Numeric(15, 4), nullable=False)
+    amount = Column(Numeric(15, 4))
     shares = Column(Numeric(15, 4))
     unit_price = Column(Numeric(10, 4))
     apply_date = Column(Date, nullable=False)
