@@ -297,7 +297,7 @@ export default function PortfolioSnapshotsPage() {
       </div>
 
       {/* 单日生成对话框 */}
-      <Dialog open={showSingleDialog} onOpenChange={setShowSingleDialog}>
+      <Dialog open={showSingleDialog} onOpenChange={setShowSingleDialog} modal={false}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>生成单日快照</DialogTitle>
@@ -398,7 +398,7 @@ export default function PortfolioSnapshotsPage() {
       </Dialog>
 
       {/* 区间重算对话框 */}
-      <Dialog open={showRecalcDialog} onOpenChange={setShowRecalcDialog}>
+      <Dialog open={showRecalcDialog} onOpenChange={setShowRecalcDialog} modal={false}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>区间重算快照</DialogTitle>

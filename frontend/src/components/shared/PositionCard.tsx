@@ -5,7 +5,7 @@ import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass } f
 
 interface PositionCardProps {
   productCode: string;
-  productName: string;
+  productName?: string;
   market?: string;
   shares?: number;
   costPrice?: number;
@@ -33,7 +33,7 @@ export default function PositionCard({
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <p className="font-medium">{productName}</p>
+            <p className="font-medium">{productName || productCode}</p>
             <p className="text-xs text-muted-foreground">
               {productCode}
               {market ? ` | ${market}` : ""}

@@ -1,12 +1,8 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { portfolioApi, positionApi } from "@/lib/api";
-import {
-  Portfolio,
-  PortfolioCreate,
-  PortfolioUpdate,
-} from "@/types/portfolio";
+import { portfolioApi, positionApi, getErrorMessage } from "@/lib/api";
+import { PortfolioCreate, PortfolioUpdate } from "@/types/portfolio";
 import { useUIStore } from "@/stores/uiStore";
 
 const PORTFOLIO_QUERY_KEY = "portfolios";
@@ -47,11 +43,11 @@ export function useCreatePortfolio() {
         message: "组合已创建",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "创建失败",
-        message: error.message || "请检查输入信息",
+        message: getErrorMessage(error, "请检查输入信息"),
       });
     },
   });
@@ -73,11 +69,11 @@ export function useUpdatePortfolio(code: string) {
         message: "组合信息已更新",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "更新失败",
-        message: error.message || "请稍后重试",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
@@ -99,11 +95,11 @@ export function useClosePortfolio() {
         message: "组合已关闭",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "关闭失败",
-        message: error.message || "请确保无待处理交易",
+        message: getErrorMessage(error, "请确保无待处理交易"),
       });
     },
   });
@@ -125,11 +121,11 @@ export function useActivatePortfolio() {
         message: "组合已重新激活",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "激活失败",
-        message: error.message || "请稍后重试",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
@@ -151,11 +147,11 @@ export function useDeletePortfolio() {
         message: "组合已删除",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "删除失败",
-        message: error.message || "仅草稿状态组合可删除",
+        message: getErrorMessage(error, "仅草稿状态组合可删除"),
       });
     },
   });

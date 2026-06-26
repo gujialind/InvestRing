@@ -340,6 +340,27 @@ def cancel_subscription(
     return {"message": "Subscription cancelled successfully"}
 
 
+@router.post("/{id}/unconfirm")
+def unconfirm_subscription(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: Investor = Depends(get_current_admin),
+):
+    subscription = db.query(Subscription).filter(Subscription.id == id).first()
+    if not subscription:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    if subscription.status != "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_STATUS", "message": "仅 confirmed 状态可取消确认"},
+        )
+    
+    subscription.status = "pending"
+    subscription.confirm_date = None
+    db.commit()
+    return {"message": "Subscription unconfirmed successfully"}
+
+
 @router.put("/{id}", response_model=SubscriptionResponse)
 def update_subscription(
     id: int,

@@ -1,0 +1,83 @@
+import { request } from "./client";
+import {
+  Portfolio,
+  PortfolioCreate,
+  PortfolioUpdate,
+  PortfolioValueSnapshot,
+} from "@/types/portfolio";
+import { Position, PositionCreate, PositionUpdate } from "@/types/position";
+import { PaginatedResponse } from "@/types/common";
+
+export const portfolioApi = {
+  list: (params?: { page?: number; page_size?: number; status?: string }) =>
+    request<PaginatedResponse<Portfolio>>({ method: "GET", url: "/portfolios", params }),
+
+  get: (code: string) =>
+    request<Portfolio>({ method: "GET", url: `/portfolios/${code}` }),
+
+  create: (data: PortfolioCreate) =>
+    request<Portfolio>({ method: "POST", url: "/portfolios", data }),
+
+  update: (code: string, data: PortfolioUpdate) =>
+    request<Portfolio>({ method: "PUT", url: `/portfolios/${code}`, data }),
+
+  close: (code: string) =>
+    request<Portfolio>({ method: "POST", url: `/portfolios/${code}/close` }),
+
+  activate: (code: string) =>
+    request<Portfolio>({ method: "POST", url: `/portfolios/${code}/reactivate` }),
+
+  remove: (code: string) =>
+    request<{ message: string }>({ method: "DELETE", url: `/portfolios/${code}` }),
+
+  getSnapshots: (code: string, params?: { page?: number; page_size?: number }) =>
+    request<PaginatedResponse<PortfolioValueSnapshot>>({
+      method: "GET",
+      url: `/portfolios/${code}/snapshots`,
+      params,
+    }),
+
+  getLatestSnapshot: (code: string) =>
+    request<PortfolioValueSnapshot>({ method: "GET", url: `/portfolios/${code}/snapshots/latest` }),
+
+  getAvailableCash: (code: string) =>
+    request<{ available_cash: number }>({ method: "GET", url: `/positions/portfolio/${code}/available-cash` }),
+
+  getInvestors: (code: string) =>
+    request<{ investor_code: string; name: string; shares: number }[]>({
+      method: "GET",
+      url: `/portfolios/${code}/investors`,
+    }),
+};
+
+// 持仓管理 API（与组合强相关，归入此模块）
+export const positionApi = {
+  list: (portfolioCode: string, params?: { page?: number; page_size?: number; snapshot_date?: string }) =>
+    request<PaginatedResponse<Position>>({
+      method: "GET",
+      url: `/positions`,
+      params: { portfolio_code: portfolioCode, ...params },
+    }),
+
+  getLatest: (portfolioCode: string) =>
+    request<Position[]>({ method: "GET", url: `/portfolios/${portfolioCode}/positions/latest` }),
+
+  create: (data: PositionCreate) =>
+    request<Position>({ method: "POST", url: "/positions", data }),
+
+  update: (id: number, data: PositionUpdate) =>
+    request<Position>({ method: "PUT", url: `/positions/${id}`, data }),
+
+  updateCashPosition: (portfolioCode: string, amount: number, platformCode: string, updateDate?: string) =>
+    request<{ success: boolean; message: string; portfolio_code: string; platform_code: string; amount: number; update_date: string }>({
+      method: "POST",
+      url: `/positions/portfolio/${portfolioCode}/cash-position`,
+      data: { amount, platform_code: platformCode, update_date: updateDate },
+    }),
+
+  getAttribution: (portfolioCode: string) =>
+    request<{ asset_type: string; value: number; weight: number }[]>({
+      method: "GET",
+      url: `/portfolios/${portfolioCode}/attribution`,
+    }),
+};

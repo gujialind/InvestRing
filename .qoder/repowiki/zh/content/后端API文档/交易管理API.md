@@ -150,14 +150,16 @@ API-->>FE : TradeResponse
   - 方法与路径：PUT /api/trades/{id}
   - 请求体：TradeUpdate（支持部分字段更新）
   - 权限：管理员（admin）
+  - 安全验证：**新增** 已确认交易不可直接修改，需先取消确认
   - 响应：TradeResponse
-  - 实现参考：[backend/app/routers/trades.py:535-551](file://backend/app/routers/trades.py#L535-L551)
+  - 实现参考：[backend/app/routers/trades.py:535-561](file://backend/app/routers/trades.py#L535-L561)
 
 - 删除交易
   - 方法与路径：DELETE /api/trades/{id}
   - 权限：管理员（admin）
+  - 安全验证：**新增** 已确认交易不可直接删除，需先取消确认
   - 响应：成功消息
-  - 实现参考：[backend/app/routers/trades.py:554-566](file://backend/app/routers/trades.py#L554-L566)
+  - 实现参考：[backend/app/routers/trades.py:563-585](file://backend/app/routers/trades.py#L563-L585)
 
 - 确认交易
   - 方法与路径：POST /api/trades/{id}/confirm
@@ -184,7 +186,7 @@ API-->>FE : TradeResponse
 
 请求/响应模式与字段说明（基于Schema与模型）：
 - TradeBase/TradeCreate/TradeUpdate/TradeResponse 字段定义参见 [backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-L45)
-- Trade模型字段与约束参见 [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-32)
+- Trade模型字段与约束参见 [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-L32)
 
 权限与鉴权：
 - 普通用户：通过Bearer Token鉴权，见 [backend/app/dependencies.py:49-111](file://backend/app/dependencies.py#L49-L111)
@@ -199,7 +201,7 @@ API-->>FE : TradeResponse
 - Hooks与类型：见 [frontend/src/hooks/useTrade.ts:22-103](file://frontend/src/hooks/useTrade.ts#L22-L103) 与 [frontend/src/types/trade.ts:1-45](file://frontend/src/types/trade.ts#L1-L45)
 
 **章节来源**
-- [backend/app/routers/trades.py:271-566](file://backend/app/routers/trades.py#L271-L566)
+- [backend/app/routers/trades.py:271-585](file://backend/app/routers/trades.py#L271-L585)
 - [backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-L45)
 - [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-L32)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
@@ -275,6 +277,23 @@ SubConfirmedSells2 --> EndShares["得到可用份额"]
 - [backend/app/routers/trades.py:53-105](file://backend/app/routers/trades.py#L53-L105)
 - [backend/app/models/product.py:11-14](file://backend/app/models/product.py#L11-L14)
 
+### 安全验证与数据完整性保护
+**新增** 交易管理包含严格的安全验证机制，防止对已确认交易进行直接修改或删除操作，确保数据完整性与审计追踪。
+
+#### 已确认交易保护机制
+- **修改保护**：当尝试修改状态为confirmed的交易时，系统将拒绝请求并提示先取消确认
+- **删除保护**：当尝试删除状态为confirmed的交易时，系统将拒绝请求并提示先取消确认
+- **错误响应**：返回标准的HTTP 422状态码和详细的错误信息
+
+#### 安全验证实现细节
+- **验证时机**：在update_trade和delete_trade操作中进行状态检查
+- **错误类型**：INVALID_STATUS（状态验证失败）
+- **错误消息**：提供清晰的指导信息，建议用户先执行取消确认操作
+
+**章节来源**
+- [backend/app/routers/trades.py:546-553](file://backend/app/routers/trades.py#L546-L553)
+- [backend/app/routers/trades.py:573-580](file://backend/app/routers/trades.py#L573-L580)
+
 ## 依赖分析
 - 路由依赖：交易路由依赖数据库会话、当前用户与管理员权限
 - 业务依赖：交易逻辑依赖交易日历服务、产品模型、价格记录、组合与持仓快照
@@ -319,17 +338,19 @@ R --> D["依赖 dependencies.py"]
 
 ## 故障排除指南
 常见错误与处理：
-- 非交易日提交：返回“非交易日，请等待交易日再提交”
-- 组合未激活：返回“组合未激活”
-- 产品不存在：返回“Product not found”
-- 买入金额无效或超可用现金：返回“买入金额必须大于0”或“买入金额超过可用现金”
-- 卖出份额无效或超可用份额：返回“卖出份额必须大于0”或“卖出份额超过可用份额”
-- 状态不符：仅pending可确认/取消，否则返回“仅 pending 状态可确认/取消”
-- 场内交易不可取消：返回“场内交易不可取消”
-- 净值型产品缺少净值：QDII返回“T日净值尚未同步”，非QDII返回“净值尚未同步”
+- 非交易日提交：返回"非交易日，请等待交易日再提交"
+- 组合未激活：返回"组合未激活"
+- 产品不存在：返回"Product not found"
+- 买入金额无效或超可用现金：返回"买入金额必须大于0"或"买入金额超过可用现金"
+- 卖出份额无效或超可用份额：返回"卖出份额必须大于0"或"卖出份额超过可用份额"
+- 状态不符：仅pending可确认/取消，否则返回"仅 pending 状态可确认/取消"
+- 场内交易不可取消：返回"场内交易不可取消"
+- 净值型产品缺少净值：QDII返回"T日净值尚未同步"，非QDII返回"净值尚未同步"
+- **新增** 已确认交易修改失败：返回"已确认的交易不可直接修改，请先取消确认后再修改"
+- **新增** 已确认交易删除失败：返回"已确认的交易不可直接删除，请先取消确认后再删除"
 
 定位参考：
-- 错误抛出位置与消息定义见 [backend/app/routers/trades.py:298-336](file://backend/app/routers/trades.py#L298-L336)、[L364-L374]、[L428-L432]、[L516-L528]、[L458-L464]
+- 错误抛出位置与消息定义见 [backend/app/routers/trades.py:298-336](file://backend/app/routers/trades.py#L298-L336)、[L364-L374]、[L428-L432]、[L516-L528]、[L458-L464]、[L546-L553]、[L573-L580]
 - 交易日判断见 [backend/app/services/trading_calendar_service.py:110-124](file://backend/app/services/trading_calendar_service.py#L110-L124)
 
 **章节来源**
@@ -338,10 +359,16 @@ R --> D["依赖 dependencies.py"]
 - [backend/app/routers/trades.py:428-432](file://backend/app/routers/trades.py#L428-L432)
 - [backend/app/routers/trades.py:516-528](file://backend/app/routers/trades.py#L516-L528)
 - [backend/app/routers/trades.py:458-464](file://backend/app/routers/trades.py#L458-L464)
+- [backend/app/routers/trades.py:546-553](file://backend/app/routers/trades.py#L546-L553)
+- [backend/app/routers/trades.py:573-580](file://backend/app/routers/trades.py#L573-L580)
 - [backend/app/services/trading_calendar_service.py:110-124](file://backend/app/services/trading_calendar_service.py#L110-L124)
 
 ## 结论
-交易管理API提供了完整的调仓交易生命周期管理：从创建（买入/卖出）、到确认（净值型与非净值型差异化处理）、再到取消与删除。通过严格的权限控制、交易日校验、可用资金/份额计算与状态机管理，确保交易安全与一致性。前端通过标准化的Hooks与类型定义，简化了集成与调试。
+交易管理API提供了完整的调仓交易生命周期管理：从创建（买入/卖出）、到确认（净值型与非净值型差异化处理）、再到取消与删除。通过严格的权限控制、交易日校验、可用资金/份额计算与状态机管理，确保交易安全与一致性。
+
+**重要更新** 新增的安全验证机制进一步强化了数据完整性保护，防止对已确认交易进行直接修改或删除操作，确保交易历史的不可篡改性和审计追踪的完整性。管理员需要遵循"先取消确认，再进行修改或删除"的工作流程，这为复杂的金融交易管理提供了必要的安全保障。
+
+前端通过标准化的Hooks与类型定义，简化了集成与调试。
 
 ## 附录
 
@@ -374,15 +401,17 @@ R --> D["依赖 dependencies.py"]
   - 路径：/api/trades/{id}
   - 权限：管理员
   - 请求体：TradeUpdate（部分字段）
+  - 安全验证：已确认交易不可直接修改
   - 示例响应：TradeResponse
-  - 参考：[backend/app/routers/trades.py:535-551](file://backend/app/routers/trades.py#L535-L551)
+  - 参考：[backend/app/routers/trades.py:535-561](file://backend/app/routers/trades.py#L535-L561)
 
 - 删除交易
   - 方法：DELETE
   - 路径：/api/trades/{id}
   - 权限：管理员
+  - 安全验证：已确认交易不可直接删除
   - 示例响应：成功消息
-  - 参考：[backend/app/routers/trades.py:554-566](file://backend/app/routers/trades.py#L554-L566)
+  - 参考：[backend/app/routers/trades.py:563-585](file://backend/app/routers/trades.py#L563-L585)
 
 - 确认交易
   - 方法：POST
@@ -401,7 +430,7 @@ R --> D["依赖 dependencies.py"]
 
 ### 数据模型与字段说明
 - Trade模型字段：id、portfolio_code、platform_code、product_code、market、trade_type、shares、amount、price、fee、actual_amount、trade_date、confirm_date、status、notes、created_at、updated_at
-  - 参考：[backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-32)
+  - 参考：[backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-L32)
 - Trade Schema：TradeBase/TradeCreate/TradeUpdate/TradeResponse
   - 参考：[backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-L45)
 - Product模型：product_type、confirm_days、is_qdii

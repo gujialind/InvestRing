@@ -1,12 +1,8 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { investorApi } from "@/lib/api";
-import {
-  Investor,
-  InvestorCreate,
-  InvestorUpdate,
-} from "@/types/investor";
+import { investorApi, getErrorMessage } from "@/lib/api";
+import { InvestorCreate, InvestorUpdate } from "@/types/investor";
 import { useUIStore } from "@/stores/uiStore";
 
 const INVESTOR_QUERY_KEY = "investors";
@@ -45,11 +41,11 @@ export function useCreateInvestor() {
         message: "投资人已创建",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "创建失败",
-        message: error.message || "请检查输入信息",
+        message: getErrorMessage(error, "请检查输入信息"),
       });
     },
   });
@@ -71,11 +67,11 @@ export function useUpdateInvestor(code: string) {
         message: "投资人信息已更新",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "更新失败",
-        message: error.message || "请稍后重试",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
@@ -96,11 +92,11 @@ export function useRemoveInvestor() {
         message: "投资人已移除",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "移除失败",
-        message: error.message || "该投资人仍持有份额，无法移除",
+        message: getErrorMessage(error, "该投资人仍持有份额，无法移除"),
       });
     },
   });

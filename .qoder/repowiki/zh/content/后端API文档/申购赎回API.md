@@ -16,6 +16,13 @@
 - [Docs/04-后端开发.md](file://Docs/04-后端开发.md)
 </cite>
 
+## 更新摘要
+**变更内容**
+- 新增订阅路由安全验证逻辑章节，详细说明已确认订阅事件的保护机制
+- 更新权限与约束部分，增加已确认状态的修改限制
+- 新增故障排查指南中的相关错误码说明
+- 更新架构概览图，体现安全验证流程
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构与入口](#项目结构与入口)
@@ -35,9 +42,10 @@
 - 交易确认流程与净值/份额计算逻辑
 - 查询接口：申购赎回列表、份额变动事件列表、产品查询、组合查询
 - 权限控制与业务约束（交易日、可用份额/现金、状态机等）
+- **新增** 已确认订阅事件的安全保护机制
 
 ## 项目结构与入口
-- API 路由统一挂载于应用入口，其中“申购赎回”模块对应路由前缀为 /api/subscriptions，“份额变动事件”模块对应 /api/share-change-events。
+- API 路由统一挂载于应用入口，其中"申购赎回"模块对应路由前缀为 /api/subscriptions，"份额变动事件"模块对应 /api/share-change-events。
 - 权限依赖通过依赖注入实现，普通用户仅能查看自身记录，管理员可执行写操作。
 
 ```mermaid
@@ -51,13 +59,13 @@ C --> G["份额变动事件Schema<br/>share_change_event.py"]
 A --> H["权限依赖<br/>dependencies.py"]
 ```
 
-图表来源
+**图表来源**
 - [backend/app/main.py:32-48](file://backend/app/main.py#L32-L48)
 - [backend/app/routers/subscriptions.py:1-16](file://backend/app/routers/subscriptions.py#L1-L16)
 - [backend/app/routers/share_change_events.py:1-18](file://backend/app/routers/share_change_events.py#L1-L18)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 
-章节来源
+**章节来源**
 - [backend/app/main.py:32-48](file://backend/app/main.py#L32-L48)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 
@@ -77,7 +85,7 @@ A --> H["权限依赖<br/>dependencies.py"]
   - 组合查询：/api/portfolios
   - 交易确认与净值计算：/api/trades
 
-章节来源
+**章节来源**
 - [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
 - [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-L46)
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-L45)
@@ -93,6 +101,8 @@ A --> H["权限依赖<br/>dependencies.py"]
   - 份额变动事件：登记权益日 → 生成快照 → 确认事件 → 计算份额/现金变化
 - 数据一致性
   - 交易日校验、可用份额/现金实时计算、状态机约束
+- **新增** 安全验证
+  - 已确认订阅事件不可直接修改或删除，需先取消确认
 
 ```mermaid
 sequenceDiagram
@@ -114,11 +124,21 @@ participant 投资者 as "Investor模型"
 投资者-->>路由 : "存在/不存在"
 路由->>模型 : "保存为pending"
 模型-->>客户端 : "返回创建成功"
+客户端->>路由 : "PUT /api/subscriptions/{id}"
+路由->>模型 : "检查状态是否为confirmed"
+模型-->>路由 : "pending/confirmed"
+alt 状态为confirmed
+路由-->>客户端 : "返回错误：已确认事件不可直接修改"
+else 状态为pending
+路由->>模型 : "更新字段"
+模型-->>客户端 : "返回更新成功"
+end
 ```
 
-图表来源
+**图表来源**
 - [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-L199)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
+- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-L361)
 
 ## 详细组件分析
 
@@ -138,6 +158,7 @@ participant 投资者 as "Investor模型"
   - 申购：金额必须 > 0
   - 赎回：份额必须 > 0，且不超过可用份额（含pending/未生成快照的已确认赎回）
   - 状态机：仅 pending 可 confirm/cancel
+  - **新增** 安全验证：已确认（confirmed）状态的订阅事件不可直接修改或删除
 
 - 份额/金额计算
   - 申购：确认时按净值计算份额 = 申请金额 / 单位净值
@@ -174,11 +195,11 @@ AvailOK --> SavePending
 SavePending --> End(["结束"])
 ```
 
-图表来源
+**图表来源**
 - [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-L199)
 - [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-L85)
 
-章节来源
+**章节来源**
 - [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
 - [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-L199)
 - [backend/app/routers/subscriptions.py:237-320](file://backend/app/routers/subscriptions.py#L237-L320)
@@ -227,11 +248,11 @@ participant 日历 as "交易日历"
 模型-->>客户端 : "返回确认结果"
 ```
 
-图表来源
+**图表来源**
 - [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-L77)
 - [backend/app/routers/share_change_events.py:92-128](file://backend/app/routers/share_change_events.py#L92-L128)
 
-章节来源
+**章节来源**
 - [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-L46)
 - [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-L77)
 - [backend/app/routers/share_change_events.py:92-128](file://backend/app/routers/share_change_events.py#L92-L128)
@@ -253,7 +274,7 @@ participant 日历 as "交易日历"
   - GET /api/portfolios/{code}/returns：累计/年化收益
   - GET /api/portfolios/{code}/cash-flow：资金流入流出
 
-章节来源
+**章节来源**
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-L45)
 - [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-L92)
 - [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-L122)
@@ -262,6 +283,43 @@ participant 日历 as "交易日历"
 - [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-L191)
 - [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-L241)
 - [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-L275)
+
+### **新增** 已确认订阅事件的安全验证机制
+- **安全验证规则**
+  - 已确认（confirmed）状态的订阅事件不可直接修改或删除
+  - 修改已确认订阅事件时，系统会检查状态并阻止直接修改
+  - 删除已确认订阅事件时，系统会检查状态并阻止直接删除
+  - 需要先取消确认（cancel）才能进行修改或删除操作
+
+- **错误处理**
+  - 修改已确认订阅事件：返回 422 错误，错误码为 CANNOT_MODIFY_CONFIRMED
+  - 删除已确认订阅事件：返回 422 错误，错误码为 CANNOT_DELETE_CONFIRMED
+  - 错误信息提示用户需要先取消确认后再进行相应操作
+
+- **业务影响**
+  - 确保已确认的交易数据不可篡改，维护数据完整性
+  - 防止误操作导致的历史数据丢失
+  - 保持审计追踪的完整性和可追溯性
+
+```mermaid
+flowchart TD
+Start(["修改/删除请求"]) --> CheckStatus["检查订阅状态"]
+CheckStatus --> Status{"状态为confirmed？"}
+Status --> |是| BlockRequest["阻止请求"]
+Status --> |否| AllowRequest["允许请求"]
+BlockRequest --> ReturnError["返回错误：已确认事件不可直接修改/删除"]
+AllowRequest --> ProcessRequest["处理修改/删除请求"]
+ReturnError --> End(["结束"])
+ProcessRequest --> End
+```
+
+**图表来源**
+- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-L361)
+- [backend/app/routers/subscriptions.py:380-388](file://backend/app/routers/subscriptions.py#L380-L388)
+
+**章节来源**
+- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-L361)
+- [backend/app/routers/subscriptions.py:380-388](file://backend/app/routers/subscriptions.py#L380-L388)
 
 ## 依赖关系分析
 - 认证与授权
@@ -281,16 +339,17 @@ R --> T["交易日校验"]
 R --> C1["可用份额计算"]
 R --> C2["可用现金计算"]
 R --> M["模型持久化"]
+R --> S["安全验证已确认事件"]
 ```
 
-图表来源
+**图表来源**
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 - [backend/app/routers/subscriptions.py:19-23](file://backend/app/routers/subscriptions.py#L19-L23)
 - [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-L85)
 - [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-L32)
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
 
-章节来源
+**章节来源**
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 - [backend/app/routers/subscriptions.py:19-23](file://backend/app/routers/subscriptions.py#L19-L23)
 - [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-L85)
@@ -301,8 +360,7 @@ R --> M["模型持久化"]
 - 交易日历查询：每次操作均进行一次数据库查询，建议在上层缓存交易日历
 - 可用份额/现金计算：涉及多表聚合查询，建议在业务层做缓存或延迟计算
 - 批量确认：逐条校验，失败不影响其他事件，适合异步批处理
-
-[本节为通用性能讨论，无需列出具体文件来源]
+- **新增** 安全验证：状态检查为轻量级操作，对性能影响极小
 
 ## 故障排查指南
 - 常见错误码与原因
@@ -312,6 +370,8 @@ R --> M["模型持久化"]
   - 422 份额超可用：赎回份额超过可用份额
   - 422 仅 pending 可确认/取消：状态不符
   - 422 缺少持仓快照：权益登记日快照不存在
+  - 422 **新增** 已确认事件不可直接修改：CANNOT_MODIFY_CONFIRMED
+  - 422 **新增** 已确认事件不可直接删除：CANNOT_DELETE_CONFIRMED
   - 404 未找到：组合/投资人/事件/交易不存在
   - 403 权限不足：非管理员或非本人记录
 - 排查步骤
@@ -320,8 +380,9 @@ R --> M["模型持久化"]
   - 核对可用份额/现金计算逻辑
   - 确认权益登记日快照是否已生成
   - 检查状态机是否符合预期
+  - **新增** 对于已确认事件的修改/删除操作，先执行取消确认操作
 
-章节来源
+**章节来源**
 - [backend/app/routers/subscriptions.py:121-126](file://backend/app/routers/subscriptions.py#L121-L126)
 - [backend/app/routers/subscriptions.py:136-140](file://backend/app/routers/subscriptions.py#L136-L140)
 - [backend/app/routers/subscriptions.py:152-156](file://backend/app/routers/subscriptions.py#L152-L156)
@@ -331,14 +392,15 @@ R --> M["模型持久化"]
 - [backend/app/routers/share_change_events.py:56-63](file://backend/app/routers/share_change_events.py#L56-L63)
 - [backend/app/routers/share_change_events.py:116-123](file://backend/app/routers/share_change_events.py#L116-L123)
 - [backend/app/routers/share_change_events.py:101-105](file://backend/app/routers/share_change_events.py#L101-L105)
+- [backend/app/routers/subscriptions.py:357-361](file://backend/app/routers/subscriptions.py#L357-L361)
+- [backend/app/routers/subscriptions.py:384-388](file://backend/app/routers/subscriptions.py#L384-L388)
 
 ## 结论
 - 申购/赎回与份额变动事件模块均采用严格的交易日与状态机约束，确保业务合规
 - 可用份额/现金的实时计算保障了交易与赎回的准确性
 - 管理员权限用于关键操作（确认、取消、删除），普通用户仅能查看自身记录
+- **新增** 已确认订阅事件的安全验证机制有效防止了数据篡改，维护了系统的数据完整性
 - 建议在前端与网关层增加必要的缓存与限流策略，提升整体性能与稳定性
-
-[本节为总结性内容，无需列出具体文件来源]
 
 ## 附录：接口清单与示例
 
@@ -358,11 +420,13 @@ R --> M["模型持久化"]
   - 返回：取消成功消息
 - PUT /api/subscriptions/{id}
   - 请求体：amount、shares、unit_price、confirm_date、status、notes
+  - **新增** 当状态为 confirmed 时，返回错误：已确认事件不可直接修改
   - 返回：更新后的订阅
 - DELETE /api/subscriptions/{id}
+  - **新增** 当状态为 confirmed 时，返回错误：已确认事件不可直接删除
   - 返回：删除成功消息
 
-章节来源
+**章节来源**
 - [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
 - [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-L199)
 - [backend/app/routers/subscriptions.py:202-213](file://backend/app/routers/subscriptions.py#L202-L213)
@@ -390,7 +454,7 @@ R --> M["模型持久化"]
 - DELETE /api/share-change-events/{id}
   - 返回：删除成功消息
 
-章节来源
+**章节来源**
 - [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-L46)
 - [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-L77)
 - [backend/app/routers/share_change_events.py:80-89](file://backend/app/routers/share_change_events.py#L80-L89)
@@ -413,7 +477,7 @@ R --> M["模型持久化"]
   - GET /api/portfolios/{code}/returns：累计/年化收益
   - GET /api/portfolios/{code}/cash-flow：资金流入流出
 
-章节来源
+**章节来源**
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-L45)
 - [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-L92)
 - [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-L122)

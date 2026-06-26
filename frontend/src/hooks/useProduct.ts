@@ -1,12 +1,8 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { productApi } from "@/lib/api";
-import {
-  Product,
-  ProductCreate,
-  ProductUpdate,
-} from "@/types/product";
+import { productApi, getErrorMessage } from "@/lib/api";
+import { ProductCreate, ProductUpdate } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
 
 const PRODUCT_QUERY_KEY = "products";
@@ -45,11 +41,11 @@ export function useCreateProduct() {
         message: "产品已创建",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "创建失败",
-        message: error.message || "请检查输入信息",
+        message: getErrorMessage(error, "请检查输入信息"),
       });
     },
   });
@@ -71,11 +67,11 @@ export function useUpdateProduct(code: string, market?: string) {
         message: "产品信息已更新",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "更新失败",
-        message: error.message || "请稍后重试",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
@@ -96,11 +92,11 @@ export function useDeleteProduct() {
         message: "产品已删除",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "删除失败",
-        message: error.message || "该产品已被使用，无法删除",
+        message: getErrorMessage(error, "该产品已被使用，无法删除"),
       });
     },
   });

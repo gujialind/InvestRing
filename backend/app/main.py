@@ -50,3 +50,8 @@ app.include_router(snapshots.router, prefix="/api/v1", tags=["快照管理"])
 @app.get("/")
 def read_root():
     return {"message": "Welcome to InvestRing API"}
+
+@app.get("/health")
+def health_check():
+    """健康检查端点，供 Docker 和 CI/CD 使用"""
+    return {"status": "healthy"}

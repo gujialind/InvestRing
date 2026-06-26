@@ -1,7 +1,12 @@
 "use client";
 
-import PortfolioListPage from "@/app/portfolio/page";
+import MobileLayout from "@/components/mobile/MobileLayout";
+import PortfolioListContent from "@/components/shared/PortfolioListContent";
 
 export default function MobilePortfolioListPage() {
-  return <PortfolioListPage />;
+  return (
+    <MobileLayout>
+      <PortfolioListContent basePath="/m/portfolio" variant="mobile" />
+    </MobileLayout>
+  );
 }

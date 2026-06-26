@@ -1,7 +1,12 @@
 "use client";
 
-import TradesPage from "@/app/portfolio/[code]/trades/page";
+import MobileLayout from "@/components/mobile/MobileLayout";
+import TradesContent from "@/components/shared/TradesContent";
 
 export default function MobileTradesPage() {
-  return <TradesPage />;
+  return (
+    <MobileLayout>
+      <TradesContent basePath="/m/portfolio" variant="mobile" />
+    </MobileLayout>
+  );
 }

@@ -13,9 +13,10 @@ import {
 } from "@/components/ui/table";
 import { Play, Pause, RotateCcw, Loader2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { taskApi } from "@/lib/api";
+import { taskApi, getErrorMessage } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 import { formatDate } from "@/lib/utils";
+import type { ScheduledTask, TaskExecution } from "@/types/log";
 
 export default function TasksPage() {
   const queryClient = useQueryClient();
@@ -27,7 +28,7 @@ export default function TasksPage() {
     staleTime: 10 * 1000,
   });
 
-  const tasks = ((tasksData as any)?.items) as any[] || [];
+  const tasks: ScheduledTask[] = tasksData || [];
 
   const { data: executionsData, isLoading: execLoading } = useQuery({
     queryKey: ["tasks", "executions"],
@@ -35,15 +36,15 @@ export default function TasksPage() {
     staleTime: 10 * 1000,
   });
 
-  const executions = ((executionsData as any)?.items) as any[] || [];
+  const executions: TaskExecution[] = executionsData || [];
 
   const runTask = useMutation({
     mutationFn: (code: string) => taskApi.run(code),
     onSuccess: (_, code) => {
       addToast({ type: "success", title: "任务已启动", message: `任务 ${code} 已启动` });
     },
-    onError: (error: any) => {
-      addToast({ type: "error", title: "启动失败", message: error.message || "请稍后重试" });
+    onError: (error: unknown) => {
+      addToast({ type: "error", title: "启动失败", message: getErrorMessage(error, "请稍后重试") });
     },
   });
 
@@ -53,8 +54,8 @@ export default function TasksPage() {
       queryClient.invalidateQueries({ queryKey: ["tasks", "list"] });
       addToast({ type: "success", title: "启用成功", message: "任务已启用" });
     },
-    onError: (error: any) => {
-      addToast({ type: "error", title: "操作失败", message: error.message || "请稍后重试" });
+    onError: (error: unknown) => {
+      addToast({ type: "error", title: "操作失败", message: getErrorMessage(error, "请稍后重试") });
     },
   });
 
@@ -64,8 +65,8 @@ export default function TasksPage() {
       queryClient.invalidateQueries({ queryKey: ["tasks", "list"] });
       addToast({ type: "success", title: "禁用成功", message: "任务已禁用" });
     },
-    onError: (error: any) => {
-      addToast({ type: "error", title: "操作失败", message: error.message || "请稍后重试" });
+    onError: (error: unknown) => {
+      addToast({ type: "error", title: "操作失败", message: getErrorMessage(error, "请稍后重试") });
     },
   });
 
@@ -123,7 +124,7 @@ export default function TasksPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tasks?.map((task: any) => (
+                {tasks?.map((task) => (
                   <TableRow key={task.id}>
                     <TableCell className="font-medium">{task.name}</TableCell>
                     <TableCell>{task.description || "--"}</TableCell>
@@ -201,7 +202,7 @@ export default function TasksPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {executions.map((exec: any) => (
+                  {executions.map((exec) => (
                     <TableRow key={exec.id}>
                       <TableCell className="font-medium">{exec.task_code}</TableCell>
                       <TableCell>

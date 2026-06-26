@@ -1,17 +1,9 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { tradeApi, subscriptionApi } from "@/lib/api";
-import {
-  Trade,
-  TradeCreate,
-  TradeUpdate,
-} from "@/types/trade";
-import {
-  Subscription,
-  SubscriptionCreate,
-  SubscriptionUpdate,
-} from "@/types/subscription";
+import { tradeApi, subscriptionApi, getErrorMessage } from "@/lib/api";
+import { TradeCreate, TradeUpdate } from "@/types/trade";
+import { SubscriptionCreate } from "@/types/subscription";
 import { useUIStore } from "@/stores/uiStore";
 
 const TRADE_QUERY_KEY = "trades";
@@ -66,11 +58,11 @@ export function useCreateTrade() {
         message: `${data.trade_type === "buy" ? "买入" : "卖出"} 申请已提交`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "交易创建失败",
-        message: error.message || "请检查可用份额/现金是否充足",
+        message: getErrorMessage(error, "请检查可用份额/现金是否充足"),
       });
     },
   });
@@ -92,11 +84,11 @@ export function useUpdateTrade(id: number) {
         message: "交易信息已更新",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "更新失败",
-        message: error.message || "请稍后重试",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
@@ -125,11 +117,11 @@ export function useConfirmTrade() {
         message: "交易已确认",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "确认失败",
-        message: error.message || "请检查确认日期和价格",
+        message: getErrorMessage(error, "请检查确认日期和价格"),
       });
     },
   });
@@ -154,11 +146,37 @@ export function useCancelTrade() {
         message: "交易已取消",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "取消失败",
-        message: error.message || "该交易状态不允许取消",
+        message: getErrorMessage(error, "该交易状态不允许取消"),
+      });
+    },
+  });
+}
+
+// 取消确认交易 Hook
+export function useUnconfirmTrade() {
+  const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
+
+  return useMutation({
+    mutationFn: (id: number) => tradeApi.unconfirm(id),
+    onSuccess: (data, id) => {
+      queryClient.invalidateQueries({ queryKey: [TRADE_QUERY_KEY, id] });
+      queryClient.invalidateQueries({ queryKey: [TRADE_QUERY_KEY, "list"] });
+      addToast({
+        type: "success",
+        title: "取消确认成功",
+        message: "交易已取消确认，可以修改或删除",
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "取消确认失败",
+        message: getErrorMessage(error, "操作失败，请重试"),
       });
     },
   });
@@ -205,11 +223,11 @@ export function useBatchRebalance() {
         message: `已创建 ${data.created_trades.length} 笔交易`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "批量调仓失败",
-        message: error.message || "请检查可用现金和份额",
+        message: getErrorMessage(error, "请检查可用现金和份额"),
       });
     },
   });
@@ -261,11 +279,11 @@ export function useCreateSubscription() {
         message: `${data.sub_type === "subscribe" ? "申购" : "赎回"} 申请已提交`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "申请提交失败",
-        message: error.message || "请检查输入信息",
+        message: getErrorMessage(error, "请检查输入信息"),
       });
     },
   });
@@ -296,11 +314,11 @@ export function useConfirmSubscription() {
         message: `${data.sub_type === "subscribe" ? "申购" : "赎回"} 已确认`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "确认失败",
-        message: error.message || "请检查确认信息",
+        message: getErrorMessage(error, "请检查确认信息"),
       });
     },
   });
@@ -325,11 +343,37 @@ export function useCancelSubscription() {
         message: "申请已取消",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "取消失败",
-        message: error.message || "该申请状态不允许取消",
+        message: getErrorMessage(error, "该申请状态不允许取消"),
+      });
+    },
+  });
+}
+
+// 取消确认申购赎回 Hook
+export function useUnconfirmSubscription() {
+  const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
+
+  return useMutation({
+    mutationFn: (id: number) => subscriptionApi.unconfirm(id),
+    onSuccess: (data, id) => {
+      queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, id] });
+      queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, "list"] });
+      addToast({
+        type: "success",
+        title: "取消确认成功",
+        message: "申购赎回事件已取消确认，可以修改或删除",
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "取消确认失败",
+        message: getErrorMessage(error, "操作失败，请重试"),
       });
     },
   });

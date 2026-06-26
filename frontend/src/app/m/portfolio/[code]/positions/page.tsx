@@ -26,11 +26,13 @@ import {
 import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass } from "@/lib/utils";
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { positionApi, platformApi } from "@/lib/api";
+import { positionApi, platformApi, getErrorMessage } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 import { usePositionList } from "@/hooks/usePosition";
 import PositionCard from "@/components/shared/PositionCard";
 import { DatePicker } from "@/components/ui/date-picker";
+import type { Position } from "@/types/position";
+import type { Platform } from "@/types/platform";
 
 export default function MobilePositionsPage() {
   const params = useParams();
@@ -39,7 +41,7 @@ export default function MobilePositionsPage() {
   const addToast = useUIStore((state) => state.addToast);
 
   const { data: positionsData, isLoading } = usePositionList(code);
-  const positions = ((positionsData as any)?.items) || [];
+  const positions: Position[] = positionsData?.items || [];
 
   // 非净值资产更新相关状态
   const [isCashUpdateOpen, setIsCashUpdateOpen] = useState(false);
@@ -52,10 +54,10 @@ export default function MobilePositionsPage() {
     queryKey: ["platforms"],
     queryFn: () => platformApi.list({ page_size: 100 }),
   });
-  const platforms = ((platformsData as any)?.items) || [];
+  const platforms: Platform[] = platformsData?.items || [];
 
-  const totalMarketValue = positions.reduce((sum: number, p: any) => sum + (p.market_value || 0), 0);
-  const totalCost = positions.reduce((sum: number, p: any) => sum + ((p.shares || 0) * (p.cost_price || 0)), 0);
+  const totalMarketValue = positions.reduce((sum, p) => sum + (p.market_value || 0), 0);
+  const totalCost = positions.reduce((sum, p) => sum + ((p.shares || 0) * (p.cost_price || 0)), 0);
   const totalProfitLoss = totalMarketValue - totalCost;
 
   // 更新非净值资产的 mutation
@@ -79,19 +81,11 @@ export default function MobilePositionsPage() {
       setSelectedDate(undefined);
       queryClient.invalidateQueries({ queryKey: ["positions", code] });
     },
-    onError: (error: any) => {
-      // 尝试从不同位置提取错误信息
-      const errorMsg = 
-        error.response?.data?.detail?.message || 
-        error.response?.data?.detail ||
-        error.response?.data?.message ||
-        error.message || 
-        "更新失败，请检查网络连接或联系管理员";
-      
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "更新失败",
-        message: errorMsg,
+        message: getErrorMessage(error, "更新失败，请检查网络连接或联系管理员"),
       });
     },
   });
@@ -200,7 +194,7 @@ export default function MobilePositionsPage() {
               </CardContent>
             </Card>
           ) : (
-            positions.map((position: any) => (
+            positions.map((position) => (
               <PositionCard
                 key={position.id}
                 productCode={position.product_code}
@@ -245,7 +239,7 @@ export default function MobilePositionsPage() {
                       <SelectValue placeholder="请选择平台" />
                     </SelectTrigger>
                     <SelectContent>
-                      {platforms.map((platform: any) => (
+                      {platforms.map((platform) => (
                         <SelectItem key={platform.code} value={platform.code}>
                           {platform.name} ({platform.code})
                         </SelectItem>

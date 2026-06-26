@@ -4,7 +4,7 @@ import { useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/stores/authStore";
-import { authApi } from "@/lib/api";
+import { authApi, getErrorMessage } from "@/lib/api";
 import { LoginRequest, ChangePasswordRequest } from "@/types/auth";
 import { useUIStore } from "@/stores/uiStore";
 
@@ -25,11 +25,11 @@ export function useLogin() {
       });
       router.push("/dashboard");
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "登录失败",
-        message: error.message || "用户名或密码错误",
+        message: getErrorMessage(error, "用户名或密码错误"),
       });
     },
   });
@@ -83,11 +83,11 @@ export function useChangePassword() {
         message: "请使用新密码重新登录",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "密码修改失败",
-        message: error.message || "请检查原密码是否正确",
+        message: getErrorMessage(error, "请检查原密码是否正确"),
       });
     },
   });

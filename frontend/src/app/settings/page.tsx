@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Save, Calendar, Loader2, RefreshCw, CheckCircle, XCircle } from "lucide-react";
-import { systemApi, authApi } from "@/lib/api";
+import { systemApi, getErrorMessage } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 import { useChangePassword } from "@/hooks/useAuth";
 
@@ -75,15 +75,15 @@ export default function SettingsPage() {
         message: `已新增 ${data.synced_count} 条交易日历记录`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       setSyncResult({
         success: false,
-        message: error.message || "同步失败",
+        message: getErrorMessage(error, "同步失败"),
       });
       addToast({
         type: "error",
         title: "同步失败",
-        message: error.message || "请检查 Tushare Token 配置",
+        message: getErrorMessage(error, "请检查 Tushare Token 配置"),
       });
     },
   });
@@ -98,11 +98,11 @@ export default function SettingsPage() {
         message: "数据源配置已保存",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "保存失败",
-        message: error.message || "请稍后重试",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
