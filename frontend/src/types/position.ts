@@ -2,6 +2,7 @@ export interface Position {
   id: number;
   portfolio_code: string;
   product_code: string;
+  product_name?: string;
   market?: string;
   platform_code?: string;
   shares?: number;
@@ -11,6 +12,8 @@ export interface Position {
   market_value?: number;
   amount?: number;
   frozen_amount?: number;
+  profit_loss?: number;
+  profit_loss_percent?: number;
   snapshot_date: string;
   created_at?: string;
 }

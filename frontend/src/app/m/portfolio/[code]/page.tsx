@@ -6,12 +6,17 @@ import MobileLayout from "@/components/mobile/MobileLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { formatCurrency, formatReturnRate, formatNumber, getReturnColorClass } from "@/lib/utils";
-import { TrendingUp, Users, Wallet, ArrowLeft, Loader2, PowerOff, Power, Trash2, Plus, ArrowRightLeft } from "lucide-react";
+import { ArrowLeft, Wallet, Plus, ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
 import { usePortfolio, useLatestSnapshot, useClosePortfolio, useActivatePortfolio, useDeletePortfolio } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import NavCurveSimple from "@/components/charts/NavCurveSimple";
+import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
+import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
+import ClosePortfolioDialog from "@/components/shared/dialogs/ClosePortfolioDialog";
+import DeletePortfolioDialog from "@/components/shared/dialogs/DeletePortfolioDialog";
+import LoadingState from "@/components/shared/LoadingState";
+import EmptyState from "@/components/shared/EmptyState";
 
 export default function MobilePortfolioDetailPage() {
   const params = useParams();
@@ -33,9 +38,7 @@ export default function MobilePortfolioDetailPage() {
   if (isLoading) {
     return (
       <MobileLayout>
-        <div className="flex items-center justify-center h-[60vh]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+        <LoadingState />
       </MobileLayout>
     );
   }
@@ -43,15 +46,17 @@ export default function MobilePortfolioDetailPage() {
   if (!portfolio) {
     return (
       <MobileLayout>
-        <div className="text-center py-12 px-4">
-          <p className="text-muted-foreground">组合不存在</p>
-          <Link href="/m/portfolio">
-            <Button variant="outline" className="mt-4">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              返回列表
-            </Button>
-          </Link>
-        </div>
+        <EmptyState
+          message="组合不存在"
+          action={
+            <Link href="/m/portfolio">
+              <Button variant="outline">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                返回列表
+              </Button>
+            </Link>
+          }
+        />
       </MobileLayout>
     );
   }
@@ -61,8 +66,6 @@ export default function MobilePortfolioDetailPage() {
   const unitPrice = snapshot?.unit_price || 0;
 
   const isDraft = portfolio.status === "draft";
-  const isActive = portfolio.status === "active";
-  const isClosed = portfolio.status === "closed";
 
   const handleClose = () => {
     closePortfolio.mutate(code, {
@@ -71,9 +74,7 @@ export default function MobilePortfolioDetailPage() {
   };
 
   const handleActivate = () => {
-    if (confirm("确定要重新激活该组合吗？")) {
-      activatePortfolio.mutate(code);
-    }
+    activatePortfolio.mutate(code);
   };
 
   const handleDelete = () => {
@@ -112,93 +113,29 @@ export default function MobilePortfolioDetailPage() {
 
         {/* Stats Cards - Simplified for mobile */}
         {!isDraft && (
-          <div className="grid grid-cols-2 gap-3">
-            <Card>
-              <CardContent className="p-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <Wallet className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">总资产</span>
-                </div>
-                <div className="text-lg font-bold">{formatCurrency(totalValue)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">净值</span>
-                </div>
-                <div className="text-lg font-bold">{formatNumber(unitPrice, 4)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <TrendingUp className="h-4 w-4 text-red-500" />
-                  <span className="text-xs text-muted-foreground">累计收益</span>
-                </div>
-                <div className={`text-lg font-bold ${getReturnColorClass(portfolio.cumulative_return || 0)}`}>
-                  {formatReturnRate(portfolio.cumulative_return || 0)}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">总份额</span>
-                </div>
-                <div className="text-lg font-bold">
-                  {formatNumber(totalShares, 2)}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          <PortfolioStatsCards
+            totalValue={totalValue}
+            unitPrice={unitPrice}
+            totalShares={totalShares}
+            cumulativeReturn={portfolio.cumulative_return || 0}
+            variant="mobile"
+          />
         )}
 
         {/* Action Buttons */}
         {isAdmin && (
-          <div className="grid grid-cols-2 gap-2">
-            {isDraft && (
-              <>
-                <Link href={`/m/portfolio/${code}/subscriptions`}>
-                  <Button className="w-full">
-                    <Plus className="mr-2 h-4 w-4" />
-                    首次申购
-                  </Button>
-                </Link>
-                <Button variant="outline" onClick={() => setShowDeleteDialog(true)} disabled={deletePortfolio.isPending}>
-                  <Trash2 className="mr-2 h-4 w-4 text-red-500" />
-                  删除
-                </Button>
-              </>
-            )}
-            {isActive && (
-              <>
-                <Link href={`/m/portfolio/${code}/subscriptions`}>
-                  <Button className="w-full">
-                    <Plus className="mr-2 h-4 w-4" />
-                    申购赎回
-                  </Button>
-                </Link>
-                <Link href={`/m/portfolio/${code}/trades`}>
-                  <Button variant="outline" className="w-full">
-                    <ArrowRightLeft className="mr-2 h-4 w-4" />
-                    调仓
-                  </Button>
-                </Link>
-              </>
-            )}
-            {isClosed && (
-              <Button variant="outline" onClick={handleActivate} disabled={activatePortfolio.isPending} className="col-span-2">
-                <Power className="mr-2 h-4 w-4 text-green-500" />
-                重新激活
-              </Button>
-            )}
-          </div>
+          <PortfolioActionButtons
+            portfolioCode={code}
+            status={portfolio.status as "draft" | "active" | "closed"}
+            basePath="/m/portfolio"
+            variant="mobile"
+            onCloseClick={() => setShowCloseDialog(true)}
+            onActivateClick={handleActivate}
+            onDeleteClick={() => setShowDeleteDialog(true)}
+            isClosePending={closePortfolio.isPending}
+            isActivatePending={activatePortfolio.isPending}
+            isDeletePending={deletePortfolio.isPending}
+          />
         )}
 
         {/* NAV Chart - Simplified for mobile */}
@@ -243,6 +180,20 @@ export default function MobilePortfolioDetailPage() {
           </Card>
         )}
       </div>
+
+      <ClosePortfolioDialog
+        open={showCloseDialog}
+        onOpenChange={setShowCloseDialog}
+        onConfirm={handleClose}
+        isPending={closePortfolio.isPending}
+        positions={[]}
+      />
+      <DeletePortfolioDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        onConfirm={handleDelete}
+        isPending={deletePortfolio.isPending}
+      />
     </MobileLayout>
   );
 }

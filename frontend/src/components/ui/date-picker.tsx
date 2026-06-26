@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { format } from "date-fns"
-import { CalendarIcon } from "lucide-react"
+import { CalendarIcon, X } from "lucide-react"
 import { zhCN } from "date-fns/locale"
 
 import { cn } from "@/lib/utils"
@@ -33,37 +33,51 @@ export function DatePicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          className={cn(
-            "w-full justify-start text-left font-normal",
-            !date && "text-muted-foreground",
-            className
-          )}
-          disabled={disabled}
-        >
-          <CalendarIcon className="mr-2 h-4 w-4" />
-          {date ? format(date, "yyyy-MM-dd") : placeholder}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent 
-        className="w-auto p-0" 
-        onPointerDownOutside={(e) => {
-          // 防止点击下拉框时关闭 Popover
-          const target = e.target as HTMLElement
-          if (target.closest('[role="combobox"]')) {
-            e.preventDefault()
-          }
-        }}
+      <div className="relative">
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            className={cn(
+              "w-full justify-start text-left font-normal pr-9",
+              !date && "text-muted-foreground",
+              className
+            )}
+          >
+            <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+            {date ? format(date, "yyyy-MM-dd") : placeholder}
+          </Button>
+        </PopoverTrigger>
+        {date && !disabled ? (
+          <button
+            type="button"
+            aria-label="清除日期"
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelect?.(undefined)
+            }}
+            className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+      <PopoverContent
+        align="start"
+        className="w-auto p-0"
+        onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <Calendar
           mode="single"
           selected={date}
           onSelect={(newDate) => {
             onSelect?.(newDate)
-            setOpen(false)
+            if (newDate) {
+              setOpen(false)
+            }
           }}
+          autoFocus
           locale={zhCN}
         />
       </PopoverContent>

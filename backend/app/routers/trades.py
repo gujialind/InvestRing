@@ -532,6 +532,27 @@ def cancel_trade(
     return {"message": "Trade cancelled successfully"}
 
 
+@router.post("/{id}/unconfirm")
+def unconfirm_trade(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_admin),
+):
+    trade = db.query(Trade).filter(Trade.id == id).first()
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    if trade.status != "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_STATUS", "message": "仅 confirmed 状态可取消确认"},
+        )
+    
+    trade.status = "pending"
+    trade.confirm_date = None
+    db.commit()
+    return {"message": "Trade unconfirmed successfully"}
+
+
 @router.put("/{id}", response_model=TradeResponse)
 def update_trade(
     id: int,

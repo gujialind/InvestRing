@@ -37,11 +37,12 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
-import { shareChangeEventApi, ShareChangeEvent, ShareChangeEventCreate } from "@/lib/api";
+import { shareChangeEventApi, ShareChangeEvent, ShareChangeEventCreate, getErrorMessage } from "@/lib/api";
+import { EventType } from "@/types/common";
 import { useUIStore } from "@/stores/uiStore";
 import { useQuery } from "@tanstack/react-query";
 
-const EVENT_TYPE_LABELS: Record<string, string> = {
+const EVENT_TYPE_LABELS: Record<EventType, string> = {
   cash_dividend: "现金分红",
   reinvest_dividend: "分红再投资",
   share_split: "份额拆分",
@@ -84,7 +85,7 @@ export default function ShareChangeEventsPage() {
     queryFn: () => shareChangeEventApi.list({ portfolio_code: code, page_size: 100 }),
   });
 
-  const events = (eventsData as any)?.items as ShareChangeEvent[] || [];
+  const events = eventsData?.items || [];
 
   // 创建事件
   const createEvent = useMutation({
@@ -99,11 +100,11 @@ export default function ShareChangeEventsPage() {
       resetForm();
       queryClient.invalidateQueries({ queryKey: ["shareChangeEvents", code] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "创建失败",
-        message: error.message || "请检查输入数据后重试",
+        message: getErrorMessage(error, "请检查输入数据后重试"),
       });
     },
   });
@@ -119,11 +120,11 @@ export default function ShareChangeEventsPage() {
       });
       queryClient.invalidateQueries({ queryKey: ["shareChangeEvents", code] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "确认失败",
-        message: error.message || "请稍后重试",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
@@ -139,11 +140,11 @@ export default function ShareChangeEventsPage() {
       });
       queryClient.invalidateQueries({ queryKey: ["shareChangeEvents", code] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "取消失败",
-        message: error.message || "请稍后重试",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
@@ -195,7 +196,7 @@ export default function ShareChangeEventsPage() {
               <p className="text-muted-foreground">组合代码: {code}</p>
             </div>
           </div>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen} modal={false}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -216,7 +217,7 @@ export default function ShareChangeEventsPage() {
                       <Label htmlFor="event_type">事件类型</Label>
                       <Select
                         value={formData.event_type}
-                        onValueChange={(value) => setFormData({ ...formData, event_type: value })}
+                        onValueChange={(value) => setFormData({ ...formData, event_type: value as EventType })}
                       >
                         <SelectTrigger>
                           <SelectValue />

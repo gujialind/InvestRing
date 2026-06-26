@@ -1,0 +1,352 @@
+# ============================================================================
+# InvestRing CD 持续部署流水线
+# ============================================================================
+# 触发条件：CI 通过后，main/develop 分支合并时自动触发
+# 部署策略：Docker 镜像构建 → 推送到 GHCR → SSH 部署到服务器
+# 多环境支持：main → 生产环境 | develop → 测试环境
+# ============================================================================
+
+name: Deploy
+
+on:
+  # CI 通过后手动触发（确保 CI 先通过）
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main, develop]
+
+  # 也支持手动触发部署（用于紧急修复或回滚）
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "部署目标环境"
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+      version:
+        description: "部署版本号（留空则使用最新 commit）"
+        required: false
+        type: string
+
+# 并发控制：确保同一时间只有一个部署在运行
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false  # 部署不可取消，必须等待完成
+
+env:
+  # GitHub Container Registry 镜像地址
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+
+jobs:
+  # ==========================================================================
+  # 环境判断：根据分支确定部署目标
+  # ==========================================================================
+  setup:
+    name: "确定部署环境"
+    runs-on: ubuntu-latest
+    # 仅在 CI 成功或手动触发时运行
+    if: >
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      server_host: ${{ steps.env.outputs.server_host }}
+      deploy_path: ${{ steps.env.outputs.deploy_path }}
+    steps:
+      - name: 判断目标环境
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            ENV="production"
+          else
+            ENV="staging"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+          # ============================================================
+          # 根据环境设置服务器地址和部署路径
+          # 注意：请在 GitHub Secrets 中配置对应的服务器信息
+          # ============================================================
+          if [ "$ENV" == "production" ]; then
+            echo "server_host=${{ secrets.PROD_SERVER_HOST }}" >> $GITHUB_OUTPUT
+            echo "deploy_path=/opt/investring" >> $GITHUB_OUTPUT
+          else
+            echo "server_host=${{ secrets.STAGING_SERVER_HOST }}" >> $GITHUB_OUTPUT
+            echo "deploy_path=/opt/investring-staging" >> $GITHUB_OUTPUT
+          fi
+
+          echo "📍 部署目标: $ENV"
+
+  # ==========================================================================
+  # 构建 Docker 镜像并推送至 GHCR
+  # ==========================================================================
+  build-and-push:
+    name: "构建镜像 & 推送"
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write  # 需要写入 GHCR 的权限
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 提取镜像元数据（标签、标签等）
+      - name: Extract metadata for Backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            # main 分支打 latest 标签
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            # develop 分支打 staging 标签
+            type=raw,value=staging,enable=${{ github.ref == 'refs/heads/develop' }}
+            # 所有分支打 commit SHA 标签（用于回滚）
+            type=sha,prefix=
+
+      - name: Extract metadata for Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=staging,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=sha,prefix=
+
+      # 构建并推送后端镜像
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 构建并推送前端镜像
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==========================================================================
+  # 部署到服务器（通过 SSH）
+  # ==========================================================================
+  deploy:
+    name: "部署到 ${{ needs.setup.outputs.environment }}"
+    needs: [setup, build-and-push]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.setup.outputs.environment }}
+      url: ${{ needs.setup.outputs.environment == 'production' && secrets.PROD_URL || secrets.STAGING_URL }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 获取短 commit SHA 用于镜像标签
+      - name: Get commit SHA
+        id: sha
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      # 在服务器上创建部署目录结构
+      - name: Prepare server directories
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ needs.setup.outputs.server_host }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            mkdir -p ${{ needs.setup.outputs.deploy_path }}/nginx
+
+      # 传输部署配置文件到服务器（docker-compose.yml + nginx.conf）
+      - name: Copy deploy files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ needs.setup.outputs.server_host }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "docker-compose.yml,nginx/nginx.conf"
+          target: "${{ needs.setup.outputs.deploy_path }}"
+          strip_components: 0
+
+      # 通过 SSH 部署到目标服务器
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ needs.setup.outputs.server_host }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            DEPLOY_PATH="${{ needs.setup.outputs.deploy_path }}"
+            COMMIT_SHA="${{ steps.sha.outputs.short_sha }}"
+            ENV="${{ needs.setup.outputs.environment }}"
+
+            echo "============================================"
+            echo "  InvestRing 部署 - $ENV"
+            echo "  版本: $COMMIT_SHA"
+            echo "  路径: $DEPLOY_PATH"
+            echo "============================================"
+
+            # 1. 确保部署目录存在
+            mkdir -p $DEPLOY_PATH
+            cd $DEPLOY_PATH
+
+            # 2. 登录 GHCR（拉取镜像需要）
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # 3. 拉取最新镜像
+            docker pull ${{ env.BACKEND_IMAGE }}:${COMMIT_SHA}
+            docker pull ${{ env.FRONTEND_IMAGE }}:${COMMIT_SHA}
+
+            # 4. 备份当前 docker-compose 和 .env（用于回滚）
+            if [ -f docker-compose.yml ]; then
+              cp docker-compose.yml docker-compose.yml.bak
+            fi
+            if [ -f .env ]; then
+              cp .env .env.bak
+            fi
+
+            # 5. 生成 .env 文件（从 Secrets 注入，注意不能有前导空格）
+            echo "DB_HOST=${{ secrets.DB_HOST }}" > .env
+            echo "DB_PORT=${{ secrets.DB_PORT }}" >> .env
+            echo "DB_USER=${{ secrets.DB_USER }}" >> .env
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
+            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
+            echo "TUSHARE_TOKEN=${{ secrets.TUSHARE_TOKEN }}" >> .env
+            echo "DEBUG=false" >> .env
+
+            # 6. 更新 docker-compose.yml 中的镜像版本
+            sed -i "s|ghcr.io/.*/backend:.*|${{ env.BACKEND_IMAGE }}:${COMMIT_SHA}|g" docker-compose.yml
+            sed -i "s|ghcr.io/.*/frontend:.*|${{ env.FRONTEND_IMAGE }}:${COMMIT_SHA}|g" docker-compose.yml
+
+            # 7. 启动新容器（先停旧再启新，减少停机时间）
+            docker compose down --timeout 30
+            docker compose up -d --remove-orphans
+
+            # 8. 执行数据库迁移（在容器内运行）
+            echo "执行 Alembic 数据库迁移..."
+            docker compose exec -T backend alembic upgrade head || {
+              echo "❌ 数据库迁移失败，执行回滚..."
+              docker compose down
+              # 恢复备份
+              if [ -f docker-compose.yml.bak ]; then
+                cp docker-compose.yml.bak docker-compose.yml
+              fi
+              if [ -f .env.bak ]; then
+                cp .env.bak .env
+              fi
+              docker compose up -d
+              exit 1
+            }
+
+            # 9. 健康检查（等待后端就绪）
+            echo "执行健康检查..."
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "✅ 后端服务健康检查通过"
+                break
+              fi
+              if [ $i -eq 30 ]; then
+                echo "❌ 健康检查超时，执行回滚..."
+                docker compose down
+                if [ -f docker-compose.yml.bak ]; then
+                  cp docker-compose.yml.bak docker-compose.yml
+                fi
+                docker compose up -d
+                exit 1
+              fi
+              sleep 2
+            done
+
+            # 10. 清理旧镜像（释放磁盘空间）
+            docker image prune -f
+
+            echo "============================================"
+            echo "  ✅ 部署完成: $ENV ($COMMIT_SHA)"
+            echo "============================================"
+
+      # 部署成功通知（可选，接入企业微信/钉钉/飞书等）
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "✅ ${{ needs.setup.outputs.environment }} 部署成功"
+          # 如需接入通知，可在此添加 webhook 调用
+          # curl -X POST "${{ secrets.NOTIFY_WEBHOOK }}" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{"msg": "InvestRing 部署成功: ${{ needs.setup.outputs.environment }}"}'
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "❌ ${{ needs.setup.outputs.environment }} 部署失败"
+          # curl -X POST "${{ secrets.NOTIFY_WEBHOOK }}" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{"msg": "InvestRing 部署失败: ${{ needs.setup.outputs.environment }}"}'
+
+  # ==========================================================================
+  # 回滚操作（手动触发）
+  # ==========================================================================
+  rollback:
+    name: "回滚到指定版本"
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
+    needs: setup
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.setup.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Rollback via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ needs.setup.outputs.server_host }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            DEPLOY_PATH="${{ needs.setup.outputs.deploy_path }}"
+            TARGET_VERSION="${{ github.event.inputs.version }}"
+            cd $DEPLOY_PATH
+
+            echo "🔄 回滚到版本: $TARGET_VERSION"
+
+            # 更新 docker-compose 中的镜像版本
+            sed -i "s|ghcr.io/.*/backend:.*|${{ env.BACKEND_IMAGE }}:${TARGET_VERSION}|g" docker-compose.yml
+            sed -i "s|ghcr.io/.*/frontend:.*|${{ env.FRONTEND_IMAGE }}:${TARGET_VERSION}|g" docker-compose.yml
+
+            # 拉取目标版本镜像并重启
+            docker compose pull
+            docker compose down --timeout 30
+            docker compose up -d
+
+            # 回滚数据库（如果有 down 迁移）
+            docker compose exec -T backend alembic downgrade -1 || echo "⚠️ 数据库回滚跳过"
+
+            echo "✅ 回滚完成: $TARGET_VERSION"

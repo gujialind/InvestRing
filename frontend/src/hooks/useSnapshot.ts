@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { snapshotApi } from "@/lib/api";
+import { snapshotApi, getErrorMessage } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 
 const SNAPSHOT_QUERY_KEY = "snapshots";
@@ -30,11 +30,11 @@ export function useGenerateSnapshot() {
         message: `${data.portfolio_code} ${data.snapshot_date} 净值: ${data.unit_price?.toFixed(4)}`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "快照生成失败",
-        message: error.response?.data?.detail?.message || error.message || "请检查依赖数据是否完整",
+        message: getErrorMessage(error, "请检查依赖数据是否完整"),
       });
     },
   });
@@ -78,11 +78,11 @@ export function useRecalculateSnapshots() {
         });
       }
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "快照重算失败",
-        message: error.response?.data?.detail?.message || error.message,
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });
@@ -112,11 +112,11 @@ export function useDeleteSnapshot() {
         message: data.message,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "删除失败",
-        message: error.response?.data?.detail?.message || error.message,
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });

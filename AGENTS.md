@@ -1,8 +1,8 @@
 # InvestRing 模块开发指南
 
-> 版本：v3.0
-> 更新日期：2026-04-28
-> 用途：为 AI 编程助手提供核心业务规则、约束边界与模块级开发规范的快速参考。详细技术文档请参阅 docs/ 目录。
+> 版本：v3.1
+> 更新日期：2026-06-26
+> 用途：为 AI 编程助手提供核心业务规则、约束边界与模块级开发规范的快速参考。前端架构详见 §2.3，详细技术文档参阅 `Docs/` 目录（见 §5.1）。
 
 ---
 
@@ -136,16 +136,21 @@
 
 ### 2.3 前端架构要点
 
-**技术栈**：Next.js 14+ (App Router) + shadcn/ui + TailwindCSS v4 + Zustand + @tanstack/react-query v5
+**技术栈**：Next.js 15 (App Router) + React 19 + shadcn/ui + TailwindCSS v4 (CSS-first 配置) + Zustand v5 + @tanstack/react-query v5 + TypeScript 5.6
 
 **双端独立路由**：
 - 移动端：`/m/` 前缀（如 `/m/dashboard`, `/m/portfolio/PORT001`）
 - PC端：根路径（如 `/dashboard`, `/portfolio/PORT001`）
 - Middleware 根据 User-Agent 自动重定向
 
-**组件复用策略**：
-- 完全共享：数据层(hooks/)、状态管理(stores/)、UI原子组件(components/ui/)
-- 独立实现：布局组件(mobile/ vs desktop/)、页面级组件(app/m/ vs app/)
+**组件复用策略**（三层层级）：
+- 完全共享：数据层(`hooks/`)、状态管理(`stores/`)、UI 原子组件(`components/ui/`)、类型定义(`types/`)
+- 共享业务组件（`components/shared/`）：双端共用的页面级业务逻辑，通过 `variant: "desktop" | "mobile"` + `basePath` prop 适配两端布局与链接前缀。含 `LoadingState`/`EmptyState`/`StatCard` 等基础件，`PortfolioListContent`/`TradesContent`/`SubscriptionsContent` 等整页内容组件，`PortfolioStatsCards`/`PortfolioActionButtons`/`DashboardStatsCards` 等复合组件，以及 `dialogs/` 下的 `ClosePortfolioDialog`/`DeletePortfolioDialog`
+- 独立实现：布局组件(`components/mobile/` vs `components/desktop/`、`components/layout/`)、各端页面入口(`app/m/` vs `app/`，仅负责套 Layout + 渲染共享内容组件)
+
+**API 层**：`lib/api/` 按业务域拆分为 15 个模块（`auth`/`investor`/`portfolio`/`position`/`subscription`/`trade`/`product`/`platform`/`system`/`snapshot`/`share-change-event`/`log`/`task`/`notification` + 共享 `client`），通过 barrel `index.ts` 统一导出，保持 `@/lib/api` 导入路径兼容。`client.ts` 提供 `ApiException`/`handleApiError`/`getErrorMessage` 统一错误处理。
+
+**质量保障**：ESLint v9 flat config（`eslint.config.mjs`），`npm run lint` 即 `eslint .`；构建期间强制 lint + tsc 类型检查，0 error 才可通过 `next build`。
 
 ---
 
@@ -254,11 +259,13 @@
 
 | 文档路径 | 内容 |
 |----------|------|
-| `docs/02-数据库设计.md` | 21 张表完整结构、索引定义、外键约束、MySQL 连接池配置 |
-| `docs/03-业务流程设计.md` | 详细业务流程图、状态机、每日计算流程 |
-| `docs/04-后端开发.md` | 89 个 API 接口完整规范、枚举值定义、错误码、分页规范 |
-| `docs/05-前端开发.md` | 前端架构、组件策略、页面设计、路由规则 |
-| `docs/开发重点规则清单.md` | 14 个开发阶段、核心规则总结 |
+| `AGENTS.md` §2.3 | 前端架构、技术栈、组件复用策略、API 层、质量保障 |
+| `Docs/00-开发总览.md` | 开发阶段、核心规则总结 |
+| `Docs/02-数据库设计.md` | 21 张表完整结构、索引定义、外键约束、MySQL 连接池配置 |
+| `Docs/03-业务流程设计.md` | 详细业务流程图、状态机、每日计算流程 |
+| `Docs/04-后端开发.md` | 89 个 API 接口完整规范、枚举值定义、错误码、分页规范 |
+| `Docs/05-前端开发.md` | 前端架构、组件策略、页面设计、路由规则 |
+| `Docs/07-日志系统设计.md` | 日志/任务系统设计 |
 
 ### 5.2 核心枚举值
 

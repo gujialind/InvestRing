@@ -7,21 +7,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { formatCurrency, formatReturnRate, formatNumber, getReturnColorClass } from "@/lib/utils";
-import { TrendingUp, Users, Wallet, ArrowLeft, Loader2, PowerOff, Power, Trash2, Plus, ArrowRightLeft, History, RefreshCw } from "lucide-react";
+import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass } from "@/lib/utils";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { usePortfolio, useLatestSnapshot, usePortfolioInvestors, useClosePortfolio, useActivatePortfolio, useDeletePortfolio } from "@/hooks/usePortfolio";
-import { usePositionList } from "@/hooks/usePortfolio";
+import {
+  usePortfolio,
+  useLatestSnapshot,
+  usePortfolioInvestors,
+  usePositionList,
+  useClosePortfolio,
+  useActivatePortfolio,
+  useDeletePortfolio,
+} from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import NavCurve from "@/components/charts/NavCurve";
+import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
+import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
+import ClosePortfolioDialog from "@/components/shared/dialogs/ClosePortfolioDialog";
+import DeletePortfolioDialog from "@/components/shared/dialogs/DeletePortfolioDialog";
+import LoadingState from "@/components/shared/LoadingState";
+import EmptyState from "@/components/shared/EmptyState";
 
 export default function PortfolioDetailPage() {
   const params = useParams();
@@ -47,9 +52,7 @@ export default function PortfolioDetailPage() {
   if (isLoading) {
     return (
       <MainLayout>
-        <div className="flex items-center justify-center h-[60vh]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+        <LoadingState />
       </MainLayout>
     );
   }
@@ -57,15 +60,17 @@ export default function PortfolioDetailPage() {
   if (!portfolio) {
     return (
       <MainLayout>
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">组合不存在</p>
-          <Link href="/portfolio">
-            <Button variant="outline" className="mt-4">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              返回列表
-            </Button>
-          </Link>
-        </div>
+        <EmptyState
+          message="组合不存在"
+          action={
+            <Link href="/portfolio">
+              <Button variant="outline">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                返回列表
+              </Button>
+            </Link>
+          }
+        />
       </MainLayout>
     );
   }
@@ -75,8 +80,6 @@ export default function PortfolioDetailPage() {
   const unitPrice = snapshot?.unit_price || 0;
 
   const isDraft = portfolio.status === "draft";
-  const isActive = portfolio.status === "active";
-  const isClosed = portfolio.status === "closed";
 
   const handleClose = () => {
     closePortfolio.mutate(code, {
@@ -85,9 +88,7 @@ export default function PortfolioDetailPage() {
   };
 
   const handleActivate = () => {
-    if (confirm("确定要重新激活该组合吗？")) {
-      activatePortfolio.mutate(code);
-    }
+    activatePortfolio.mutate(code);
   };
 
   const handleDelete = () => {
@@ -115,54 +116,18 @@ export default function PortfolioDetailPage() {
             </div>
           </div>
           {isAdmin && (
-            <div className="flex gap-2">
-              {isDraft && (
-                <>
-                  <Link href={`/portfolio/${code}/subscriptions`}>
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      首次申购激活
-                    </Button>
-                  </Link>
-                  <Button variant="outline" onClick={() => setShowDeleteDialog(true)} disabled={deletePortfolio.isPending}>
-                    <Trash2 className="mr-2 h-4 w-4 text-red-500" />
-                    删除组合
-                  </Button>
-                </>
-              )}
-              {isActive && (
-                <>
-                  <Link href={`/portfolio/${code}/subscriptions`}>
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      申购赎回
-                    </Button>
-                  </Link>
-                  <Link href={`/portfolio/${code}/trades`}>
-                    <Button variant="outline">
-                      <ArrowRightLeft className="mr-2 h-4 w-4" />
-                      调仓交易
-                    </Button>
-                  </Link>
-                  <Link href={`/portfolio/${code}/share-change-events`}>
-                    <Button variant="outline">
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      份额变动
-                    </Button>
-                  </Link>
-                  <Button variant="outline" onClick={() => setShowCloseDialog(true)} disabled={closePortfolio.isPending}>
-                    <PowerOff className="mr-2 h-4 w-4 text-red-500" />
-                    关闭组合
-                  </Button>
-                </>
-              )}
-              {isClosed && (
-                <Button variant="outline" onClick={handleActivate} disabled={activatePortfolio.isPending}>
-                  <Power className="mr-2 h-4 w-4 text-green-500" />
-                  重新激活
-                </Button>
-              )}
-            </div>
+            <PortfolioActionButtons
+              portfolioCode={code}
+              status={portfolio.status as "draft" | "active" | "closed"}
+              basePath="/portfolio"
+              variant="desktop"
+              onCloseClick={() => setShowCloseDialog(true)}
+              onActivateClick={handleActivate}
+              onDeleteClick={() => setShowDeleteDialog(true)}
+              isClosePending={closePortfolio.isPending}
+              isActivatePending={activatePortfolio.isPending}
+              isDeletePending={deletePortfolio.isPending}
+            />
           )}
         </div>
 
@@ -177,51 +142,13 @@ export default function PortfolioDetailPage() {
         {!isDraft && (
           <div className="space-y-4">
             {/* Stats Cards */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">总资产</CardTitle>
-                  <Wallet className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{formatCurrency(totalValue)}</div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">净值</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{formatNumber(unitPrice, 4)}</div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">收益率</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-red-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className={`text-2xl font-bold ${getReturnColorClass(portfolio.cumulative_return || 0)}`}>
-                    {formatReturnRate(portfolio.cumulative_return || 0)}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">总份额</CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {formatNumber(totalShares, 2)}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <PortfolioStatsCards
+              totalValue={totalValue}
+              unitPrice={unitPrice}
+              totalShares={totalShares}
+              cumulativeReturn={portfolio.cumulative_return || 0}
+              variant="desktop"
+            />
 
             {/* Return Type Switcher */}
             <Card>
@@ -377,7 +304,7 @@ export default function PortfolioDetailPage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {investors.map((investor: any) => (
+                    {investors.map((investor) => (
                       <div key={investor.investor_code} className="flex items-center justify-between p-4 border rounded-lg">
                         <div>
                           <p className="font-medium">{investor.name}</p>
@@ -423,68 +350,21 @@ export default function PortfolioDetailPage() {
         </Tabs>
       </div>
 
-      <Dialog open={showCloseDialog} onOpenChange={setShowCloseDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>关闭组合</DialogTitle>
-            <DialogDescription>
-              关闭组合前请确认以下事项：
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 text-sm">
-            {positions.length > 0 && (
-              <p className="text-yellow-600">
-                当前仍有 {positions.length} 个持仓，关闭后持仓数据将被保留但不可操作
-              </p>
-            )}
-            {investors && investors.length > 0 && (
-              <p className="text-yellow-600">
-                当前有 {investors.length} 位投资人持有份额
-              </p>
-            )}
-            <p className="text-red-500">
-              关闭后无法再进行申购/赎回/调仓操作
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCloseDialog(false)}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleClose}
-              disabled={closePortfolio.isPending}
-            >
-              {closePortfolio.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认关闭
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ClosePortfolioDialog
+        open={showCloseDialog}
+        onOpenChange={setShowCloseDialog}
+        onConfirm={handleClose}
+        isPending={closePortfolio.isPending}
+        positions={positions}
+        investors={investors}
+      />
 
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除组合</DialogTitle>
-            <DialogDescription>
-              此操作不可恢复，请确认后继续
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deletePortfolio.isPending}
-            >
-              {deletePortfolio.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeletePortfolioDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        onConfirm={handleDelete}
+        isPending={deletePortfolio.isPending}
+      />
     </MainLayout>
   );
 }

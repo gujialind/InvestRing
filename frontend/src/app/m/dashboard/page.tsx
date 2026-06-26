@@ -3,38 +3,28 @@
 import MobileLayout from "@/components/mobile/MobileLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatReturnRate, getReturnColorClass } from "@/lib/utils";
-import { TrendingUp, Wallet, Users, Briefcase, Loader2 } from "lucide-react";
-import { usePortfolioList } from "@/hooks/usePortfolio";
-import { useSubscriptionList } from "@/hooks/useTrade";
-import { useInvestorList } from "@/hooks/useInvestor";
 import Link from "next/link";
+import { useDashboardStats } from "@/hooks/useDashboardStats";
+import DashboardStatsCards from "@/components/shared/DashboardStatsCards";
+import LoadingState from "@/components/shared/LoadingState";
+import EmptyState from "@/components/shared/EmptyState";
 
 export default function MobileDashboardPage() {
-  const { data: portfoliosData, isLoading: portfoliosLoading } = usePortfolioList({ page_size: 100 });
-  const { data: subscriptionsData, isLoading: subscriptionsLoading } = useSubscriptionList({ page_size: 5 });
-  const { data: investorsData, isLoading: investorsLoading } = useInvestorList({ page_size: 100 });
-
-  const portfolios = portfoliosData?.items || [];
-  const subscriptions = subscriptionsData?.items || [];
-  const investors = investorsData?.items || [];
-
-  // Calculate stats
-  const activePortfolios = portfolios.filter(p => p.status === "active");
-  const totalValue = activePortfolios.reduce((sum, p) => sum + (p.total_value || 0), 0);
-
-  const portfoliosWithReturn = activePortfolios.filter(p => p.cumulative_return !== undefined && p.cumulative_return !== null);
-  const avgReturn = portfoliosWithReturn.length > 0
-    ? portfoliosWithReturn.reduce((sum, p) => sum + (p.cumulative_return || 0), 0) / portfoliosWithReturn.length
-    : 0;
-
-  const isLoading = portfoliosLoading || subscriptionsLoading || investorsLoading;
+  const {
+    portfolios,
+    activePortfolios,
+    subscriptions,
+    investors,
+    totalValue,
+    avgReturn,
+    pendingSubscriptions,
+    isLoading,
+  } = useDashboardStats();
 
   if (isLoading) {
     return (
       <MobileLayout>
-        <div className="flex items-center justify-center h-[60vh]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+        <LoadingState />
       </MobileLayout>
     );
   }
@@ -49,70 +39,23 @@ export default function MobileDashboardPage() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 gap-3">
-          <Card>
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Wallet className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">总资产</span>
-              </div>
-              <div className="text-lg font-bold">{formatCurrency(totalValue)}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {activePortfolios.length} 个活跃组合
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <TrendingUp className="h-4 w-4 text-red-500" />
-                <span className="text-xs text-muted-foreground">平均收益</span>
-              </div>
-              <div className={`text-lg font-bold ${getReturnColorClass(avgReturn)}`}>
-                {formatReturnRate(avgReturn)}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                活跃组合平均
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Briefcase className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">活跃组合</span>
-              </div>
-              <div className="text-lg font-bold">{activePortfolios.length}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                共 {portfolios.length} 个
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Users className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">投资人</span>
-              </div>
-              <div className="text-lg font-bold">{investors.length}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                系统注册
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+        <DashboardStatsCards
+          totalValue={totalValue}
+          avgReturn={avgReturn}
+          activeCount={activePortfolios.length}
+          totalCount={portfolios.length}
+          investorCount={investors.length}
+          variant="mobile"
+        />
 
         {/* Pending Transactions Alert */}
-        {subscriptions.filter(s => s.status === "pending").length > 0 && (
+        {pendingSubscriptions.length > 0 && (
           <Card className="bg-yellow-50 border-yellow-200">
             <CardContent className="p-3">
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
                 <span className="text-sm font-medium text-yellow-800">
-                  {subscriptions.filter(s => s.status === "pending").length} 笔待确认交易
+                  {pendingSubscriptions.length} 笔待确认交易
                 </span>
               </div>
             </CardContent>

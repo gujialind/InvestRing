@@ -1,0 +1,42 @@
+// API barrel —— 保持 `@/lib/api` 导入路径向后兼容。
+// 各模块按业务域拆分，类型统一来自 @/types/*。
+export { default } from "./client";
+export { ApiException, handleApiError, getErrorMessage } from "./client";
+
+export { authApi } from "./auth";
+export { investorApi } from "./investor";
+export { portfolioApi, positionApi } from "./portfolio";
+export { subscriptionApi } from "./subscription";
+export { tradeApi } from "./trade";
+export { productApi } from "./product";
+export type { PriceDataPoint } from "./product";
+export { platformApi } from "./platform";
+export { systemApi } from "./system";
+export { snapshotApi } from "./snapshot";
+export { shareChangeEventApi } from "./share-change-event";
+export { logApi } from "./log";
+export { taskApi } from "./task";
+export { notificationApi } from "./notification";
+
+// 重新导出此前散落在 api.ts 中的类型，保持既有 import 兼容
+export type {
+  Platform,
+  PlatformCreate,
+  PlatformUpdate,
+} from "@/types/platform";
+export type {
+  ShareChangeEvent,
+  ShareChangeEventCreate,
+  ShareChangeEventUpdate,
+} from "@/types/share-change-event";
+export type { SnapshotValidationCheck } from "@/types/snapshot";
+export type {
+  LoginLog,
+  AuditLog,
+  ErrorLog,
+  TaskLog,
+  ScheduledTask,
+  TaskExecution,
+} from "@/types/log";
+export type { NotificationItem } from "@/types/notification";
+export type { TradingCalendarDay, DataSourceConfig } from "@/types/system";

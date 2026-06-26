@@ -35,24 +35,13 @@ import {
 import { formatCurrency, formatNumber, formatReturnRate } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { tradeApi, positionApi, platformApi } from "@/lib/api";
+import { tradeApi, positionApi, platformApi, getErrorMessage } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 import { usePositionList } from "@/hooks/usePosition";
 import { DatePicker } from "@/components/ui/date-picker";
-
-interface Position {
-  id: number;
-  product_code: string;
-  product_name: string;
-  market?: string;
-  shares?: number;
-  amount?: number;
-  cost_price?: number;
-  unit_price?: number;
-  market_value?: number;
-  profit_loss?: number;
-  profit_loss_percent?: number;
-}
+import type { Position } from "@/types/position";
+import type { Platform } from "@/types/platform";
+import type { TradeCreate } from "@/types/trade";
 
 export default function PositionsPage() {
   const params = useParams();
@@ -61,7 +50,7 @@ export default function PositionsPage() {
   const addToast = useUIStore((state) => state.addToast);
 
   const { data: positionsData, isLoading } = usePositionList(code);
-  const positions = ((positionsData as any)?.items) as Position[] || [];
+  const positions: Position[] = positionsData?.items || [];
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [tradeType, setTradeType] = useState<"buy" | "sell">("buy");
@@ -83,7 +72,7 @@ export default function PositionsPage() {
     queryKey: ["platforms"],
     queryFn: () => platformApi.list({ page_size: 100 }),
   });
-  const platforms = ((platformsData as any)?.items) || [];
+  const platforms: Platform[] = platformsData?.items || [];
 
   const totalMarketValue = positions.reduce((sum, p) => sum + (p.market_value || 0), 0);
   const totalCost = positions.reduce((sum, p) => sum + ((p.shares || 0) * (p.cost_price || 0)), 0);
@@ -101,11 +90,11 @@ export default function PositionsPage() {
       setFormData({ product_code: "", shares: "", amount: "", price: "" });
       queryClient.invalidateQueries({ queryKey: ["trades", code] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "交易提交失败",
-        message: error.message || "请检查输入数据后重试",
+        message: getErrorMessage(error, "请检查输入数据后重试"),
       });
     },
   });
@@ -131,19 +120,11 @@ export default function PositionsPage() {
       setSelectedDate(undefined);
       queryClient.invalidateQueries({ queryKey: ["positions", code] });
     },
-    onError: (error: any) => {
-      // 尝试从不同位置提取错误信息
-      const errorMsg = 
-        error.response?.data?.detail?.message || 
-        error.response?.data?.detail ||
-        error.response?.data?.message ||
-        error.message || 
-        "更新失败，请检查网络连接或联系管理员";
-      
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "更新失败",
-        message: errorMsg,
+        message: getErrorMessage(error, "更新失败，请检查网络连接或联系管理员"),
       });
     },
   });
@@ -217,7 +198,7 @@ export default function PositionsPage() {
       return;
     }
 
-    const tradeData = {
+    const tradeData: TradeCreate = {
       portfolio_code: code,
       product_code: formData.product_code,
       trade_type: tradeType,
@@ -229,7 +210,7 @@ export default function PositionsPage() {
       fee: 0,
     };
 
-    createTrade.mutate(tradeData as any);
+    createTrade.mutate(tradeData);
   };
 
   return (
@@ -362,7 +343,7 @@ export default function PositionsPage() {
                         <SelectValue placeholder="请选择平台" />
                       </SelectTrigger>
                       <SelectContent>
-                        {platforms.map((platform: any) => (
+                        {platforms.map((platform) => (
                           <SelectItem key={platform.code} value={platform.code}>
                             {platform.name} ({platform.code})
                           </SelectItem>

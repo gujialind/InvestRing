@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/table";
 import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, TrendingUp, Eye } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { productApi } from "@/lib/api";
+import { productApi, getErrorMessage } from "@/lib/api";
 import { Product, ProductCreate, ProductUpdate } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
 import { formatCurrency } from "@/lib/utils";
@@ -46,8 +46,8 @@ export default function ProductsPage() {
       queryClient.invalidateQueries({ queryKey: ["products", "list"] });
       addToast({ type: "success", title: "创建成功", message: "产品已创建" });
     },
-    onError: (error: any) => {
-      addToast({ type: "error", title: "创建失败", message: error.message || "请检查输入信息" });
+    onError: (error: unknown) => {
+      addToast({ type: "error", title: "创建失败", message: getErrorMessage(error, "请检查输入信息") });
     },
   });
 
@@ -57,8 +57,8 @@ export default function ProductsPage() {
       queryClient.invalidateQueries({ queryKey: ["products", "list"] });
       addToast({ type: "success", title: "更新成功", message: "产品信息已更新" });
     },
-    onError: (error: any) => {
-      addToast({ type: "error", title: "更新失败", message: error.message || "请稍后重试" });
+    onError: (error: unknown) => {
+      addToast({ type: "error", title: "更新失败", message: getErrorMessage(error, "请稍后重试") });
     },
   });
 
@@ -68,8 +68,8 @@ export default function ProductsPage() {
       queryClient.invalidateQueries({ queryKey: ["products", "list"] });
       addToast({ type: "success", title: "删除成功", message: "产品已删除" });
     },
-    onError: (error: any) => {
-      addToast({ type: "error", title: "删除失败", message: error.message || "该产品已被使用，无法删除" });
+    onError: (error: unknown) => {
+      addToast({ type: "error", title: "删除失败", message: getErrorMessage(error, "该产品已被使用，无法删除") });
     },
   });
 
@@ -148,11 +148,11 @@ export default function ProductsPage() {
       });
       queryClient.invalidateQueries({ queryKey: ["products", "list"] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "同步失败",
-        message: error.message || "请检查数据源配置",
+        message: getErrorMessage(error, "请检查数据源配置"),
       });
     },
   });
@@ -168,11 +168,11 @@ export default function ProductsPage() {
       });
       queryClient.invalidateQueries({ queryKey: ["products", "list"] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       addToast({
         type: "error",
         title: "同步失败",
-        message: error.message || "请检查数据源配置",
+        message: getErrorMessage(error, "请检查数据源配置"),
       });
     },
   });
