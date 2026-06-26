@@ -74,6 +74,11 @@ htmlcov/
 .coverage.*
 coverage.xml
 
+# Playwright
+frontend/playwright-report/
+frontend/test-results/
+frontend/playwright/.cache/
+
 # Turborepo
 .turbo/
 

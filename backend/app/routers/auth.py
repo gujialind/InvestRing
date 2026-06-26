@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from typing import Optional
 from app.database import get_db
 from app.models.investor import Investor
 from app.schemas.auth import LoginRequest, LoginResponse, ChangePasswordRequest
@@ -18,6 +20,7 @@ from app.dependencies import (
     record_login_log,
     get_current_user,
     get_current_admin,
+    security,
 )
 from datetime import datetime, timedelta
 from app.config import get_settings
@@ -99,16 +102,13 @@ def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
 def logout(
     request: Request,
     current_user: Investor = Depends(get_current_user),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ):
     """
     登出接口。
     将当前 Token 加入黑名单，并记录登出日志。
     """
-    from fastapi.security import HTTPAuthorizationCredentials
-    from app.dependencies import security
-
-    credentials: HTTPAuthorizationCredentials = security(request)
     if credentials:
         blacklist_token(credentials.credentials)
 
@@ -124,6 +124,7 @@ def change_password(
     request: Request,
     body: ChangePasswordRequest,
     current_user: Investor = Depends(get_current_user),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ):
     """
@@ -173,10 +174,6 @@ def change_password(
     db.commit()
 
     # 修改密码后，将当前 Token 加入黑名单（强制重新登录）
-    from fastapi.security import HTTPAuthorizationCredentials
-    from app.dependencies import security
-
-    credentials: HTTPAuthorizationCredentials = security(request)
     if credentials:
         blacklist_token(credentials.credentials)
 

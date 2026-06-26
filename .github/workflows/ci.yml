@@ -81,10 +81,11 @@ jobs:
           # 检查代码格式
           ruff format --check app/
 
-      # 6. 运行单元测试
+      # 6. 运行测试（单元 + 集成 + E2E）
       - name: Run tests with pytest
         env:
           # 注入测试环境变量
+          TEST_DB_URL: mysql+pymysql://root:test_password@127.0.0.1:3306/investring_test?charset=utf8mb4
           DB_HOST: 127.0.0.1
           DB_PORT: 3306
           DB_USER: root
@@ -98,9 +99,9 @@ jobs:
             --strict-markers \
             -v \
             --cov=app \
+            --cov-fail-under=70 \
             --cov-report=term-missing \
-            --cov-report=xml:coverage.xml \
-            || echo "⚠️ 测试目录不存在或无测试用例，跳过测试"
+            --cov-report=xml:coverage.xml
 
       # 7. Alembic 迁移脚本校验（确保迁移文件语法正确且可执行）
       - name: Validate Alembic migrations
@@ -188,3 +189,85 @@ jobs:
             frontend/package.json
             frontend/package-lock.json
           retention-days: 3
+
+  # ==========================================================================
+  # 前端 E2E CI：Playwright 端到端测试
+  # ==========================================================================
+  frontend-e2e:
+    name: "Frontend E2E"
+    runs-on: ubuntu-latest
+    needs: [backend-ci, frontend-ci]
+    defaults:
+      run:
+        working-directory: frontend
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: investring_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 启动后端 API 服务
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          cd ../backend
+          pip install -r requirements.txt
+
+      - name: Start backend API
+        env:
+          TEST_DB_URL: mysql+pymysql://root:test_password@127.0.0.1:3306/investring_test?charset=utf8mb4
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: test_password
+          DB_NAME: investring_test
+          SECRET_KEY: test-secret-key-for-ci
+        run: |
+          cd ../backend
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+
+      # 前端 E2E
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E tests
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          API_BASE_URL: http://localhost:8000
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

@@ -10,14 +10,18 @@ class ShareChangeEventBase(BaseModel):
     entitlement_date: date
     product_code: Optional[str] = None
     market: Optional[str] = None
+    event_source: str = "manual"
+    entitlement_shares: Optional[float] = None
     shares_before: Optional[float] = None
     shares_change: Optional[float] = None
     shares_after: Optional[float] = None
     cash_change: Optional[float] = None
+    cash_product_code: Optional[str] = None
     div_cash: Optional[float] = None
     reinvest_nav: Optional[float] = None
     ratio: Optional[float] = None
     status: str = "pending"
+    tushare_event_id: Optional[str] = None
     notes: Optional[str] = None
 
 

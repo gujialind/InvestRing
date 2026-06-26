@@ -1,0 +1,362 @@
+# ============================================================================
+# InvestRing 测试全局配置 (conftest.py)
+# ============================================================================
+# 提供所有测试共享的 fixtures：
+# - 测试数据库（SQLite 文件或 CI 中的 MySQL）
+# - FastAPI TestClient（带依赖注入覆写）
+# - 认证 Token（admin / viewer）
+# - 基础数据初始化（资产分类、平台、产品、交易日历）
+# ============================================================================
+
+import os
+import pytest
+from datetime import date, timedelta
+from decimal import Decimal
+from typing import Generator
+
+# ---------------------------------------------------------------------------
+# 关键：在所有 app 模块导入之前设置测试数据库 URL，
+# 这样 app.config.Settings 和 app.database.engine 将使用测试数据库
+# ---------------------------------------------------------------------------
+os.environ.setdefault(
+    "DATABASE_URL",
+    os.environ.get("TEST_DB_URL", "sqlite:///./test_investring.db"),
+)
+# 确保 DEBUG 不会因 .env 文件干扰测试
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing")
+
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.pool import StaticPool
+
+from app.database import Base, get_db
+from app.main import app
+from app.models import (
+    Investor, Portfolio, Product, Platform,
+    AssetClassification, TradingCalendar, PriceRecord,
+    PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
+    Subscription, Trade, ShareChangeEvent,
+)
+from app.utils.security import get_password_hash, create_access_token
+
+
+# ============================================================================
+# 数据库引擎（session-scoped）
+# ============================================================================
+
+TEST_DB_URL = os.environ["DATABASE_URL"]
+IS_SQLITE = TEST_DB_URL.startswith("sqlite")
+
+
+@pytest.fixture(scope="session")
+def test_engine():
+    """
+    创建测试数据库引擎（整个测试会话共享）。
+    - SQLite: 使用文件数据库 + WAL 模式
+    - MySQL: 使用 CI 环境变量配置
+    """
+    if IS_SQLITE:
+        engine = create_engine(
+            TEST_DB_URL,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,  # 内存数据库需要 StaticPool
+            echo=False,
+        )
+        # SQLite WAL 模式配置
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+    else:
+        engine = create_engine(
+            TEST_DB_URL,
+            pool_pre_ping=True,
+            pool_size=5,
+            max_overflow=10,
+            echo=False,
+        )
+
+    # 创建所有表
+    Base.metadata.create_all(bind=engine)
+    yield engine
+
+    # 清理：删除所有表
+    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def _seed_base_data(test_engine):
+    """
+    初始化测试基础数据（session-scoped，仅执行一次）。
+    包括：资产分类、平台、示例产品、交易日历、管理员和测试用户。
+    """
+    SessionFactory = sessionmaker(bind=test_engine)
+    db = SessionFactory()
+    try:
+        # 1. 资产分类
+        asset_classes = [
+            {"code": "CASH", "asset_type": "现金", "asset_category": "现金", "asset_subcat": "现金", "description": "现金类资产"},
+            {"code": "STOCK_CN_LARGE", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "大盘", "description": "国内大盘股票"},
+            {"code": "STOCK_CN_SMALL", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "中小盘", "description": "国内中小盘股票"},
+            {"code": "STOCK_CN_VALUE", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "价值", "description": "国内价值风格股票"},
+            {"code": "STOCK_CN_GROWTH", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "成长", "description": "国内成长风格股票"},
+            {"code": "STOCK_CN_MIXED", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "综合", "description": "国内综合风格股票"},
+            {"code": "BOND_SHORT", "asset_type": "债券", "asset_category": "国内债券", "asset_subcat": "短债", "description": "国内短期债券"},
+            {"code": "BOND_LONG", "asset_type": "债券", "asset_category": "国内债券", "asset_subcat": "中长债", "description": "国内中长期债券"},
+            {"code": "GOLD", "asset_type": "黄金", "asset_category": "黄金", "asset_subcat": "黄金", "description": "黄金资产"},
+        ]
+        for ac in asset_classes:
+            if not db.query(AssetClassification).filter(AssetClassification.code == ac["code"]).first():
+                db.add(AssetClassification(**ac))
+        db.commit()
+
+        # 2. 平台
+        platforms = [
+            {"code": "MYCF", "name": "蚂蚁财富", "platform_type": "第三方平台"},
+            {"code": "HBZQ", "name": "华宝证券", "platform_type": "券商"},
+            {"code": "TTJJ", "name": "天天基金", "platform_type": "第三方平台"},
+            {"code": "ZB", "name": "纸币", "platform_type": "其他"},
+        ]
+        for p in platforms:
+            if not db.query(Platform).filter(Platform.code == p["code"]).first():
+                db.add(Platform(**p))
+        db.commit()
+
+        # 3. 示例产品（精简版，仅用于测试）
+        products = [
+            {"code": "CASH", "market": "", "name": "现金类资产", "product_type": "CASH",
+             "asset_class_code": "CASH", "confirm_days": 0, "is_qdii": False},
+            {"code": "510300.SH", "market": "CN_EXCHANGE", "name": "沪深300ETF", "product_type": "ETF",
+             "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 0, "is_qdii": False},
+            {"code": "000300.OF", "market": "CN_OTC", "name": "沪深300联接A", "product_type": "OEF",
+             "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 1, "is_qdii": False},
+            {"code": "270042.OF", "market": "CN_OTC", "name": "广发纳指100(QDII)A", "product_type": "OEF",
+             "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 2, "is_qdii": True},
+        ]
+        for p in products:
+            if not db.query(Product).filter(
+                Product.code == p["code"], Product.market == p["market"]
+            ).first():
+                db.add(Product(**p))
+        db.commit()
+
+        # 4. 交易日历（2025-01-01 到 2026-12-31，工作日为交易日）
+        start = date(2025, 1, 1)
+        end = date(2026, 12, 31)
+        existing_count = db.query(TradingCalendar).count()
+        if existing_count == 0:
+            current = start
+            while current <= end:
+                is_weekday = current.weekday() < 5  # Mon-Fri
+                db.add(TradingCalendar(
+                    date=current,
+                    is_open=is_weekday,
+                    exchange="SSE",
+                ))
+                current += timedelta(days=1)
+            db.commit()
+
+        # 5. 管理员用户（密码：admin@2026）
+        if not db.query(Investor).filter(Investor.code == "ADMIN").first():
+            db.add(Investor(
+                code="ADMIN",
+                name="测试管理员",
+                role="admin",
+                password_hash=get_password_hash("admin@2026"),
+            ))
+            db.commit()
+
+        # 6. 普通用户（viewer，密码：viewer123）
+        if not db.query(Investor).filter(Investor.code == "VIEWER").first():
+            db.add(Investor(
+                code="VIEWER",
+                name="测试投资人",
+                role="viewer",
+                password_hash=get_password_hash("viewer123"),
+            ))
+            db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ============================================================================
+# 数据库会话（function-scoped，使用事务隔离）
+# ============================================================================
+
+@pytest.fixture
+def test_db(test_engine, _seed_base_data) -> Generator[Session, None, None]:
+    """
+    每个测试函数获得独立的数据库会话。
+    使用事务 + SAVEPOINT 实现测试间隔离：
+    - 测试开始时开启外层事务
+    - 使用 SAVEPOINT 嵌套事务
+    - 测试结束后 rollback 到 SAVEPOINT，再 rollback 外层事务
+    这样每个测试的数据变更都不会影响其他测试。
+    """
+    connection = test_engine.connect()
+    transaction = connection.begin()
+
+    TestingSession = sessionmaker(bind=connection, expire_on_commit=False)
+    db = TestingSession()
+
+    # SQLite 需要开启嵌套事务支持
+    if IS_SQLITE:
+        connection.execute(text("PRAGMA foreign_keys=ON"))
+
+    nested = connection.begin_nested()
+
+    @event.listens_for(db, "after_transaction_end")
+    def _restart_savepoint(session, transaction):
+        if transaction.nested and not transaction._parent.nested:
+            session.begin_nested()
+
+    yield db
+
+    db.close()
+    transaction.rollback()
+    connection.close()
+
+
+# ============================================================================
+# FastAPI TestClient（function-scoped，带依赖注入覆写）
+# ============================================================================
+
+@pytest.fixture
+def client(test_db: Session) -> Generator[TestClient, None, None]:
+    """
+    提供配置好的 TestClient，已覆写 get_db 依赖注入，
+    使所有 API 请求使用测试数据库。
+    """
+    def _override_get_db():
+        yield test_db
+
+    app.dependency_overrides[get_db] = _override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+# ============================================================================
+# 认证 Token Fixtures
+# ============================================================================
+
+@pytest.fixture
+def admin_token(test_db: Session) -> str:
+    """生成管理员用户的 JWT Token"""
+    return create_access_token({"sub": "ADMIN", "role": "admin"})
+
+
+@pytest.fixture
+def viewer_token(test_db: Session) -> str:
+    """生成普通用户（viewer）的 JWT Token"""
+    return create_access_token({"sub": "VIEWER", "role": "viewer"})
+
+
+@pytest.fixture
+def admin_headers(admin_token: str) -> dict:
+    """管理员认证请求头"""
+    return {"Authorization": f"Bearer {admin_token}"}
+
+
+@pytest.fixture
+def viewer_headers(viewer_token: str) -> dict:
+    """普通用户认证请求头"""
+    return {"Authorization": f"Bearer {viewer_token}"}
+
+
+# ============================================================================
+# 测试数据工厂 Fixtures
+# ============================================================================
+
+@pytest.fixture
+def sample_trading_day(test_db: Session) -> date:
+    """返回一个确认为交易日的日期（2025-01-06 是周一）"""
+    d = date(2025, 1, 6)
+    # 确保该日期存在于交易日历中
+    existing = test_db.query(TradingCalendar).filter(TradingCalendar.date == d).first()
+    if not existing:
+        test_db.add(TradingCalendar(date=d, is_open=True, exchange="SSE"))
+        test_db.commit()
+    return d
+
+
+@pytest.fixture
+def sample_non_trading_day(test_db: Session) -> date:
+    """返回一个确认为非交易日的日期（2025-01-04 是周六）"""
+    d = date(2025, 1, 4)
+    existing = test_db.query(TradingCalendar).filter(TradingCalendar.date == d).first()
+    if not existing:
+        test_db.add(TradingCalendar(date=d, is_open=False, exchange="SSE"))
+        test_db.commit()
+    return d
+
+
+@pytest.fixture
+def sample_portfolio(test_db: Session) -> Portfolio:
+    """创建一个测试用投资组合（draft 状态）"""
+    code = "TEST_PORT"
+    existing = test_db.query(Portfolio).filter(Portfolio.code == code).first()
+    if existing:
+        return existing
+    port = Portfolio(code=code, name="测试组合", description="测试用", status="draft")
+    test_db.add(port)
+    test_db.commit()
+    test_db.refresh(port)
+    return port
+
+
+@pytest.fixture
+def active_portfolio(test_db: Session) -> Portfolio:
+    """创建一个已激活的测试组合"""
+    code = "ACTIVE_PORT"
+    existing = test_db.query(Portfolio).filter(Portfolio.code == code).first()
+    if existing:
+        return existing
+    port = Portfolio(code=code, name="活跃组合", description="测试用", status="active")
+    test_db.add(port)
+    test_db.commit()
+    test_db.refresh(port)
+    return port
+
+
+@pytest.fixture
+def sample_etf_product(test_db: Session) -> Product:
+    """返回一个场内 ETF 产品"""
+    return test_db.query(Product).filter(
+        Product.code == "510300.SH", Product.market == "CN_EXCHANGE"
+    ).first()
+
+
+@pytest.fixture
+def sample_otc_product(test_db: Session) -> Product:
+    """返回一个场外 OEF 产品"""
+    return test_db.query(Product).filter(
+        Product.code == "000300.OF", Product.market == "CN_OTC"
+    ).first()
+
+
+@pytest.fixture
+def sample_platform(test_db: Session) -> Platform:
+    """返回一个测试用平台"""
+    return test_db.query(Platform).filter(Platform.code == "MYCF").first()
+
+
+@pytest.fixture
+def sample_investor(test_db: Session) -> Investor:
+    """返回 viewer 测试用户"""
+    return test_db.query(Investor).filter(Investor.code == "VIEWER").first()
+
+
+@pytest.fixture
+def sample_admin(test_db: Session) -> Investor:
+    """返回 admin 测试用户"""
+    return test_db.query(Investor).filter(Investor.code == "ADMIN").first()

@@ -1,0 +1,86 @@
+# ============================================================================
+# 集成测试：投资人管理 (test_investors.py)
+# ============================================================================
+
+import pytest
+from tests.factories import create_investor
+from app.models.investor import Investor
+
+
+class TestInvestorCRUD:
+    """投资人 CRUD API 测试"""
+
+    def test_create_investor(self, client, admin_headers, test_db):
+        """admin 创建投资人"""
+        resp = client.post(
+            "/api/investors",
+            json={"code": "NEW_INV1", "name": "新投资人", "password": "inv_pass123"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["code"] == "NEW_INV1"
+        assert data["name"] == "新投资人"
+        assert data["role"] == "viewer"
+
+    def test_create_duplicate_investor_fails(self, client, admin_headers, test_db):
+        """创建重复投资人应失败"""
+        create_investor(test_db, code="DUP_INV")
+        resp = client.post(
+            "/api/investors",
+            json={"code": "DUP_INV", "name": "重复", "password": "pass"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_list_investors(self, client, admin_headers, test_db):
+        """获取投资人列表"""
+        resp = client.get("/api/investors", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+        assert data["total"] >= 1
+
+    def test_get_investor_detail(self, client, admin_headers, test_db):
+        """获取单个投资人详情"""
+        create_investor(test_db, code="DETAIL_INV", name="详情投资人")
+        resp = client.get("/api/investors/DETAIL_INV", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json()["code"] == "DETAIL_INV"
+
+    def test_get_nonexistent_investor_404(self, client, admin_headers):
+        """获取不存在的投资人应返回 404"""
+        resp = client.get("/api/investors/NO_SUCH_CODE", headers=admin_headers)
+        assert resp.status_code == 404
+
+    def test_update_investor(self, client, admin_headers, test_db):
+        """更新投资人信息"""
+        create_investor(test_db, code="UPD_INV", name="旧名称")
+        resp = client.put(
+            "/api/investors/UPD_INV",
+            json={"name": "新名称"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "新名称"
+
+    def test_viewer_cannot_create_investor(self, client, viewer_headers):
+        """viewer 不能创建投资人"""
+        resp = client.post(
+            "/api/investors",
+            json={"code": "V_INV", "name": "X", "password": "pass"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 403
+
+    def test_password_is_hashed(self, client, admin_headers, test_db):
+        """创建投资人时密码应被 bcrypt 哈希存储"""
+        client.post(
+            "/api/investors",
+            json={"code": "HASH_INV", "name": "哈希测试", "password": "plain_text"},
+            headers=admin_headers,
+        )
+        investor = test_db.query(Investor).filter(Investor.code == "HASH_INV").first()
+        assert investor is not None
+        assert investor.password_hash != "plain_text"
+        assert investor.password_hash.startswith("$2b$")
