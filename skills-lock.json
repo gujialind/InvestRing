@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "apifox-cli": {
+      "source": "apifox.com",
+      "sourceType": "well-known",
+      "computedHash": "c629fb4be587c378d03243053a6893dc872cd31b566ceefbaf3964ddce1466ab"
+    }
+  }
+}

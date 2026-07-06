@@ -34,7 +34,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatNumber } from "@/lib/utils";
+import { formatCurrency, formatNumber, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
 import { shareChangeEventApi, ShareChangeEvent, ShareChangeEventCreate, getErrorMessage } from "@/lib/api";
@@ -67,8 +67,8 @@ export default function ShareChangeEventsPage() {
   const [formData, setFormData] = useState<ShareChangeEventCreate>({
     portfolio_code: code,
     event_type: "cash_dividend",
-    event_date: new Date().toISOString().split("T")[0],
-    entitlement_date: new Date().toISOString().split("T")[0],
+    event_date: toDateOnly(new Date()),
+    entitlement_date: toDateOnly(new Date()),
     product_code: "",
     market: "",
     div_cash: 0,
@@ -153,8 +153,8 @@ export default function ShareChangeEventsPage() {
     setFormData({
       portfolio_code: code,
       event_type: "cash_dividend",
-      event_date: new Date().toISOString().split("T")[0],
-      entitlement_date: new Date().toISOString().split("T")[0],
+      event_date: toDateOnly(new Date()),
+      entitlement_date: toDateOnly(new Date()),
       product_code: "",
       market: "",
       div_cash: 0,
@@ -246,18 +246,18 @@ export default function ShareChangeEventsPage() {
                     <div className="space-y-2">
                       <Label htmlFor="event_date">事件日期</Label>
                       <DatePicker
-                        date={formData.event_date ? new Date(formData.event_date) : undefined}
+                        date={parseDateOnly(formData.event_date)}
                         onSelect={(date) => {
-                          setFormData({ ...formData, event_date: date ? date.toISOString().split("T")[0] : "" })
+                          setFormData({ ...formData, event_date: toDateOnly(date) })
                         }}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="entitlement_date">权益登记日</Label>
                       <DatePicker
-                        date={formData.entitlement_date ? new Date(formData.entitlement_date) : undefined}
+                        date={parseDateOnly(formData.entitlement_date)}
                         onSelect={(date) => {
-                          setFormData({ ...formData, entitlement_date: date ? date.toISOString().split("T")[0] : "" })
+                          setFormData({ ...formData, entitlement_date: toDateOnly(date) })
                         }}
                       />
                     </div>

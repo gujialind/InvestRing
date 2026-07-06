@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import { toDateOnly, parseDateOnly } from "@/lib/utils";
 
 interface TradeFormProps {
   portfolioCode: string;
@@ -30,7 +31,7 @@ export default function TradeForm({ portfolioCode, onSubmit, isSubmitting }: Tra
     amount: "",
     shares: "",
     price: "",
-    trade_date: new Date().toISOString().split("T")[0],
+    trade_date: toDateOnly(new Date()),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -120,9 +121,9 @@ export default function TradeForm({ portfolioCode, onSubmit, isSubmitting }: Tra
           <div className="space-y-2">
             <Label htmlFor="trade_date">交易日期</Label>
             <DatePicker
-              date={formData.trade_date ? new Date(formData.trade_date) : undefined}
+              date={parseDateOnly(formData.trade_date)}
               onSelect={(date) => {
-                setFormData({ ...formData, trade_date: date ? date.toISOString().split("T")[0] : "" })
+                setFormData({ ...formData, trade_date: toDateOnly(date) })
               }}
             />
           </div>

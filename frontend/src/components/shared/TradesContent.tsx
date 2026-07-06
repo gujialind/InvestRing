@@ -34,7 +34,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatNumber, formatMarketName } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatMarketName, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo } from "lucide-react";
 import Link from "next/link";
 import {
@@ -102,7 +102,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     shares: "",
     amount: "",
     price: "",
-    trade_date: new Date().toISOString().split("T")[0],
+    trade_date: toDateOnly(new Date()),
   });
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   // 编辑提示（原 alert 改为内部状态展示）
@@ -124,7 +124,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     createTrade.mutate(payload, {
       onSuccess: () => {
         setIsDialogOpen(false);
-        setFormData({ product_code: "", market: "", shares: "", amount: "", price: "", trade_date: new Date().toISOString().split("T")[0] });
+        setFormData({ product_code: "", market: "", shares: "", amount: "", price: "", trade_date: toDateOnly(new Date()) });
       },
     });
   };
@@ -252,9 +252,9 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                 <div className="space-y-2">
                   <Label htmlFor="trade_date">交易日期</Label>
                   <DatePicker
-                    date={formData.trade_date ? new Date(formData.trade_date) : undefined}
+                    date={parseDateOnly(formData.trade_date)}
                     onSelect={(date) => {
-                      setFormData({ ...formData, trade_date: date ? date.toISOString().split("T")[0] : "" });
+                      setFormData({ ...formData, trade_date: toDateOnly(date) });
                     }}
                   />
                 </div>

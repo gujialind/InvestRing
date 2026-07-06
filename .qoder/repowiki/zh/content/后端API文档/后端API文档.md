@@ -16,6 +16,15 @@
 - [backend/app/routers/snapshots.py](file://backend/app/routers/snapshots.py)
 - [backend/app/routers/tasks.py](file://backend/app/routers/tasks.py)
 - [backend/app/routers/subscriptions.py](file://backend/app/routers/subscriptions.py)
+- [backend/app/routers/data_sources.py](file://backend/app/routers/data_sources.py)
+- [backend/app/routers/market_data.py](file://backend/app/routers/market_data.py)
+- [backend/app/routers/logs.py](file://backend/app/routers/logs.py)
+- [backend/app/routers/notifications.py](file://backend/app/routers/notifications.py)
+- [backend/app/routers/share_change_events.py](file://backend/app/routers/share_change_events.py)
+- [backend/app/routers/trading_calendar.py](file://backend/app/routers/trading_calendar.py)
+- [backend/export_openapi.py](file://backend/export_openapi.py)
+- [backend/openapi.json](file://backend/openapi.json)
+- [backend/nginx/nginx.conf](file://backend/nginx/nginx.conf)
 - [backend/requirements.txt](file://backend/requirements.txt)
 </cite>
 
@@ -25,17 +34,20 @@
 3. [核心组件](#核心组件)
 4. [架构总览](#架构总览)
 5. [详细组件分析](#详细组件分析)
-6. [依赖分析](#依赖分析)
-7. [性能考虑](#性能考虑)
-8. [故障排除指南](#故障排除指南)
-9. [结论](#结论)
-10. [附录](#附录)
+6. [OpenAPI规范管理](#openapi规范管理)
+7. [依赖分析](#依赖分析)
+8. [性能考虑](#性能考虑)
+9. [故障排除指南](#故障排除指南)
+10. [结论](#结论)
+11. [附录](#附录)
 
 ## 简介
-本文件为 InvestRing 后端的完整 API 文档，覆盖认证系统、投资人管理、投资组合管理、产品管理、持仓管理、交易管理、快照系统、任务管理等模块。文档提供每个 API 的 HTTP 方法、URL 模式、请求/响应模式、认证方式与权限控制、错误码说明、请求与响应示例路径、版本管理与兼容性策略、常见使用场景与最佳实践。
+本文件为 InvestRing 后端的完整 API 文档，覆盖认证系统、投资人管理、投资组合管理、产品管理、持仓管理、交易管理、快照系统、任务管理、数据源配置、市场数据、日志管理、通知管理、份额变动事件、交易日历等模块。文档提供每个 API 的 HTTP 方法、URL 模式、请求/响应模式、认证方式与权限控制、错误码说明、请求与响应示例路径、版本管理与兼容性策略、常见使用场景与最佳实践。
+
+**更新** 新增自动OpenAPI规范生成功能，包含export_openapi.py脚本和openapi.json文件，提供完整的API规范管理流程。
 
 ## 项目结构
-后端基于 FastAPI 构建，采用模块化路由组织，核心入口在主应用中注册各模块路由，并统一处理 CORS 与数据库初始化。认证与权限通过依赖注入与安全工具实现，配置集中于配置模块。
+后端基于 FastAPI 构建，采用模块化路由组织，核心入口在主应用中注册各模块路由，并统一处理 CORS 与数据库初始化。认证与权限通过依赖注入与安全工具实现，配置集中于配置模块。新增OpenAPI规范自动生成与管理功能。
 
 ```mermaid
 graph TB
@@ -51,9 +63,16 @@ A --> J["快照路由<br/>routers/snapshots.py"]
 A --> K["任务路由<br/>routers/tasks.py"]
 A --> L["通用依赖与安全<br/>dependencies.py / utils/security.py"]
 A --> M["配置<br/>config.py"]
+A --> N["数据源路由<br/>routers/data_sources.py"]
+A --> O["市场数据路由<br/>routers/market_data.py"]
+A --> P["日志路由<br/>routers/logs.py"]
+A --> Q["通知路由<br/>routers/notifications.py"]
+A --> R["份额事件路由<br/>routers/share_change_events.py"]
+A --> S["交易日历路由<br/>routers/trading_calendar.py"]
+A --> T["OpenAPI规范<br/>export_openapi.py / openapi.json"]
 ```
 
-图表来源
+**图表来源**
 - [backend/app/main.py:17-48](file://backend/app/main.py#L17-L48)
 - [backend/app/routers/auth.py:25](file://backend/app/routers/auth.py#L25)
 - [backend/app/routers/investors.py:11](file://backend/app/routers/investors.py#L11)
@@ -65,27 +84,34 @@ A --> M["配置<br/>config.py"]
 - [backend/app/routers/subscriptions.py:16](file://backend/app/routers/subscriptions.py#L16)
 - [backend/app/routers/snapshots.py:25](file://backend/app/routers/snapshots.py#L25)
 - [backend/app/routers/tasks.py:16](file://backend/app/routers/tasks.py#L16)
-- [backend/app/dependencies.py:9](file://backend/app/dependencies.py#L9)
-- [backend/app/utils/security.py:8](file://backend/app/utils/security.py#L8)
-- [backend/app/config.py:5](file://backend/app/config.py#L5)
+- [backend/app/routers/data_sources.py:11](file://backend/app/routers/data_sources.py#L11)
+- [backend/app/routers/market_data.py:1](file://backend/app/routers/market_data.py#L1)
+- [backend/app/routers/logs.py:1](file://backend/app/routers/logs.py#L1)
+- [backend/app/routers/notifications.py:1](file://backend/app/routers/notifications.py#L1)
+- [backend/app/routers/share_change_events.py:1](file://backend/app/routers/share_change_events.py#L1)
+- [backend/app/routers/trading_calendar.py:1](file://backend/app/routers/trading_calendar.py#L1)
+- [backend/export_openapi.py:1](file://backend/export_openapi.py#L1)
+- [backend/openapi.json:1](file://backend/openapi.json#L1)
 
-章节来源
+**章节来源**
 - [backend/app/main.py:17-48](file://backend/app/main.py#L17-L48)
 
 ## 核心组件
-- 应用入口与路由注册：在主应用中注册认证、投资人、组合、产品、平台、交易、持仓、订阅、快照、任务等路由，并启用 CORS。
+- 应用入口与路由注册：在主应用中注册认证、投资人、组合、产品、平台、交易、持仓、订阅、快照、任务、数据源、市场数据、日志、通知、份额事件、交易日历等路由，并启用 CORS。
 - 认证与权限：通过 HTTP Bearer Token 进行认证，支持令牌黑名单、账户锁定与失败追踪；提供普通用户与管理员权限依赖。
 - 安全工具：密码哈希、JWT 编解码、令牌黑名单维护、登录失败锁定策略。
 - 配置中心：集中管理数据库连接、密钥、Tushare Token、调试开关等。
+- **OpenAPI规范管理**：自动生成和导出OpenAPI规范，支持Apifox等工具导入。
 
-章节来源
+**章节来源**
 - [backend/app/main.py:17-48](file://backend/app/main.py#L17-L48)
 - [backend/app/dependencies.py:49-137](file://backend/app/dependencies.py#L49-L137)
 - [backend/app/utils/security.py:15-103](file://backend/app/utils/security.py#L15-L103)
 - [backend/app/config.py:5-36](file://backend/app/config.py#L5-L36)
+- [backend/export_openapi.py:1](file://backend/export_openapi.py#L1)
 
 ## 架构总览
-下图展示 API 路由与核心依赖的关系，体现认证、权限、安全与业务模块之间的交互。
+下图展示 API 路由与核心依赖的关系，体现认证、权限、安全与业务模块之间的交互，以及新增的OpenAPI规范管理流程。
 
 ```mermaid
 graph TB
@@ -104,6 +130,17 @@ PosR["持仓路由<br/>routers/positions.py"]
 SubR["订阅路由<br/>routers/subscriptions.py"]
 SnpR["快照路由<br/>routers/snapshots.py"]
 TskR["任务路由<br/>routers/tasks.py"]
+DataR["数据源路由<br/>routers/data_sources.py"]
+MktR["市场数据路由<br/>routers/market_data.py"]
+LogR["日志路由<br/>routers/logs.py"]
+NotiR["通知路由<br/>routers/notifications.py"]
+ShareR["份额事件路由<br/>routers/share_change_events.py"]
+CalR["交易日历路由<br/>routers/trading_calendar.py"]
+end
+subgraph "OpenAPI规范管理"
+Exp["导出脚本<br/>export_openapi.py"]
+Spec["规范文件<br/>openapi.json"]
+Nginx["Nginx配置<br/>nginx.conf"]
 end
 Main["应用入口<br/>main.py"] --> AuthR
 Main --> InvR
@@ -115,6 +152,12 @@ Main --> PosR
 Main --> SubR
 Main --> SnpR
 Main --> TskR
+Main --> DataR
+Main --> MktR
+Main --> LogR
+Main --> NotiR
+Main --> ShareR
+Main --> CalR
 AuthR --> Sec
 AuthR --> Dep
 InvR --> Dep
@@ -126,13 +169,24 @@ PosR --> Dep
 SubR --> Dep
 SnpR --> Dep
 TskR --> Dep
+DataR --> Dep
+MktR --> Dep
+LogR --> Dep
+NotiR --> Dep
+ShareR --> Dep
+CalR --> Dep
+Exp --> Spec
+Nginx --> Spec
 ```
 
-图表来源
+**图表来源**
 - [backend/app/main.py:32-48](file://backend/app/main.py#L32-L48)
 - [backend/app/routers/auth.py:15-21](file://backend/app/routers/auth.py#L15-L21)
 - [backend/app/dependencies.py:9](file://backend/app/dependencies.py#L9)
 - [backend/app/utils/security.py:8](file://backend/app/utils/security.py#L8)
+- [backend/export_openapi.py:1](file://backend/export_openapi.py#L1)
+- [backend/openapi.json:1](file://backend/openapi.json#L1)
+- [backend/nginx/nginx.conf:105](file://backend/nginx/nginx.conf#L105)
 
 ## 详细组件分析
 
@@ -158,7 +212,7 @@ TskR --> Dep
   - 权限：需要认证；admin 可改任意用户密码，viewer 只能改自己且需旧密码
   - 示例路径：[改密请求示例:122-128](file://backend/app/routers/auth.py#L122-L128)，[改密响应示例:185-185](file://backend/app/routers/auth.py#L185-L185)
 
-章节来源
+**章节来源**
 - [backend/app/routers/auth.py:29-186](file://backend/app/routers/auth.py#L29-L186)
 - [backend/app/dependencies.py:49-137](file://backend/app/dependencies.py#L49-L137)
 - [backend/app/utils/security.py:29-46](file://backend/app/utils/security.py#L29-L46)
@@ -185,7 +239,7 @@ TskR --> Dep
     - 响应体：{"message": "..."}
     - 示例路径：[删除投资人示例:91-119](file://backend/app/routers/investors.py#L91-L119)
 
-章节来源
+**章节来源**
 - [backend/app/routers/investors.py:14-120](file://backend/app/routers/investors.py#L14-L120)
 
 ### 投资组合管理
@@ -223,7 +277,7 @@ TskR --> Dep
     - 响应体：流入、流出、净流入
     - 示例路径：[现金流示例:244-275](file://backend/app/routers/portfolios.py#L244-L275)
 
-章节来源
+**章节来源**
 - [backend/app/routers/portfolios.py:18-276](file://backend/app/routers/portfolios.py#L18-L276)
 
 ### 产品管理
@@ -248,7 +302,7 @@ TskR --> Dep
     - 响应体：{"message": "..."}
     - 示例路径：[删除产品示例:125-141](file://backend/app/routers/products.py#L125-L141)
 
-章节来源
+**章节来源**
 - [backend/app/routers/products.py:27-142](file://backend/app/routers/products.py#L27-L142)
 
 ### 平台管理
@@ -273,7 +327,7 @@ TskR --> Dep
     - 响应体：{"message": "..."}
     - 示例路径：[删除平台示例:78-90](file://backend/app/routers/platforms.py#L78-L90)
 
-章节来源
+**章节来源**
 - [backend/app/routers/platforms.py:12-91](file://backend/app/routers/platforms.py#L12-L91)
 
 ### 持仓管理
@@ -310,7 +364,7 @@ TskR --> Dep
     - 权限：管理员；仅交易日；必须指定平台代码；CASH 产品金额更新
     - 示例路径：[更新现金头寸示例:319-409](file://backend/app/routers/positions.py#L319-L409)
 
-章节来源
+**章节来源**
 - [backend/app/routers/positions.py:180-410](file://backend/app/routers/positions.py#L180-L410)
 
 ### 交易管理
@@ -345,7 +399,7 @@ TskR --> Dep
     - 响应体：{"message": "..."}
     - 示例路径：[删除交易示例:554-566](file://backend/app/routers/trades.py#L554-L566)
 
-章节来源
+**章节来源**
 - [backend/app/routers/trades.py:271-567](file://backend/app/routers/trades.py#L271-L567)
 
 ### 快照系统
@@ -371,7 +425,7 @@ TskR --> Dep
     - 响应体：{"success": true, "message": "..."}
     - 示例路径：[删除快照示例:160-187](file://backend/app/routers/snapshots.py#L160-L187)
 
-章节来源
+**章节来源**
 - [backend/app/routers/snapshots.py#L28-L188:28-188](file://backend/app/routers/snapshots.py#L28-L188)
 
 ### 任务管理
@@ -396,7 +450,7 @@ TskR --> Dep
     - 响应体：分页对象（任务执行日志）
     - 示例路径：[任务日志示例:300-322](file://backend/app/routers/tasks.py#L300-L322)
 
-章节来源
+**章节来源**
 - [backend/app/routers/tasks.py#L70-L323:70-323](file://backend/app/routers/tasks.py#L70-L323)
 
 ### 申购赎回
@@ -432,8 +486,126 @@ TskR --> Dep
     - 响应体：{"message": "..."}
     - 示例路径：[删除订阅示例:362-374](file://backend/app/routers/subscriptions.py#L362-L374)
 
-章节来源
+**章节来源**
 - [backend/app/routers/subscriptions.py#L88-L375:88-375](file://backend/app/routers/subscriptions.py#L88-L375)
+
+### 数据源配置
+- 权限：管理员
+- 接口清单
+  - GET /api/system/data-sources
+    - 响应体：数据源配置列表（包含Tushare、AkShare等）
+    - 示例路径：[数据源列表示例:1594-1618](file://backend/app/routers/data_sources.py#L1594-L1618)
+  - GET /api/system/data-sources/{name}
+    - 响应体：单个数据源配置
+    - 示例路径：[数据源详情示例:1619-1674](file://backend/app/routers/data_sources.py#L1619-L1674)
+  - PUT /api/system/data-sources/{name}
+    - 请求体：DataSourceUpdate
+    - 响应体：更新后的数据源配置
+    - 示例路径：[更新数据源示例:1675-1700](file://backend/app/routers/data_sources.py#L1675-L1700)
+
+**章节来源**
+- [backend/app/routers/data_sources.py#L1594-L1700:1594-1700](file://backend/app/routers/data_sources.py#L1594-L1700)
+
+### 市场数据
+- 权限：管理员
+- 接口清单
+  - GET /api/market-data/products/{code}/{market}/price-data
+    - 查询参数：start_date、end_date、adjust（复权因子）
+    - 响应体：价格数据列表
+    - 示例路径：[产品价格数据示例:1675-1788](file://backend/app/routers/market_data.py#L1675-L1788)
+  - POST /api/market-data/products/{code}/{market}/sync-price-data
+    - 请求体：同步请求参数
+    - 响应体：同步结果
+    - 示例路径：[同步价格数据示例:1789-1854](file://backend/app/routers/market_data.py#L1789-L1854)
+  - POST /api/market-data/products/{code}/{market}/sync-history
+    - 请求体：历史数据同步参数
+    - 响应体：同步结果
+    - 示例路径：[同步历史数据示例:1855-1903](file://backend/app/routers/market_data.py#L1855-L1903)
+  - POST /api/market-data/portfolios/{portfolio_code}/sync-nav
+    - 请求体：净值同步参数
+    - 响应体：同步结果
+    - 示例路径：[同步组合净值示例:1904-1943](file://backend/app/routers/market_data.py#L1904-L1943)
+
+**章节来源**
+- [backend/app/routers/market_data.py#L1675-L1943:1675-1943](file://backend/app/routers/market_data.py#L1675-L1943)
+
+### 日志管理
+- 权限：管理员
+- 接口清单
+  - GET /api/logs/system-error-logs
+    - 查询参数：level、start_time、end_time、page、page_size
+    - 响应体：系统错误日志分页列表
+    - 示例路径：[系统错误日志示例:1-200](file://backend/app/routers/logs.py#L1-L200)
+  - GET /api/logs/login-logs
+    - 查询参数：investor_code、start_time、end_time、page、page_size
+    - 响应体：登录日志分页列表
+    - 示例路径：[登录日志示例:1-200](file://backend/app/routers/logs.py#L1-L200)
+  - GET /api/logs/audit-logs
+    - 查询参数：investor_code、operation、start_time、end_time、page、page_size
+    - 响应体：审计日志分页列表
+    - 示例路径：[审计日志示例:1-200](file://backend/app/routers/logs.py#L1-L200)
+
+**章节来源**
+- [backend/app/routers/logs.py#L1-L200:1-200](file://backend/app/routers/logs.py#L1-L200)
+
+### 通知管理
+- 村章来源
+- 接口清单
+  - GET /api/notifications
+    - 查询参数：investor_code、read_status、start_time、end_time、page、page_size
+    - 响应体：通知分页列表
+    - 示例路径：[通知列表示例:1-200](file://backend/app/routers/notifications.py#L1-L200)
+  - POST /api/notifications/mark-as-read
+    - 请求体：标记已读请求
+    - 响应体：操作结果
+    - 示例路径：[标记已读示例:1-200](file://backend/app/routers/notifications.py#L1-L200)
+  - POST /api/notifications/mark-all-as-read
+    - 请求体：无
+    - 响应体：操作结果
+    - 示例路径：[全部标记已读示例:1-200](file://backend/app/routers/notifications.py#L1-L200)
+
+**章节来源**
+- [backend/app/routers/notifications.py#L1-L200:1-200](file://backend/app/routers/notifications.py#L1-L200)
+
+### 份额变动事件
+- 权限：管理员
+- 接口清单
+  - GET /api/share-change-events
+    - 查询参数：portfolio_code、product_code、event_type、start_date、end_date、page、page_size
+    - 响应体：份额变动事件分页列表
+    - 示例路径：[份额事件列表示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+  - POST /api/share-change-events
+    - 请求体：份额变动事件创建请求
+    - 响应体：创建后的事件
+    - 示例路径：[创建份额事件示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+  - GET /api/share-change-events/{id}
+    - 响应体：单个份额变动事件
+    - 示例路径：[份额事件详情示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+  - PUT /api/share-change-events/{id}
+    - 请求体：份额变动事件更新请求
+    - 响应体：更新后的事件
+    - 示例路径：[更新份额事件示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+  - DELETE /api/share-change-events/{id}
+    - 响应体：删除结果
+    - 示例路径：[删除份额事件示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+
+**章节来源**
+- [backend/app/routers/share_change_events.py#L1-L200:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+
+### 交易日历
+- 权限：GET 对普通用户开放；其余对管理员开放
+- 接口清单
+  - GET /api/trading-calendar
+    - 查询参数：year、start_date、end_date、is_open
+    - 响应体：交易日历列表
+    - 示例路径：[交易日历列表示例:1431-1546](file://backend/app/routers/trading_calendar.py#L1431-L1546)
+  - POST /api/trading-calendar/sync
+    - 请求体：TradingCalendarSyncRequest
+    - 响应体：同步结果
+    - 示例路径：[同步交易日历示例:1547-1593](file://backend/app/routers/trading_calendar.py#L1547-L1593)
+
+**章节来源**
+- [backend/app/routers/trading_calendar.py#L1431-L1593:1431-1593](file://backend/app/routers/trading_calendar.py#L1431-L1593)
 
 ### 认证机制、权限控制与限流策略
 - 认证机制
@@ -443,19 +615,22 @@ TskR --> Dep
   - 普通用户依赖 get_current_user；管理员依赖 get_current_admin。
   - 部分接口对 viewer 有限制（如订阅查询仅能看到自己的记录）。
 - 限流策略
-  - 当前代码未实现显式的速率限制；建议在网关层或中间件增加限流策略（例如基于 IP 或用户维度）。
+  - Nginx层配置了API限流：limit_req zone=api_limit burst=50 nodelay
+  - FastAPI文档路由在生产环境建议关闭，避免暴露内部API细节。
 
-章节来源
+**章节来源**
 - [backend/app/utils/security.py#L29-L46:29-46](file://backend/app/utils/security.py#L29-L46)
 - [backend/app/dependencies.py#L49-137:49-137](file://backend/app/dependencies.py#L49-L137)
-- [backend/app/config.py:14-16](file://backend/app/config.py#L14-L16)
+- [backend/app/config.py#L14-16:14-16](file://backend/app/config.py#L14-L16)
+- [backend/nginx/nginx.conf#L85-L86:85-86](file://backend/nginx/nginx.conf#L85-L86)
+- [backend/nginx/nginx.conf#L94-L103:94-103](file://backend/nginx/nginx.conf#L94-L103)
 
 ### API 版本管理与向后兼容性
 - 版本号：应用版本为 1.0.0。
 - 快照模块使用 /api/v1 前缀，便于未来扩展与独立演进。
 - 建议：新增接口优先使用新前缀或版本号，保持旧接口稳定；对破坏性变更提供迁移指引与过渡期。
 
-章节来源
+**章节来源**
 - [backend/app/main.py:17-21](file://backend/app/main.py#L17-L21)
 - [backend/app/routers/snapshots.py#L25](file://backend/app/routers/snapshots.py#L25)
 
@@ -469,16 +644,55 @@ TskR --> Dep
   - 净值同步完成后自动触发当日快照生成；支持重算与依赖预检。
 - 权限最小化
   - viewer 仅能访问自身相关数据；管理员负责系统配置与运营操作。
+- **OpenAPI规范管理**
+  - 使用export_openapi.py自动生成openapi.json规范文件。
+  - 支持Apifox等工具导入，便于API文档管理和团队协作。
 
-章节来源
+**章节来源**
 - [backend/app/routers/auth.py#L98-L186:98-186](file://backend/app/routers/auth.py#L98-L186)
 - [backend/app/routers/trades.py#L292-L504:292-504](file://backend/app/routers/trades.py#L292-L504)
 - [backend/app/routers/tasks.py#L199-L237:199-237](file://backend/app/routers/tasks.py#L199-L237)
 - [backend/app/routers/subscriptions.py#L237-L320:237-320](file://backend/app/routers/subscriptions.py#L237-L320)
+- [backend/export_openapi.py#L1-L46:1-46](file://backend/export_openapi.py#L1-L46)
+
+## OpenAPI规范管理
+
+### 自动规范生成功能
+InvestRing后端提供了完整的OpenAPI规范管理功能，包括自动生成、导出和导入支持。
+
+#### 导出脚本功能
+- **export_openapi.py**：提供命令行工具，支持从运行中的后端服务导出OpenAPI规范
+- 支持命令行参数：`python export_openapi.py [url] [output_file]`
+- 默认URL：`http://localhost:8000/openapi.json`
+- 默认输出文件：`openapi.json`
+
+#### 规范文件结构
+- **openapi.json**：完整的OpenAPI 3.1.0规范文件
+- 包含所有75个API接口的详细描述
+- 支持标签分类：认证、投资人管理、组合管理、产品管理等
+- 包含完整的请求/响应模式定义
+
+#### 导入Apifox流程
+1. 打开Apifox → 项目设置 → 导入数据
+2. 选择 'OpenAPI/Swagger' 格式
+3. 上传openapi.json文件
+4. 选择导入模式（普通导入/自动合并）
+5. 确认导入
+
+#### Nginx配置支持
+- Nginx配置中包含`location /openapi.json`路由
+- 支持直接访问OpenAPI规范文件
+- 生产环境建议配合FastAPI文档路由配置
+
+**章节来源**
+- [backend/export_openapi.py#L1-L46:1-46](file://backend/export_openapi.py#L1-L46)
+- [backend/openapi.json#L1-L200:1-200](file://backend/openapi.json#L1-L200)
+- [backend/nginx/nginx.conf#L105-L108:105-108](file://backend/nginx/nginx.conf#L105-L108)
 
 ## 依赖分析
 - 外部依赖：FastAPI、SQLAlchemy、Pydantic、JWTS、bcrypt、APScheduler、pandas、numpy、tushare 等。
 - 内部依赖：路由模块依赖通用依赖与安全工具；业务模块通过数据库会话与模型交互。
+- **OpenAPI依赖**：FastAPI内置OpenAPI生成器，export_openapi.py提供外部导出功能。
 
 ```mermaid
 graph TB
@@ -491,18 +705,25 @@ Req --> AP["APScheduler"]
 Req --> PDa["pandas"]
 Req --> NP["numpy"]
 Req --> TS["tushare"]
+subgraph "OpenAPI支持"
+FA --> OA["OpenAPI生成器"]
+Exp["export_openapi.py"] --> OA
+OA --> Spec["openapi.json"]
+end
 ```
 
-图表来源
+**图表来源**
 - [backend/requirements.txt#L1-L19:1-19](file://backend/requirements.txt#L1-L19)
+- [backend/export_openapi.py#L1](file://backend/export_openapi.py#L1)
 
-章节来源
+**章节来源**
 - [backend/requirements.txt#L1-L19:1-19](file://backend/requirements.txt#L1-L19)
 
 ## 性能考虑
 - 数据库查询优化：分页查询、子查询与聚合查询（如最新快照）需注意索引与排序字段。
 - 交易与订阅确认：涉及多表关联与净值查询，建议缓存常用净值与交易日历。
 - 任务执行：批量同步与清理任务应分批处理，避免长时间阻塞。
+- **OpenAPI规范优化**：规范文件较大（7590行），建议在CI/CD中缓存和版本控制。
 
 ## 故障排除指南
 - 认证失败
@@ -520,15 +741,19 @@ Req --> TS["tushare"]
   - 产品/组合不存在：404，提示 Not found。
 - 任务执行异常
   - 任务失败：500，包含错误信息；日志中记录失败详情。
+- **OpenAPI规范问题**
+  - 导出失败：检查后端服务是否运行，网络连接是否正常。
+  - Apifox导入失败：确认openapi.json格式正确，版本兼容。
 
-章节来源
+**章节来源**
 - [backend/app/dependencies.py#L58-L111:58-111](file://backend/app/dependencies.py#L58-L111)
 - [backend/app/routers/trades.py#L298-L336:298-336](file://backend/app/routers/trades.py#L298-L336)
 - [backend/app/routers/subscriptions.py#L121-L140:121-140](file://backend/app/routers/subscriptions.py#L121-L140)
 - [backend/app/routers/tasks.py#L259-L267:259-267](file://backend/app/routers/tasks.py#L259-L267)
+- [backend/export_openapi.py#L21-L30:21-30](file://backend/export_openapi.py#L21-L30)
 
 ## 结论
-本 API 文档覆盖 InvestRing 后端主要业务模块，明确了认证与权限、数据模型、关键流程与错误处理。建议在生产环境中补充速率限制、审计日志与监控告警，并持续完善版本演进策略与向后兼容保障。
+本 API 文档覆盖 InvestRing 后端主要业务模块，明确了认证与权限、数据模型、关键流程与错误处理。新增的OpenAPI规范管理功能提供了完整的API文档自动化解决方案，支持Apifox等工具导入，便于团队协作和API文档维护。建议在生产环境中补充速率限制、审计日志与监控告警，并持续完善版本演进策略与向后兼容保障。
 
 ## 附录
 - 认证流程时序图
@@ -553,7 +778,7 @@ Sec-->>Auth : 成功
 Auth-->>Client : 返回登出成功
 ```
 
-图表来源
+**图表来源**
 - [backend/app/routers/auth.py#L29-L119:29-119](file://backend/app/routers/auth.py#L29-L119)
 - [backend/app/utils/security.py#L29-L46:29-46](file://backend/app/utils/security.py#L29-L46)
 
@@ -585,7 +810,7 @@ DB-->>Trades : 返回
 Trades-->>Client : 返回确认结果
 ```
 
-图表来源
+**图表来源**
 - [backend/app/routers/trades.py#L292-L504:292-504](file://backend/app/routers/trades.py#L292-L504)
 
 - 快照生成流程时序图
@@ -611,6 +836,24 @@ DB-->>Snap : 返回
 Snap-->>Client : 返回生成结果
 ```
 
-图表来源
+**图表来源**
 - [backend/app/routers/tasks.py#L112-L237:112-237](file://backend/app/routers/tasks.py#L112-L237)
 - [backend/app/routers/snapshots.py#L28-L55:28-55](file://backend/app/routers/snapshots.py#L28-L55)
+
+- **OpenAPI规范管理流程图**
+
+```mermaid
+flowchart TD
+A["后端服务启动"] --> B["FastAPI生成OpenAPI规范"]
+B --> C["export_openapi.py导出规范"]
+C --> D["生成openapi.json文件"]
+D --> E["Apifox导入规范"]
+E --> F["API文档管理"]
+F --> G["团队协作"]
+G --> H["版本控制"]
+H --> I["CI/CD集成"]
+```
+
+**图表来源**
+- [backend/export_openapi.py#L1-L46:1-46](file://backend/export_openapi.py#L1-L46)
+- [backend/openapi.json#L1-L200:1-200](file://backend/openapi.json#L1-L200)

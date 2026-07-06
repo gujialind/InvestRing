@@ -12,6 +12,29 @@ export function cn(...inputs: ClassValue[]) {
 // ==================== 日期格式化 ====================
 
 /**
+ * 将 Date 对象转换为本地日期字符串 (yyyy-MM-dd)
+ * 使用本地时区的年/月/日，避免 toISOString() 的 UTC 转换导致日期偏移
+ * （如 UTC+8 下 7月3日 00:00 经 toISOString 会变成 7月2日）
+ */
+export function toDateOnly(date: Date | undefined | null): string {
+  if (!date || isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * 将日期字符串 (yyyy-MM-dd) 解析为本地 Date 对象
+ * 添加 T00:00:00 后缀使其按本地时间解析，避免 new Date("yyyy-MM-dd") 按 UTC 解析导致时区偏移
+ */
+export function parseDateOnly(dateStr: string): Date | undefined {
+  if (!dateStr) return undefined;
+  const d = new Date(dateStr + "T00:00:00");
+  return isNaN(d.getTime()) ? undefined : d;
+}
+
+/**
  * 格式化日期为 YYYY-MM-DD
  */
 export function formatDate(date: string | Date | number): string {

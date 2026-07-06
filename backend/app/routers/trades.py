@@ -78,7 +78,7 @@ def _get_nav_for_trade_confirmation(
         price_record = db.query(PriceRecord).filter(
             PriceRecord.product_code == product_code,
             PriceRecord.market == market,
-            PriceRecord.price_date == trade_date
+            PriceRecord.date == trade_date
         ).first()
         
         if not price_record or not price_record.unit_price:
@@ -96,8 +96,8 @@ def _get_nav_for_trade_confirmation(
         price_record = db.query(PriceRecord).filter(
             PriceRecord.product_code == product_code,
             PriceRecord.market == market,
-            PriceRecord.price_date <= trade_date
-        ).order_by(PriceRecord.price_date.desc()).first()
+            PriceRecord.date <= trade_date
+        ).order_by(PriceRecord.date.desc()).first()
         
         if price_record and price_record.unit_price:
             return Decimal(str(price_record.unit_price))
