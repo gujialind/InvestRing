@@ -92,35 +92,21 @@ def delete_snapshot(
     snapshot_date: str = typer.Argument(..., help="YYYY-MM-DD"),
     yes: bool = typer.Option(False, "--yes"),
 ):
-    """删除指定日期的快照"""
+    """删除指定日期的快照（自动级联回退依赖该快照的申购/赎回）"""
     with cli_context() as db:
-        from app.models.portfolio_position import PortfolioPosition
-        from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
-        from app.models.investor_holding import InvestorHolding
+        from app.services.snapshot_service import _delete_existing_snapshots
 
         sd = parse_date(snapshot_date)
-
-        pp_deleted = db.query(PortfolioPosition).filter(
-            PortfolioPosition.portfolio_code == portfolio_code,
-            PortfolioPosition.snapshot_date == sd,
-        ).delete()
-
-        nav_deleted = db.query(PortfolioValueSnapshot).filter(
-            PortfolioValueSnapshot.portfolio_code == portfolio_code,
-            PortfolioValueSnapshot.snapshot_date == sd,
-        ).delete()
-
-        ih_deleted = db.query(InvestorHolding).filter(
-            InvestorHolding.portfolio_code == portfolio_code,
-            InvestorHolding.snapshot_date == sd,
-        ).delete()
-
+        result = _delete_existing_snapshots(db, portfolio_code, sd)
         db.flush()
-        success(data={
+
+        output = {
             "message": f"快照 {sd} 已删除",
-            "deleted": {
-                "portfolio_position": pp_deleted,
-                "portfolio_value_snapshot": nav_deleted,
-                "investor_holding": ih_deleted,
-            }
-        })
+            "deleted": result["deleted"],
+        }
+        cascaded = result.get("cascaded_subscriptions", [])
+        if cascaded:
+            output["cascaded_subscriptions"] = cascaded
+            output["message"] += f"（级联回退了 {len(cascaded)} 笔申购/赎回）"
+
+        success(data=output)

@@ -99,7 +99,7 @@ def sync_price_data(
         db: 数据库会话
         product_code: 产品代码
         market: 市场类型
-        start_date: 开始日期，默认今天往前推30天
+        start_date: 开始日期，不传则从有数据以来全部同步
         end_date: 结束日期，默认今天
 
     Returns:
@@ -115,12 +115,10 @@ def sync_price_data(
     if not product:
         raise ValueError(f"产品 {product_code} ({market}) 不存在")
 
-    if not start_date:
-        start_date = date.today() - timedelta(days=30)
     if not end_date:
         end_date = date.today()
 
-    start_str = start_date.strftime("%Y%m%d")
+    start_str = start_date.strftime("%Y%m%d") if start_date else None
     end_str = end_date.strftime("%Y%m%d")
 
     raw_data = []
@@ -140,7 +138,7 @@ def sync_price_data(
     if not raw_data:
         return {
             "success": True,
-            "message": f"无新数据需要同步（{start_str}~{end_str}，共 0 条）",
+            "message": f"无新数据需要同步（{start_str or 'beginning'}~{end_str}，共 0 条）",
             "synced_count": 0,
         }
 
@@ -155,14 +153,14 @@ def sync_price_data(
     synced_count = 0
     try:
         # 一次性加载该产品在该市场的所有已有记录到内存字典
-        existing_records = db.query(PriceRecord).filter(
-            and_(
-                PriceRecord.product_code == product_code,
-                PriceRecord.market == market,
-                PriceRecord.date >= start_date,
-                PriceRecord.date <= end_date,
-            )
-        ).all()
+        filters = [
+            PriceRecord.product_code == product_code,
+            PriceRecord.market == market,
+            PriceRecord.date <= end_date,
+        ]
+        if start_date:
+            filters.append(PriceRecord.date >= start_date)
+        existing_records = db.query(PriceRecord).filter(and_(*filters)).all()
         existing_map: dict[date, PriceRecord] = {r.date: r for r in existing_records}
 
         for record in raw_data:

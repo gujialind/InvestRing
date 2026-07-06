@@ -9,18 +9,17 @@ from app.models.portfolio import Portfolio
 from app.models.investor import Investor
 from app.models.investor_holding import InvestorHolding
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
-from app.models.trading_calendar import TradingCalendar
+from app.services.trading_utils import is_trading_day
+from app.services.subscription_service import (
+    confirm_single_subscription,
+    unconfirm_single_subscription,
+    NavNotAvailableError,
+    InvalidStatusError,
+)
 from app.schemas.subscription import SubscriptionCreate, SubscriptionUpdate, SubscriptionResponse
 from app.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
-
-
-def _is_trading_day(db: Session, target_date: date) -> bool:
-    cal = db.query(TradingCalendar).filter(TradingCalendar.date == target_date).first()
-    if not cal:
-        return False
-    return cal.is_open
 
 
 def _get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date]:
@@ -119,7 +118,7 @@ def create_subscription(
     current_user: Investor = Depends(get_current_admin),
 ):
     # 交易日校验
-    if not _is_trading_day(db, subscription.apply_date):
+    if not is_trading_day(db, subscription.apply_date):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": "NON_TRADING_DAY", "message": "非交易日，请等待交易日再提交"},
@@ -213,95 +212,29 @@ def get_subscription(
     return subscription
 
 
-def _get_next_trading_day(db: Session, from_date: date, days: int = 1) -> date:
-    """
-    获取 from_date 之后第 days 个交易日
-    days=1 表示 T+1，days=0 表示当天
-    """
-    from sqlalchemy import func
-    next_date = from_date
-    for _ in range(max(days, 0)):
-        next_date = (
-            db.query(func.min(TradingCalendar.date))
-            .filter(
-                TradingCalendar.date > next_date,
-                TradingCalendar.is_open == True,
-            )
-            .scalar()
-        )
-        if not next_date:
-            break
-    return next_date or from_date
-
 
 @router.post("/{id}/confirm")
 def confirm_subscription(
     id: int,
-    confirm_date: Optional[date] = None,
-    unit_price: Optional[float] = None,
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
     subscription = db.query(Subscription).filter(Subscription.id == id).first()
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
-    if subscription.status != "pending":
+
+    try:
+        confirm_single_subscription(db, subscription)
+    except InvalidStatusError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "INVALID_STATUS", "message": "仅 pending 状态可确认"},
+            detail={"error": "INVALID_STATUS", "message": str(e)},
         )
-
-    if confirm_date is None:
-        confirm_date = _get_next_trading_day(db, subscription.apply_date, days=1)
-
-    portfolio = (
-        db.query(Portfolio)
-        .filter(Portfolio.code == subscription.portfolio_code)
-        .first()
-    )
-
-    is_first = (
-        db.query(Subscription)
-        .filter(
-            Subscription.portfolio_code == subscription.portfolio_code,
-            Subscription.sub_type == "subscribe",
-            Subscription.status == "confirmed",
+    except NavNotAvailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "NAV_NOT_AVAILABLE", "message": str(e)},
         )
-        .count()
-        == 0
-    )
-
-    if subscription.sub_type == "subscribe":
-        if is_first:
-            nav = Decimal("1.0000")
-        else:
-            if unit_price is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail={"error": "MISSING_NAV", "message": "请提供确认净值"},
-                )
-            nav = Decimal(str(unit_price))
-        shares = Decimal(str(subscription.amount)) / nav
-        subscription.unit_price = nav
-        subscription.shares = shares
-        subscription.amount = subscription.amount
-    else:
-        if unit_price is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={"error": "MISSING_NAV", "message": "请提供确认净值"},
-            )
-        nav = Decimal(str(unit_price))
-        amount = Decimal(str(subscription.shares)) * nav
-        subscription.unit_price = nav
-        subscription.amount = amount
-
-    subscription.status = "confirmed"
-    subscription.confirm_date = confirm_date
-
-    if is_first and subscription.sub_type == "subscribe" and portfolio.status == "draft":
-        portfolio.status = "active"
-        portfolio.started_at = confirm_date
 
     db.commit()
     db.refresh(subscription)
@@ -349,14 +282,37 @@ def unconfirm_subscription(
     subscription = db.query(Subscription).filter(Subscription.id == id).first()
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
-    if subscription.status != "confirmed":
+
+    # 快照保护：确认日及之后已有快照则拒绝
+    if subscription.status == "confirmed" and subscription.confirm_date:
+        snapshots_after = (
+            db.query(PortfolioValueSnapshot)
+            .filter(
+                PortfolioValueSnapshot.portfolio_code == subscription.portfolio_code,
+                PortfolioValueSnapshot.snapshot_date >= subscription.confirm_date,
+            )
+            .count()
+        )
+        if snapshots_after > 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "SNAPSHOT_DEPENDENCY",
+                    "message": (
+                        f"该申赎已被快照纳入（{subscription.confirm_date} 及之后有 {snapshots_after} 张快照），"
+                        f"请先删除 {subscription.confirm_date} 及之后的快照"
+                    ),
+                },
+            )
+
+    try:
+        unconfirm_single_subscription(db, subscription)
+    except InvalidStatusError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "INVALID_STATUS", "message": "仅 confirmed 状态可取消确认"},
+            detail={"error": "INVALID_STATUS", "message": str(e)},
         )
-    
-    subscription.status = "pending"
-    subscription.confirm_date = None
+
     db.commit()
     return {"message": "Subscription unconfirmed successfully"}
 

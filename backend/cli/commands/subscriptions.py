@@ -114,59 +114,26 @@ def get_subscription(
 @app.command("confirm")
 def confirm_subscription(
     id: int = typer.Argument(...),
-    confirm_date: str = typer.Option(None, "--confirm-date", help="YYYY-MM-DD"),
-    unit_price: Optional[float] = typer.Option(None, "--unit-price"),
 ):
-    """确认申购赎回（首次申购净值固定1.0000）"""
+    """确认申购赎回（首次申购净值固定1.0000，确认日期和净值均由后端自动计算）"""
     with cli_context() as db:
         from app.models.subscription import Subscription
-        from app.models.portfolio import Portfolio
-        from app.services.trading_utils import get_next_trading_day
+        from app.services.subscription_service import (
+            confirm_single_subscription,
+            NavNotAvailableError,
+            InvalidStatusError,
+        )
 
         sub = db.query(Subscription).filter(Subscription.id == id).first()
         if not sub:
             error("NOT_FOUND", f"申购赎回记录 {id} 不存在")
-        if sub.status != "pending":
-            error("INVALID_STATUS", "仅 pending 状态可确认")
 
-        cd = parse_date(confirm_date) if confirm_date else None
-        if cd is None:
-            confirm_date = get_next_trading_day(db, sub.apply_date, days=1)
-        else:
-            confirm_date = cd
-
-        portfolio = db.query(Portfolio).filter(Portfolio.code == sub.portfolio_code).first()
-
-        is_first = db.query(Subscription).filter(
-            Subscription.portfolio_code == sub.portfolio_code,
-            Subscription.sub_type == "subscribe",
-            Subscription.status == "confirmed",
-        ).count() == 0
-
-        if sub.sub_type == "subscribe":
-            if is_first:
-                nav = Decimal("1.0000")
-            else:
-                if unit_price is None:
-                    error("MISSING_NAV", "请提供确认净值 --unit-price")
-                nav = Decimal(str(unit_price))
-            shares = Decimal(str(sub.amount)) / nav
-            sub.unit_price = nav
-            sub.shares = shares
-        else:
-            if unit_price is None:
-                error("MISSING_NAV", "请提供确认净值 --unit-price")
-            nav = Decimal(str(unit_price))
-            amount = Decimal(str(sub.shares)) * nav
-            sub.unit_price = nav
-            sub.amount = amount
-
-        sub.status = "confirmed"
-        sub.confirm_date = confirm_date
-
-        if is_first and sub.sub_type == "subscribe" and portfolio.status == "draft":
-            portfolio.status = "active"
-            portfolio.started_at = confirm_date
+        try:
+            confirm_single_subscription(db, sub)
+        except InvalidStatusError as e:
+            error("INVALID_STATUS", str(e))
+        except NavNotAvailableError as e:
+            error("NAV_NOT_AVAILABLE", str(e))
 
         db.flush()
         db.refresh(sub)
@@ -201,13 +168,37 @@ def unconfirm_subscription(
     """取消确认（confirmed -> pending）"""
     with cli_context() as db:
         from app.models.subscription import Subscription
+        from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+        from app.services.subscription_service import (
+            unconfirm_single_subscription,
+            InvalidStatusError,
+        )
 
         sub = db.query(Subscription).filter(Subscription.id == id).first()
         if not sub:
             error("NOT_FOUND", f"申购赎回记录 {id} 不存在")
-        if sub.status != "confirmed":
-            error("INVALID_STATUS", "仅 confirmed 状态可取消确认")
-        sub.status = "pending"
-        sub.confirm_date = None
+
+        # 快照保护
+        if sub.status == "confirmed" and sub.confirm_date:
+            snapshots_after = (
+                db.query(PortfolioValueSnapshot)
+                .filter(
+                    PortfolioValueSnapshot.portfolio_code == sub.portfolio_code,
+                    PortfolioValueSnapshot.snapshot_date >= sub.confirm_date,
+                )
+                .count()
+            )
+            if snapshots_after > 0:
+                error(
+                    "SNAPSHOT_DEPENDENCY",
+                    f"该申赎已被快照纳入（{sub.confirm_date} 及之后有 {snapshots_after} 张快照），"
+                    f"请先删除 {sub.confirm_date} 及之后的快照",
+                )
+
+        try:
+            unconfirm_single_subscription(db, sub)
+        except InvalidStatusError as e:
+            error("INVALID_STATUS", str(e))
+
         db.flush()
         success(data={"message": "申购赎回已取消确认", "id": id})

@@ -22,8 +22,8 @@ export const subscriptionApi = {
   delete: (id: number) =>
     request<void>({ method: "DELETE", url: `/subscriptions/${id}` }),
 
-  confirm: (id: number, data?: { confirm_date?: string; unit_price?: number }) =>
-    request<Subscription>({ method: "POST", url: `/subscriptions/${id}/confirm`, data }),
+  confirm: (id: number) =>
+    request<Subscription>({ method: "POST", url: `/subscriptions/${id}/confirm` }),
 
   cancel: (id: number) =>
     request<Subscription>({ method: "POST", url: `/subscriptions/${id}/cancel` }),

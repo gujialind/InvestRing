@@ -56,14 +56,13 @@ def sync_history(
     product_code: str = typer.Argument(...),
     market: str = typer.Argument(...),
 ):
-    """同步产品近90天历史数据"""
+    """同步产品完整历史数据（从有数据以来）"""
     with cli_context() as db:
-        from datetime import date, timedelta
+        from datetime import date
         from app.services.market_data_service import sync_price_data
 
         end_date = date.today()
-        start_date = end_date - timedelta(days=90)
-        result = sync_price_data(db, product_code, market, start_date, end_date)
+        result = sync_price_data(db, product_code, market, None, end_date)
         if result.get("success"):
             success(data=result)
         else:
