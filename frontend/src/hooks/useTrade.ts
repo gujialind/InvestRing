@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { tradeApi, subscriptionApi, getErrorMessage } from "@/lib/api";
+import { tradeApi, subscriptionApi, getErrorMessage, ApiException } from "@/lib/api";
 import { TradeCreate, TradeUpdate } from "@/types/trade";
 import { SubscriptionCreate } from "@/types/subscription";
 import { useUIStore } from "@/stores/uiStore";
@@ -300,8 +300,7 @@ export function useConfirmSubscription() {
       data,
     }: {
       id: number;
-      data?: { confirm_date?: string; unit_price?: number };
-    }) => subscriptionApi.confirm(id, data),
+    }) => subscriptionApi.confirm(id),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, data.id] });
       queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, "list"] });
@@ -370,6 +369,15 @@ export function useUnconfirmSubscription() {
       });
     },
     onError: (error: unknown) => {
+      // SNAPSHOT_DEPENDENCY: 快照已纳入该申购，需先删除快照
+      if (error instanceof ApiException && error.code === "SNAPSHOT_DEPENDENCY") {
+        addToast({
+          type: "error",
+          title: "快照依赖冲突",
+          message: error.message,
+        });
+        return;
+      }
       addToast({
         type: "error",
         title: "取消确认失败",

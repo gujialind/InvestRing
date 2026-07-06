@@ -194,8 +194,8 @@ def confirm_trade(
             nav_price = _get_nav_for_confirmation(
                 db, trade.product_code, trade.market, trade.trade_date, product.is_qdii
             )
-            if nav_price is None:
-                error("MISSING_NAV", f"产品{trade.product_code}在T={trade.trade_date}的净值尚未同步")
+            if nav_price is None and price is None:
+                error("MISSING_NAV", f"产品{trade.product_code}在T={trade.trade_date}的净值尚未同步，请手动指定 --price")
             final_price = Decimal(str(price)) if price is not None else nav_price
             trade.price = final_price
             if trade.trade_type == "buy":

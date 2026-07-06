@@ -38,6 +38,11 @@ def cli_context() -> Generator:
         db.commit()
     except SystemExit:
         # 允许 output.success/error 的 sys.exit 正常传播
+        # 成功场景下需要 commit（因为 success() 会 sys.exit）
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         db.close()
         raise
     except ValueError as e:

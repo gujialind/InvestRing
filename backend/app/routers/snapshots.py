@@ -167,18 +167,28 @@ def delete_snapshot(
     """
     删除指定日期的快照
     
+    删除前自动级联回退依赖该快照的已确认申购/赎回。
+    
     权限：仅admin
     """
     from app.services.snapshot_service import _delete_existing_snapshots
     
     try:
-        _delete_existing_snapshots(db, portfolio_code, snapshot_date)
+        result = _delete_existing_snapshots(db, portfolio_code, snapshot_date)
         db.commit()
         
-        return {
+        response = {
             "success": True,
             "message": f"已删除组合 {portfolio_code} 在 {snapshot_date} 的快照",
+            "deleted": result["deleted"],
         }
+        
+        cascaded = result.get("cascaded_subscriptions", [])
+        if cascaded:
+            response["cascaded_subscriptions"] = cascaded
+            response["message"] += f"（级联回退了 {len(cascaded)} 笔申购/赎回）"
+        
+        return response
     except Exception as e:
         db.rollback()
         raise HTTPException(

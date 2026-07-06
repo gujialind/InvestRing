@@ -73,13 +73,10 @@ def sync_history(
     market: str,
     db: Session = Depends(get_db),
 ):
-    from datetime import timedelta
-
     end_date = date.today()
-    start_date = end_date - timedelta(days=90)
 
     try:
-        result = sync_price_data(db, code, market, start_date, end_date)
+        result = sync_price_data(db, code, market, None, end_date)
         if result["success"]:
             return result
         else:

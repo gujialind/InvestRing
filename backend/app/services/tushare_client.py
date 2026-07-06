@@ -122,16 +122,16 @@ def get_trade_calendar_years(years: List[int], exchange: str = "SSE") -> List[Di
 
 def get_fund_daily(
     ts_code: str,
-    start_date: str,
-    end_date: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     获取场内基金日线行情（收盘价）
 
     Args:
         ts_code: 基金代码（如 510300.SH）
-        start_date: 开始日期（YYYYMMDD）
-        end_date: 结束日期（YYYYMMDD）
+        start_date: 开始日期（YYYYMMDD），不传则返回从有数据以来的全部记录
+        end_date: 结束日期（YYYYMMDD），不传则到最新日期
 
     Returns:
         行情数据列表，包含 trade_date, close, pre_close, pct_chg 等
@@ -143,11 +143,12 @@ def get_fund_daily(
 
     for attempt in range(max_retries):
         try:
-            df = pro.fund_daily(
-                ts_code=ts_code,
-                start_date=start_date,
-                end_date=end_date,
-            )
+            kwargs = {"ts_code": ts_code}
+            if start_date:
+                kwargs["start_date"] = start_date
+            if end_date:
+                kwargs["end_date"] = end_date
+            df = pro.fund_daily(**kwargs)
             break
         except Exception as e:
             if attempt < max_retries - 1:
@@ -173,16 +174,16 @@ def get_fund_daily(
 
 def get_fund_nav(
     ts_code: str,
-    start_date: str,
-    end_date: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     获取场外基金净值数据
 
     Args:
         ts_code: 基金代码（如 000001.OF）
-        start_date: 开始日期（YYYYMMDD）
-        end_date: 结束日期（YYYYMMDD）
+        start_date: 开始日期（YYYYMMDD），不传则返回从有数据以来的全部记录
+        end_date: 结束日期（YYYYMMDD），不传则到最新日期
 
     Returns:
         净值数据列表，包含 trade_date, unit_nav, accum_nav 等
@@ -194,11 +195,12 @@ def get_fund_nav(
 
     for attempt in range(max_retries):
         try:
-            df = pro.fund_nav(
-                ts_code=ts_code,
-                start_date=start_date,
-                end_date=end_date,
-            )
+            kwargs = {"ts_code": ts_code}
+            if start_date:
+                kwargs["start_date"] = start_date
+            if end_date:
+                kwargs["end_date"] = end_date
+            df = pro.fund_nav(**kwargs)
             break
         except Exception as e:
             if attempt < max_retries - 1:

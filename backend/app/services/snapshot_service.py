@@ -17,6 +17,8 @@ from app.models import (
     Trade, Subscription, ShareChangeEvent, PriceRecord, Product,
     TradingCalendar, Investor, AssetClassification
 )
+from app.services.trading_utils import is_trading_day as _trading_utils_is_trading_day
+from app.services.subscription_service import unconfirm_single_subscription
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,8 @@ logger = logging.getLogger(__name__)
 def generate_daily_snapshots(
     db: Session,
     portfolio_code: str,
-    target_date: date
+    target_date: date,
+    skip_validation: bool = False,
 ) -> Dict[str, Any]:
     """
     生成指定组合在指定日期的三张快照表
@@ -33,6 +36,7 @@ def generate_daily_snapshots(
         db: 数据库会话
         portfolio_code: 组合代码
         target_date: 目标日期
+        skip_validation: 跳过依赖校验（用于 recalculate force 模式）
         
     Returns:
         生成结果
@@ -44,11 +48,12 @@ def generate_daily_snapshots(
     _validate_portfolio(db, portfolio_code)
     _validate_trading_day(db, target_date)
     
-    validations = validate_snapshot_dependencies(db, portfolio_code, target_date)
-    failed_checks = [v for v in validations if v["status"] == "failed"]
-    if failed_checks:
-        error_messages = "; ".join([v["message"] for v in failed_checks])
-        raise ValueError(f"依赖数据校验失败: {error_messages}")
+    if not skip_validation:
+        validations = validate_snapshot_dependencies(db, portfolio_code, target_date)
+        failed_checks = [v for v in validations if v["status"] == "failed"]
+        if failed_checks:
+            error_messages = "; ".join([v["message"] for v in failed_checks])
+            raise ValueError(f"依赖数据校验失败: {error_messages}")
     
     try:
         # 2. 删除已有快照（如果存在）
@@ -102,14 +107,20 @@ def recalculate_snapshots(
 ) -> Dict[str, Any]:
     """
     重算指定时间区间的快照
-    
+
+    流程（每个交易日 D）：
+    1. 校验依赖数据（非 force 模式）
+    2. 删除旧快照（自动级联回退依赖该快照的申购/赎回）
+    3. 重新生成快照
+    4. 自动确认 apply_date==D 的 pending 申购/赎回
+
     Args:
         db: 数据库会话
         portfolio_code: 组合代码（None表示所有活跃组合）
         start_date: 起始日期
         end_date: 结束日期
         force: 是否强制重算（跳过校验）
-        
+
     Returns:
         重算结果
     """
@@ -120,17 +131,19 @@ def recalculate_snapshots(
             raise ValueError(f"组合 {portfolio_code} 不存在")
     else:
         portfolios = db.query(Portfolio).filter(Portfolio.status == "active").all()
-    
+
     results = []
-    
+
     for portfolio in portfolios:
         result = {
             "portfolio_code": portfolio.code,
             "processed_dates": [],
             "total_processed": 0,
+            "auto_confirmed": [],
+            "cascaded_unconfirmed": [],
             "errors": []
         }
-        
+
         current_date = start_date
         while current_date <= end_date:
             try:
@@ -138,7 +151,7 @@ def recalculate_snapshots(
                 if not _is_trading_day(db, current_date):
                     current_date += timedelta(days=1)
                     continue
-                
+
                 # 校验依赖数据（除非force模式）
                 if not force:
                     validations = validate_snapshot_dependencies(
@@ -153,16 +166,31 @@ def recalculate_snapshots(
                         })
                         current_date += timedelta(days=1)
                         continue
-                
+
                 # 删除旧快照并生成新快照
-                _delete_existing_snapshots(db, portfolio.code, current_date)
+                # （_delete_existing_snapshots 会自动级联回退依赖该快照的申购）
+                delete_info = _delete_existing_snapshots(db, portfolio.code, current_date)
+                if delete_info["cascaded_subscriptions"]:
+                    result["cascaded_unconfirmed"].extend(
+                        delete_info["cascaded_subscriptions"]
+                    )
+
                 snapshot_result = generate_daily_snapshots(
+                    db, portfolio.code, current_date,
+                    skip_validation=force,
+                )
+
+                # 自动确认 apply_date<=current_date 的 pending 申购/赎回
+                auto_results = auto_confirm_after_snapshot(
                     db, portfolio.code, current_date
                 )
-                
+                if auto_results:
+                    db.commit()
+                    result["auto_confirmed"].extend(auto_results)
+
                 result["processed_dates"].append(current_date.isoformat())
                 result["total_processed"] += 1
-                
+
             except Exception as e:
                 db.rollback()
                 result["errors"].append({
@@ -172,11 +200,11 @@ def recalculate_snapshots(
                 logger.error(
                     f"重算失败: portfolio={portfolio.code}, date={current_date}, error={str(e)}"
                 )
-            
+
             current_date += timedelta(days=1)
-        
+
         results.append(result)
-    
+
     return {
         "success": True,
         "message": f"重算完成，共处理{len(portfolios)}个组合",
@@ -235,31 +263,90 @@ def _validate_trading_day(db: Session, target_date: date):
 
 
 def _is_trading_day(db: Session, target_date: date) -> bool:
-    """检查指定日期是否为交易日"""
-    cal = db.query(TradingCalendar).filter(
-        TradingCalendar.date == target_date
-    ).first()
-    if not cal:
-        return False
-    return cal.is_open
+    """检查指定日期是否为交易日（委托给 trading_utils）"""
+    return _trading_utils_is_trading_day(db, target_date)
 
 
-def _delete_existing_snapshots(db: Session, portfolio_code: str, target_date: date):
-    """删除指定日期的三张快照表记录"""
-    db.query(PortfolioPosition).filter(
+def _cascade_unconfirm_subscriptions(
+    db: Session, portfolio_code: str, snapshot_date: date
+) -> List[Dict[str, Any]]:
+    """
+    级联回退依赖指定日期快照的申购/赎回。
+
+    查找所有 status='confirmed' 且 confirm_date == snapshot_date 的记录，
+    将它们回退至 pending 状态。
+
+    Returns:
+        被回退的记录信息列表
+    """
+    confirmed_subs = (
+        db.query(Subscription)
+        .filter(
+            Subscription.portfolio_code == portfolio_code,
+            Subscription.confirm_date == snapshot_date,
+            Subscription.status == "confirmed",
+        )
+        .all()
+    )
+
+    unconfirmed_list = []
+    for sub in confirmed_subs:
+        sub_id = sub.id
+        sub_type = sub.sub_type
+        try:
+            unconfirm_single_subscription(db, sub, auto_flush=False)
+            unconfirmed_list.append({
+                "id": sub_id,
+                "sub_type": sub_type,
+                "confirm_date": snapshot_date.isoformat(),
+                "action": "unconfirmed",
+            })
+            logger.info(
+                f"级联取消确认: subscription_id={sub_id}, "
+                f"portfolio={portfolio_code}, snapshot_date={snapshot_date}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"级联取消确认失败: subscription_id={sub_id}, error={str(e)}"
+            )
+
+    return unconfirmed_list
+
+
+def _delete_existing_snapshots(
+    db: Session, portfolio_code: str, target_date: date
+) -> Dict[str, Any]:
+    """
+    删除指定日期的三张快照表记录。
+
+    删除前先级联回退依赖该快照的已确认申购/赎回。
+    """
+    # 先级联回退依赖该快照的申购
+    cascaded = _cascade_unconfirm_subscriptions(db, portfolio_code, target_date)
+
+    pp_deleted = db.query(PortfolioPosition).filter(
         PortfolioPosition.portfolio_code == portfolio_code,
         PortfolioPosition.snapshot_date == target_date
     ).delete()
     
-    db.query(PortfolioValueSnapshot).filter(
+    nav_deleted = db.query(PortfolioValueSnapshot).filter(
         PortfolioValueSnapshot.portfolio_code == portfolio_code,
         PortfolioValueSnapshot.snapshot_date == target_date
     ).delete()
     
-    db.query(InvestorHolding).filter(
+    ih_deleted = db.query(InvestorHolding).filter(
         InvestorHolding.portfolio_code == portfolio_code,
         InvestorHolding.snapshot_date == target_date
     ).delete()
+
+    return {
+        "cascaded_subscriptions": cascaded,
+        "deleted": {
+            "portfolio_position": pp_deleted,
+            "portfolio_value_snapshot": nav_deleted,
+            "investor_holding": ih_deleted,
+        },
+    }
 
 
 def _generate_portfolio_position(
@@ -657,6 +744,87 @@ def _generate_investor_holding(
     return result_holdings
 
 
+def auto_confirm_after_snapshot(
+    db: Session,
+    portfolio_code: str,
+    snapshot_date: date
+) -> List[Dict[str, Any]]:
+    """
+    快照生成后自动确认 apply_date<=snapshot_date 的 pending 申购/赎回。
+
+    包含 apply_date < snapshot_date 的记录（可能因级联回退而重新变为 pending）。
+    按 apply_date 升序确认，确保 is_first 判断正确。
+    此时 snapshot_date 的快照已存在，NAV 可获取。
+    单笔失败不影响整批，失败记录到结果中。
+
+    Args:
+        db: 数据库会话
+        portfolio_code: 组合代码
+        snapshot_date: 快照日期
+
+    Returns:
+        确认结果列表
+    """
+    from app.services.subscription_service import (
+        confirm_single_subscription,
+        NavNotAvailableError,
+        InvalidStatusError,
+    )
+
+    pending_subs = (
+        db.query(Subscription)
+        .filter(
+            Subscription.portfolio_code == portfolio_code,
+            Subscription.apply_date <= snapshot_date,
+            Subscription.status == "pending",
+        )
+        .order_by(Subscription.apply_date.asc())
+        .all()
+    )
+
+    results = []
+    for sub in pending_subs:
+        sub_id = sub.id
+        sub_type = sub.sub_type
+        try:
+            confirm_single_subscription(db, sub, auto_flush=True)
+            results.append({
+                "id": sub_id,
+                "sub_type": sub_type,
+                "apply_date": snapshot_date.isoformat(),
+                "action": "auto_confirmed",
+                "status": "success",
+            })
+            logger.info(
+                f"自动确认: subscription_id={sub_id}, "
+                f"portfolio={portfolio_code}, apply_date={snapshot_date}"
+            )
+        except (NavNotAvailableError, InvalidStatusError) as e:
+            results.append({
+                "id": sub_id,
+                "sub_type": sub_type,
+                "apply_date": snapshot_date.isoformat(),
+                "action": "auto_confirm_failed",
+                "error": str(e),
+            })
+            logger.warning(
+                f"自动确认失败: subscription_id={sub_id}, error={str(e)}"
+            )
+        except Exception as e:
+            results.append({
+                "id": sub_id,
+                "sub_type": sub_type,
+                "apply_date": snapshot_date.isoformat(),
+                "action": "auto_confirm_failed",
+                "error": str(e),
+            })
+            logger.error(
+                f"自动确认异常: subscription_id={sub_id}, error={str(e)}"
+            )
+
+    return results
+
+
 # ==================== 校验函数 ====================
 
 def _check_trading_day(db: Session, target_date: date) -> Dict[str, Any]:
@@ -682,21 +850,26 @@ def _check_pending_transactions(
     """检查是否存在pending交易"""
     pending_trades = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
-        Trade.trade_date <= target_date,
+        Trade.trade_date < target_date,
         Trade.status == "pending"
     ).count()
     
     pending_subs = db.query(Subscription).filter(
         Subscription.portfolio_code == portfolio_code,
-        Subscription.apply_date <= target_date,
+        Subscription.apply_date < target_date,
         Subscription.status == "pending"
     ).count()
     
     if pending_trades > 0 or pending_subs > 0:
+        details = []
+        if pending_trades > 0:
+            details.append(f"{pending_trades}笔apply_date<{target_date}的待确认交易")
+        if pending_subs > 0:
+            details.append(f"{pending_subs}笔apply_date<{target_date}的待确认申赎")
         return {
             "check_type": "pending_transactions",
             "status": "failed",
-            "message": f"存在{pending_trades}笔待确认交易和{pending_subs}笔待确认申赎，请先确认这些交易"
+            "message": f"存在{', '.join(details)}，请先确认这些交易"
         }
     return {"check_type": "pending_transactions", "status": "passed", "message": "无待确认交易"}
 
