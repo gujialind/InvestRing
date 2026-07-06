@@ -32,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatNumber, formatReturnRate } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatReturnRate, toDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { tradeApi, positionApi, platformApi, getErrorMessage } from "@/lib/api";
@@ -151,7 +151,7 @@ export default function PositionsPage() {
     }
     
     if (selectedDate) {
-      const dateStr = selectedDate.toISOString().split("T")[0];
+      const dateStr = toDateOnly(selectedDate);
       updateCashPosition.mutate({
         amount: cashAmount,
         platformCode: selectedPlatform,
@@ -202,7 +202,7 @@ export default function PositionsPage() {
       portfolio_code: code,
       product_code: formData.product_code,
       trade_type: tradeType,
-      trade_date: new Date().toISOString().split("T")[0],
+      trade_date: toDateOnly(new Date()),
       price: parseFloat(formData.price),
       ...(tradeType === "buy"
         ? { amount }

@@ -15,7 +15,7 @@ from sqlalchemy import func, and_
 from app.models import (
     Portfolio, PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
     Trade, Subscription, ShareChangeEvent, PriceRecord, Product,
-    TradingCalendar, Investor
+    TradingCalendar, Investor, AssetClassification
 )
 
 logger = logging.getLogger(__name__)
@@ -292,11 +292,27 @@ def _generate_portfolio_position(
         
         for pos in prev_positions:
             key = (pos.product_code, pos.market)
+            # 如果 asset_type 为空，从产品表推导
+            pos_asset_type = pos.asset_type
+            if not pos_asset_type:
+                if pos.product_code == "CASH":
+                    pos_asset_type = "cash"
+                else:
+                    product = db.query(Product).filter(
+                        Product.code == pos.product_code,
+                        Product.market == pos.market
+                    ).first()
+                    if product and product.asset_class_code:
+                        ac = db.query(AssetClassification).filter(
+                            AssetClassification.code == product.asset_class_code
+                        ).first()
+                        if ac:
+                            pos_asset_type = ac.asset_type
             positions[key] = {
                 "shares": Decimal(str(pos.shares or 0)),
                 "amount": Decimal(str(pos.amount or 0)) if pos.amount is not None else None,
                 "cost_price": Decimal(str(pos.cost_price or 0)) if pos.cost_price else None,
-                "asset_type": pos.asset_type,
+                "asset_type": pos_asset_type,
             }
     
     # 应用期间内的已确认交易（从prev_snapshot次日到target_date）
@@ -322,7 +338,7 @@ def _generate_portfolio_position(
                 "shares": Decimal("0"),
                 "amount": None,
                 "cost_price": None,
-                "asset_type": product.asset_type if product else "stock",
+                "asset_type": _get_product_asset_type(db, product) if product else "stock",
             }
         
         new_shares = Decimal(str(trade.shares or 0))
@@ -352,15 +368,81 @@ def _generate_portfolio_position(
         if key in positions:
             positions[key]["shares"] -= Decimal(str(trade.shares or 0))
     
-    # 处理申购对成分基金的影响（简化：这里假设申购不直接影响持仓快照中的基金份额）
-    # 实际业务中，申购会增加组合现金，赎回会减少组合现金
-    # 基金份额的变化需要通过更复杂的逻辑来跟踪
+    # 处理申购/赎回对组合现金的影响
+    # 申购确认增加现金，赎回确认减少现金
+    cash_key = ("CASH", "")
+    
+    # 获取前一日现金余额
+    prev_cash_amount = Decimal("0")
+    if prev_snapshot:
+        prev_cash_pos = db.query(PortfolioPosition).filter(
+            PortfolioPosition.portfolio_code == portfolio_code,
+            PortfolioPosition.snapshot_date == prev_snapshot,
+            PortfolioPosition.product_code == "CASH"
+        ).first()
+        if prev_cash_pos and prev_cash_pos.amount is not None:
+            prev_cash_amount = Decimal(str(prev_cash_pos.amount))
+    
+    # 如果没有前一日快照，检查是否有初始现金持仓
+    if not prev_snapshot and cash_key not in positions:
+        positions[cash_key] = {
+            "shares": None,
+            "amount": Decimal("0"),
+            "cost_price": None,
+            "asset_type": "cash",
+        }
+    elif cash_key not in positions:
+        positions[cash_key] = {
+            "shares": None,
+            "amount": prev_cash_amount,
+            "cost_price": None,
+            "asset_type": "cash",
+        }
+    
+    # 处理申购确认（增加现金）
+    confirmed_subs = db.query(Subscription).filter(
+        Subscription.portfolio_code == portfolio_code,
+        Subscription.sub_type == "subscribe",
+        Subscription.status == "confirmed",
+        Subscription.confirm_date >= start_apply_date,
+        Subscription.confirm_date <= target_date
+    ).all()
+    
+    for sub in confirmed_subs:
+        positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) + Decimal(str(sub.amount or 0))
+    
+    # 处理赎回确认（减少现金）
+    confirmed_redeems = db.query(Subscription).filter(
+        Subscription.portfolio_code == portfolio_code,
+        Subscription.sub_type == "redeem",
+        Subscription.status == "confirmed",
+        Subscription.confirm_date >= start_apply_date,
+        Subscription.confirm_date <= target_date
+    ).all()
+    
+    for sub in confirmed_redeems:
+        positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) - Decimal(str(sub.amount or 0))
+    
+    # 处理买入交易（减少现金）
+    for trade in buy_trades:
+        trade_amount = Decimal(str(trade.amount or 0))
+        if trade_amount > 0:
+            positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) - trade_amount
+    
+    # 处理卖出交易（增加现金）
+    for trade in sell_trades:
+        trade_amount = Decimal(str(trade.amount or 0))
+        if trade_amount > 0:
+            positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) + trade_amount
     
     # 构建最终的持仓快照对象
     result_positions = []
     for (product_code, market), pos_data in positions.items():
-        if pos_data["shares"] <= 0 and pos_data.get("amount", Decimal("0")) <= 0:
-            continue  # 跳过零持仓
+        # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
+        is_cash = pos_data.get("asset_type") == "cash"
+        if not is_cash:
+            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and pos_data.get("amount", Decimal("0")) <= 0:
+                continue  # 跳过零持仓
         
         # 获取产品价格
         product = db.query(Product).filter(
@@ -382,15 +464,15 @@ def _generate_portfolio_position(
                 price_record = db.query(PriceRecord).filter(
                     PriceRecord.product_code == product_code,
                     PriceRecord.market == market,
-                    PriceRecord.price_date <= prev_date
-                ).order_by(PriceRecord.price_date.desc()).first()
+                    PriceRecord.date <= prev_date
+                ).order_by(PriceRecord.date.desc()).first()
             else:
                 # 普通基金：取当日净值
                 price_record = db.query(PriceRecord).filter(
                     PriceRecord.product_code == product_code,
                     PriceRecord.market == market,
-                    PriceRecord.price_date <= target_date
-                ).order_by(PriceRecord.price_date.desc()).first()
+                    PriceRecord.date <= target_date
+                ).order_by(PriceRecord.date.desc()).first()
             
             if price_record:
                 unit_price = Decimal(str(price_record.unit_price))
@@ -403,8 +485,8 @@ def _generate_portfolio_position(
             portfolio_code=portfolio_code,
             product_code=product_code,
             market=market,
-            shares=float(pos_data["shares"]) if pos_data["shares"] else None,
-            amount=float(market_value) if market_value is not None and pos_data["asset_type"] == "cash" else None,
+            shares=float(pos_data["shares"]) if pos_data["shares"] and not is_cash else None,
+            amount=float(pos_data["amount"]) if is_cash and pos_data["amount"] is not None else None,
             frozen_shares=float(frozen_shares) if frozen_shares > 0 else 0,
             frozen_amount=0,  # 简化：暂不计算冻结金额
             cost_price=float(pos_data["cost_price"]) if pos_data["cost_price"] else None,
@@ -589,7 +671,7 @@ def _check_trading_day(db: Session, target_date: date) -> Dict[str, Any]:
             "status": "failed",
             "message": f"{target_date} 不是交易日，无法生成快照"
         }
-    return {"check_type": "trading_day", "status": "passed"}
+    return {"check_type": "trading_day", "status": "passed", "message": "交易日校验通过"}
 
 
 def _check_pending_transactions(
@@ -616,7 +698,7 @@ def _check_pending_transactions(
             "status": "failed",
             "message": f"存在{pending_trades}笔待确认交易和{pending_subs}笔待确认申赎，请先确认这些交易"
         }
-    return {"check_type": "pending_transactions", "status": "passed"}
+    return {"check_type": "pending_transactions", "status": "passed", "message": "无待确认交易"}
 
 
 def _check_price_data_completeness(
@@ -662,7 +744,7 @@ def _check_price_data_completeness(
             price = db.query(PriceRecord).filter(
                 PriceRecord.product_code == product_code,
                 PriceRecord.market == market,
-                PriceRecord.price_date == prev_date
+                PriceRecord.date == prev_date
             ).first()
             
             if not price:
@@ -672,8 +754,8 @@ def _check_price_data_completeness(
             price = db.query(PriceRecord).filter(
                 PriceRecord.product_code == product_code,
                 PriceRecord.market == market,
-                PriceRecord.price_date <= target_date
-            ).order_by(PriceRecord.price_date.desc()).first()
+                PriceRecord.date <= target_date
+            ).order_by(PriceRecord.date.desc()).first()
             
             if not price:
                 missing_prices.append(f"{product_code}({market})")
@@ -690,7 +772,7 @@ def _check_price_data_completeness(
             "status": "failed",
             "message": "; ".join(all_missing)
         }
-    return {"check_type": "price_data", "status": "passed"}
+    return {"check_type": "price_data", "status": "passed", "message": "净值数据完整"}
 
 
 def _check_share_change_events(
@@ -711,7 +793,18 @@ def _check_share_change_events(
             "status": "warning",
             "message": f"存在{pending_events}笔未确认的份额变动事件，可能影响快照准确性"
         }
-    return {"check_type": "share_change_events", "status": "passed"}
+    return {"check_type": "share_change_events", "status": "passed", "message": "无未确认的份额变动事件"}
+
+
+def _get_product_asset_type(db: Session, product: Product) -> str:
+    """从产品表获取资产类型"""
+    if product.asset_class_code:
+        ac = db.query(AssetClassification).filter(
+            AssetClassification.code == product.asset_class_code
+        ).first()
+        if ac:
+            return ac.asset_type
+    return "stock"  # 默认返回股票类型
 
 
 # ==================== 冻结字段计算函数 ====================

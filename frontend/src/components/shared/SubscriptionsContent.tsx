@@ -35,7 +35,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatNumber } from "@/lib/utils";
+import { formatCurrency, formatNumber, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { subscriptionApi } from "@/lib/api";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo } from "lucide-react";
@@ -103,7 +103,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     investor_code: "",
     amount: "",
     shares: "",
-    apply_date: new Date().toISOString().split("T")[0],
+    apply_date: toDateOnly(new Date()),
   });
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [editHint, setEditHint] = useState(false);
@@ -137,7 +137,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     createSubscription.mutate(payload, {
       onSuccess: () => {
         setIsDialogOpen(false);
-        setFormData({ investor_code: "", amount: "", shares: "", apply_date: new Date().toISOString().split("T")[0] });
+        setFormData({ investor_code: "", amount: "", shares: "", apply_date: toDateOnly(new Date()) });
         if (isDraft) router.push(`${basePath}/${code}`);
       },
     });
@@ -255,9 +255,9 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                 <div className="space-y-2">
                   <Label htmlFor="apply_date">申请日期</Label>
                   <DatePicker
-                    date={formData.apply_date ? new Date(formData.apply_date) : undefined}
+                    date={parseDateOnly(formData.apply_date)}
                     onSelect={(date) => {
-                      setFormData({ ...formData, apply_date: date ? date.toISOString().split("T")[0] : "" });
+                      setFormData({ ...formData, apply_date: toDateOnly(date) });
                     }}
                   />
                 </div>

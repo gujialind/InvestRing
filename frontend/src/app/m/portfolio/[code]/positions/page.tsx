@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass, toDateOnly } from "@/lib/utils";
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { positionApi, platformApi, getErrorMessage } from "@/lib/api";
@@ -112,7 +112,7 @@ export default function MobilePositionsPage() {
     }
     
     if (selectedDate) {
-      const dateStr = selectedDate.toISOString().split("T")[0];
+      const dateStr = toDateOnly(selectedDate);
       updateCashPosition.mutate({
         amount: cashAmount,
         platformCode: selectedPlatform,

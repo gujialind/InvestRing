@@ -90,9 +90,18 @@ export function useRecalculateSnapshots() {
 
 // 预检验证
 export function useValidateSnapshot() {
+  const addToast = useUIStore((state) => state.addToast);
+
   return useMutation({
     mutationFn: ({ portfolioCode, targetDate }: { portfolioCode: string; targetDate: string }) =>
       snapshotApi.validate(portfolioCode, targetDate),
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "预检验证失败",
+        message: getErrorMessage(error, "请稍后重试"),
+      });
+    },
   });
 }
 
