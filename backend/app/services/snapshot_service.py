@@ -224,44 +224,8 @@ def recalculate_snapshots(
                 if auto_results:
                     db.commit()
                     result["auto_confirmed"].extend(auto_results)
-
-                    # 有申购被确认后，仅重新生成投资人份额快照和更新 value_snapshot 的 total_shares
-                    # 不调用 generate_daily_snapshots，避免内部级联回退刚确认的申购
-                    from app.models import PortfolioValueSnapshot as PVS
-                    vs = db.query(PVS).filter(
-                        PVS.portfolio_code == portfolio.code,
-                        PVS.snapshot_date == current_date
-                    ).first()
-                    if vs:
-                        new_holdings = _generate_investor_holding(
-                            db, portfolio.code, current_date, vs
-                        )
-                        # 删除旧的 investor_holding
-                        db.query(InvestorHolding).filter(
-                            InvestorHolding.portfolio_code == portfolio.code,
-                            InvestorHolding.snapshot_date == current_date
-                        ).delete()
-                        db.add_all(new_holdings)
-
-                        # 更新 value_snapshot 的 total_shares
-                        prev_holding_date = db.query(func.max(InvestorHolding.snapshot_date)).filter(
-                            InvestorHolding.portfolio_code == portfolio.code,
-                            InvestorHolding.snapshot_date <= current_date
-                        ).scalar()
-                        if prev_holding_date:
-                            new_total_shares = db.query(func.sum(InvestorHolding.shares)).filter(
-                                InvestorHolding.portfolio_code == portfolio.code,
-                                InvestorHolding.snapshot_date == prev_holding_date
-                            ).scalar()
-                            if new_total_shares and Decimal(str(new_total_shares)) > 0:
-                                vs.total_shares = float(new_total_shares)
-                                if Decimal(str(vs.total_shares)) > 0:
-                                    vs.unit_price = float(
-                                        Decimal(str(vs.total_value)) / Decimal(str(vs.total_shares))
-                                    )
-                        db.commit()
-                        snapshot_result["total_shares"] = float(vs.total_shares)
-                        snapshot_result["unit_price"] = float(vs.unit_price)
+                    # 申赎统一 T+1 确认，刚确认的申赎 confirm_date = D+1 > D
+                    # 不会被 D 日的 investor_holding 包含，无需局部刷新
 
                 result["processed_dates"].append(current_date.isoformat())
                 result["total_processed"] += 1
