@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base, SessionLocal
-from app.routers import auth, investors, portfolios, products, platforms, trading_calendar, data_sources, market_data, subscriptions, trades, share_change_events, positions, logs, tasks, notifications, snapshots
+from app.routers import auth, investors, portfolios, products, platforms, trading_calendar, data_sources, market_data, subscriptions, trades, share_change_events, positions, logs, tasks, notifications, snapshots, cash_transfers
 from app.init_tasks import init_scheduled_tasks
 
 # Create tables
@@ -46,6 +46,7 @@ app.include_router(logs.router, prefix="/api/system/logs", tags=["系统日志"]
 app.include_router(tasks.router, prefix="/api/system/tasks", tags=["任务管理"])
 app.include_router(notifications.router, prefix="/api/system/notifications", tags=["通知"])
 app.include_router(snapshots.router, prefix="/api/v1", tags=["快照管理"])
+app.include_router(cash_transfers.router, prefix="/api", tags=["现金转移"])
 
 @app.get("/")
 def read_root():

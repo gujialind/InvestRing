@@ -8,6 +8,7 @@ class Subscription(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
     investor_code = Column(String(20), ForeignKey("investor.code"), nullable=False)
+    platform_code = Column(String(20), ForeignKey("platform.code"), nullable=False)
     sub_type = Column(String(10), nullable=False)
     amount = Column(Numeric(15, 4))
     shares = Column(Numeric(15, 4))

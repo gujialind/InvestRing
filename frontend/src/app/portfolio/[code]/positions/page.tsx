@@ -35,13 +35,14 @@ import {
 import { formatCurrency, formatNumber, formatReturnRate, toDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { tradeApi, positionApi, platformApi, getErrorMessage } from "@/lib/api";
+import { tradeApi, positionApi, platformApi, getErrorMessage, cashTransferApi } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 import { usePositionList } from "@/hooks/usePosition";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { Position } from "@/types/position";
 import type { Platform } from "@/types/platform";
 import type { TradeCreate } from "@/types/trade";
+import { parseDateOnly } from "@/lib/utils";
 
 export default function PositionsPage() {
   const params = useParams();
@@ -66,6 +67,14 @@ export default function PositionsPage() {
   const [cashAmount, setCashAmount] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+
+  // 现金转移相关状态
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [transferFrom, setTransferFrom] = useState("");
+  const [transferTo, setTransferTo] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferDate, setTransferDate] = useState(toDateOnly(new Date()));
+  const [transferCrossDay, setTransferCrossDay] = useState(false);
 
   // 获取平台列表
   const { data: platformsData } = useQuery({
@@ -165,6 +174,39 @@ export default function PositionsPage() {
     }
   };
 
+  // 现金转移 mutation
+  const createCashTransfer = useMutation({
+    mutationFn: (data: {
+      from_platform: string;
+      to_platform: string;
+      amount: number;
+      cross_day: boolean;
+      transfer_date: string;
+    }) => cashTransferApi.create(code, data),
+    onSuccess: () => {
+      addToast({
+        type: "success",
+        title: "转移成功",
+        message: "现金转移已创建",
+      });
+      setIsTransferOpen(false);
+      setTransferFrom("");
+      setTransferTo("");
+      setTransferAmount("");
+      setTransferDate(toDateOnly(new Date()));
+      setTransferCrossDay(false);
+      queryClient.invalidateQueries({ queryKey: ["positions", code] });
+      queryClient.invalidateQueries({ queryKey: ["cash-transfers", "list", code] });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "转移失败",
+        message: getErrorMessage(error, "请检查输入信息"),
+      });
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -229,6 +271,9 @@ export default function PositionsPage() {
             </div>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setIsTransferOpen(true)}>
+              现金转移
+            </Button>
             <Button variant="outline" onClick={() => setIsCashUpdateOpen(true)}>
               <RefreshCw className="mr-2 h-4 w-4" />
               更新非净值资产
@@ -387,6 +432,104 @@ export default function PositionsPage() {
                   <Button type="submit" disabled={updateCashPosition.isPending}>
                     {updateCashPosition.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     确认更新
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* 现金转移对话框 */}
+          <Dialog open={isTransferOpen} onOpenChange={setIsTransferOpen} modal={false}>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle>平台间现金转移</DialogTitle>
+                <DialogDescription>
+                  将现金从一个平台转移到另一个平台
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                if (!transferFrom || !transferTo || transferFrom === transferTo) {
+                  addToast({ type: "error", title: "输入错误", message: "请选择不同的转出和转入平台" });
+                  return;
+                }
+                if (!transferAmount || parseFloat(transferAmount) <= 0) {
+                  addToast({ type: "error", title: "输入错误", message: "请输入有效的转移金额" });
+                  return;
+                }
+                createCashTransfer.mutate({
+                  from_platform: transferFrom,
+                  to_platform: transferTo,
+                  amount: parseFloat(transferAmount),
+                  cross_day: transferCrossDay,
+                  transfer_date: transferDate,
+                });
+              }}>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>转出平台</Label>
+                    <Select value={transferFrom} onValueChange={setTransferFrom} required>
+                      <SelectTrigger><SelectValue placeholder="选择转出平台" /></SelectTrigger>
+                      <SelectContent>
+                        {platforms.map((p) => (
+                          <SelectItem key={p.code} value={p.code} disabled={p.code === transferTo}>
+                            {p.name} ({p.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>转入平台</Label>
+                    <Select value={transferTo} onValueChange={setTransferTo} required>
+                      <SelectTrigger><SelectValue placeholder="选择转入平台" /></SelectTrigger>
+                      <SelectContent>
+                        {platforms.map((p) => (
+                          <SelectItem key={p.code} value={p.code} disabled={p.code === transferFrom}>
+                            {p.name} ({p.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="transfer_amount">转移金额（元）</Label>
+                    <Input
+                      id="transfer_amount"
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={transferAmount}
+                      onChange={(e) => setTransferAmount(e.target.value)}
+                      placeholder="请输入转移金额"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>转移日期</Label>
+                    <DatePicker
+                      date={parseDateOnly(transferDate)}
+                      onSelect={(date) => setTransferDate(toDateOnly(date))}
+                    />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="cross_day"
+                      checked={transferCrossDay}
+                      onChange={(e) => setTransferCrossDay(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    <Label htmlFor="cross_day" className="text-sm">
+                      跨天到账（T+1 确认，适用于银行转账等场景）
+                    </Label>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsTransferOpen(false)}>取消</Button>
+                  <Button type="submit" disabled={createCashTransfer.isPending}>
+                    {createCashTransfer.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    确认转移
                   </Button>
                 </DialogFooter>
               </form>

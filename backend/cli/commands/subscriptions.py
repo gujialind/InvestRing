@@ -41,6 +41,7 @@ def list_subscriptions(
 def create_subscription(
     portfolio_code: str = typer.Option(..., "--portfolio-code"),
     investor_code: str = typer.Option(..., "--investor-code"),
+    platform_code: str = typer.Option(..., "--platform-code", help="交易平台代码"),
     sub_type: str = typer.Option(..., "--type", help="subscribe/redeem"),
     amount: Optional[float] = typer.Option(None, "--amount", help="申购金额"),
     shares: Optional[float] = typer.Option(None, "--shares", help="赎回份额"),
@@ -52,6 +53,7 @@ def create_subscription(
         from app.models.subscription import Subscription
         from app.models.portfolio import Portfolio
         from app.models.investor import Investor
+        from app.models.platform import Platform
         from app.services.trading_utils import is_trading_day
         from app.services.position_service import calculate_investor_available_shares
 
@@ -69,11 +71,17 @@ def create_subscription(
         if not investor:
             error("NOT_FOUND", "投资人不存在")
 
+        # 校验平台存在性
+        platform = db.query(Platform).filter(Platform.code == platform_code).first()
+        if not platform:
+            error("PLATFORM_NOT_FOUND", f"平台 {platform_code} 不存在")
+
         if sub_type == "subscribe":
             if not amount or amount <= 0:
                 error("INVALID_AMOUNT", "申购金额必须大于0")
             new_sub = Subscription(
                 portfolio_code=portfolio_code, investor_code=investor_code,
+                platform_code=platform_code,
                 sub_type="subscribe", amount=Decimal(str(amount)),
                 apply_date=ad, status="pending", notes=notes,
             )
@@ -85,6 +93,7 @@ def create_subscription(
                 error("INSUFFICIENT_SHARES", f"赎回份额超过可用份额({float(available)})")
             new_sub = Subscription(
                 portfolio_code=portfolio_code, investor_code=investor_code,
+                platform_code=platform_code,
                 sub_type="redeem", shares=Decimal(str(shares)),
                 apply_date=ad, status="pending", notes=notes,
             )

@@ -61,6 +61,24 @@ def generate_daily_snapshots(
         
         # 3. 生成持仓快照
         positions = _generate_portfolio_position(db, portfolio_code, target_date)
+        
+        # 无持仓时跳过快照生成（组合尚无资产，如首次申购确认前）
+        if not positions:
+            db.commit()
+            logger.info(
+                f"快照跳过: portfolio={portfolio_code}, date={target_date}, "
+                f"原因=无持仓"
+            )
+            return {
+                "success": True,
+                "message": "跳过：组合无持仓",
+                "portfolio_code": portfolio_code,
+                "snapshot_date": target_date,
+                "total_value": 0,
+                "total_shares": 0,
+                "unit_price": 0,
+            }
+        
         db.add_all(positions)
         
         # 4. 生成市值快照
@@ -112,13 +130,16 @@ def recalculate_snapshots(
     1. 校验依赖数据（非 force 模式）
     2. 删除旧快照（自动级联回退依赖该快照的申购/赎回）
     3. 重新生成快照
-    4. 自动确认 apply_date==D 的 pending 申购/赎回
+    4. 自动确认 apply_date<=D 的 pending 申购/赎回
+
+    注意：若 end_date 之后存在快照，会自动扩展重算区间至最新快照日，
+    因为 D 日快照被重算后，依赖它的 D+1 日及以后的快照也必须重新生成。
 
     Args:
         db: 数据库会话
         portfolio_code: 组合代码（None表示所有活跃组合）
         start_date: 起始日期
-        end_date: 结束日期
+        end_date: 结束日期（若之后有快照会自动扩展）
         force: 是否强制重算（跳过校验）
 
     Returns:
@@ -135,6 +156,19 @@ def recalculate_snapshots(
     results = []
 
     for portfolio in portfolios:
+        # 检查 end_date 之后是否存在快照，若有则自动扩展 end_date
+        # 因为 D 日快照被重算后，D+1 日快照依赖 D 日数据，也必须重新生成
+        latest_snapshot_date = db.query(func.max(PortfolioValueSnapshot.snapshot_date)).filter(
+            PortfolioValueSnapshot.portfolio_code == portfolio.code
+        ).scalar()
+        effective_end_date = end_date
+        if latest_snapshot_date and latest_snapshot_date > end_date:
+            logger.info(
+                f"组合 {portfolio.code}: end_date({end_date}) 后存在快照"
+                f"(最新={latest_snapshot_date})，自动扩展重算区间"
+            )
+            effective_end_date = latest_snapshot_date
+
         result = {
             "portfolio_code": portfolio.code,
             "processed_dates": [],
@@ -144,8 +178,11 @@ def recalculate_snapshots(
             "errors": []
         }
 
+        if effective_end_date > end_date:
+            result["end_date_extended_to"] = effective_end_date.isoformat()
+
         current_date = start_date
-        while current_date <= end_date:
+        while current_date <= effective_end_date:
             try:
                 # 检查是否为交易日
                 if not _is_trading_day(db, current_date):
@@ -167,14 +204,14 @@ def recalculate_snapshots(
                         current_date += timedelta(days=1)
                         continue
 
-                # 删除旧快照并生成新快照
-                # （_delete_existing_snapshots 会自动级联回退依赖该快照的申购）
+                # 删除旧快照并级联回退依赖该快照的申购/赎回
                 delete_info = _delete_existing_snapshots(db, portfolio.code, current_date)
                 if delete_info["cascaded_subscriptions"]:
                     result["cascaded_unconfirmed"].extend(
                         delete_info["cascaded_subscriptions"]
                     )
 
+                # 先生成快照（作为自动确认的 NAV 依赖）
                 snapshot_result = generate_daily_snapshots(
                     db, portfolio.code, current_date,
                     skip_validation=force,
@@ -187,6 +224,44 @@ def recalculate_snapshots(
                 if auto_results:
                     db.commit()
                     result["auto_confirmed"].extend(auto_results)
+
+                    # 有申购被确认后，仅重新生成投资人份额快照和更新 value_snapshot 的 total_shares
+                    # 不调用 generate_daily_snapshots，避免内部级联回退刚确认的申购
+                    from app.models import PortfolioValueSnapshot as PVS
+                    vs = db.query(PVS).filter(
+                        PVS.portfolio_code == portfolio.code,
+                        PVS.snapshot_date == current_date
+                    ).first()
+                    if vs:
+                        new_holdings = _generate_investor_holding(
+                            db, portfolio.code, current_date, vs
+                        )
+                        # 删除旧的 investor_holding
+                        db.query(InvestorHolding).filter(
+                            InvestorHolding.portfolio_code == portfolio.code,
+                            InvestorHolding.snapshot_date == current_date
+                        ).delete()
+                        db.add_all(new_holdings)
+
+                        # 更新 value_snapshot 的 total_shares
+                        prev_holding_date = db.query(func.max(InvestorHolding.snapshot_date)).filter(
+                            InvestorHolding.portfolio_code == portfolio.code,
+                            InvestorHolding.snapshot_date <= current_date
+                        ).scalar()
+                        if prev_holding_date:
+                            new_total_shares = db.query(func.sum(InvestorHolding.shares)).filter(
+                                InvestorHolding.portfolio_code == portfolio.code,
+                                InvestorHolding.snapshot_date == prev_holding_date
+                            ).scalar()
+                            if new_total_shares and Decimal(str(new_total_shares)) > 0:
+                                vs.total_shares = float(new_total_shares)
+                                if Decimal(str(vs.total_shares)) > 0:
+                                    vs.unit_price = float(
+                                        Decimal(str(vs.total_value)) / Decimal(str(vs.total_shares))
+                                    )
+                        db.commit()
+                        snapshot_result["total_shares"] = float(vs.total_shares)
+                        snapshot_result["unit_price"] = float(vs.unit_price)
 
                 result["processed_dates"].append(current_date.isoformat())
                 result["total_processed"] += 1
@@ -273,8 +348,8 @@ def _cascade_unconfirm_subscriptions(
     """
     级联回退依赖指定日期快照的申购/赎回。
 
-    查找所有 status='confirmed' 且 confirm_date == snapshot_date 的记录，
-    将它们回退至 pending 状态。
+    查找所有 status='confirmed' 且 apply_date == snapshot_date 的记录，
+    因为它们使用了该快照的 NAV 进行确认，快照被删后必须回退。
 
     Returns:
         被回退的记录信息列表
@@ -283,7 +358,7 @@ def _cascade_unconfirm_subscriptions(
         db.query(Subscription)
         .filter(
             Subscription.portfolio_code == portfolio_code,
-            Subscription.confirm_date == snapshot_date,
+            Subscription.apply_date == snapshot_date,
             Subscription.status == "confirmed",
         )
         .all()
@@ -378,23 +453,22 @@ def _generate_portfolio_position(
         ).all()
         
         for pos in prev_positions:
-            key = (pos.product_code, pos.market)
-            # 如果 asset_type 为空，从产品表推导
+            key = (pos.product_code, pos.market, pos.platform_code)
+            # 如果 asset_type 为空或为中文，统一规范化
             pos_asset_type = pos.asset_type
-            if not pos_asset_type:
-                if pos.product_code == "CASH":
-                    pos_asset_type = "cash"
-                else:
-                    product = db.query(Product).filter(
-                        Product.code == pos.product_code,
-                        Product.market == pos.market
+            if pos.product_code == "CASH":
+                pos_asset_type = "cash"
+            elif not pos_asset_type:
+                product = db.query(Product).filter(
+                    Product.code == pos.product_code,
+                    Product.market == pos.market
+                ).first()
+                if product and product.asset_class_code:
+                    ac = db.query(AssetClassification).filter(
+                        AssetClassification.code == product.asset_class_code
                     ).first()
-                    if product and product.asset_class_code:
-                        ac = db.query(AssetClassification).filter(
-                            AssetClassification.code == product.asset_class_code
-                        ).first()
-                        if ac:
-                            pos_asset_type = ac.asset_type
+                    if ac:
+                        pos_asset_type = ac.asset_type
             positions[key] = {
                 "shares": Decimal(str(pos.shares or 0)),
                 "amount": Decimal(str(pos.amount or 0)) if pos.amount is not None else None,
@@ -415,7 +489,7 @@ def _generate_portfolio_position(
     ).all()
     
     for trade in buy_trades:
-        key = (trade.product_code, trade.market)
+        key = (trade.product_code, trade.market, trade.platform_code)
         if key not in positions:
             product = db.query(Product).filter(
                 Product.code == trade.product_code,
@@ -425,21 +499,25 @@ def _generate_portfolio_position(
                 "shares": Decimal("0"),
                 "amount": None,
                 "cost_price": None,
-                "asset_type": _get_product_asset_type(db, product) if product else "stock",
+                "asset_type": "cash" if trade.product_code == "CASH" else (_get_product_asset_type(db, product) if product else "stock"),
             }
         
-        new_shares = Decimal(str(trade.shares or 0))
-        new_price = Decimal(str(trade.price or 0))
-        old_shares = positions[key]["shares"]
-        old_cost = positions[key]["cost_price"] or Decimal("0")
-        
-        # 加权平均成本价
-        if old_shares > 0:
-            positions[key]["cost_price"] = (old_shares * old_cost + new_shares * new_price) / (old_shares + new_shares)
+        if trade.product_code == "CASH":
+            # 现金转移买入：增加平台现金
+            positions[key]["amount"] = (positions[key]["amount"] or Decimal("0")) + Decimal(str(trade.amount or 0))
         else:
-            positions[key]["cost_price"] = new_price
-        
-        positions[key]["shares"] += new_shares
+            new_shares = Decimal(str(trade.shares or 0))
+            new_price = Decimal(str(trade.price or 0))
+            old_shares = positions[key]["shares"]
+            old_cost = positions[key]["cost_price"] or Decimal("0")
+            
+            # 加权平均成本价
+            if old_shares > 0:
+                positions[key]["cost_price"] = (old_shares * old_cost + new_shares * new_price) / (old_shares + new_shares)
+            else:
+                positions[key]["cost_price"] = new_price
+            
+            positions[key]["shares"] += new_shares
     
     # 处理卖出交易
     sell_trades = db.query(Trade).filter(
@@ -451,42 +529,46 @@ def _generate_portfolio_position(
     ).all()
     
     for trade in sell_trades:
-        key = (trade.product_code, trade.market)
-        if key in positions:
+        key = (trade.product_code, trade.market, trade.platform_code)
+        if trade.product_code == "CASH":
+            # 现金转移卖出：减少平台现金
+            if key not in positions:
+                positions[key] = {
+                    "shares": None,
+                    "amount": Decimal("0"),
+                    "cost_price": None,
+                    "asset_type": "cash",
+                }
+            positions[key]["amount"] = (positions[key]["amount"] or Decimal("0")) - Decimal(str(trade.amount or 0))
+        elif key in positions:
             positions[key]["shares"] -= Decimal(str(trade.shares or 0))
     
-    # 处理申购/赎回对组合现金的影响
+    # 处理申购/赎回对组合现金的影响（按平台拆分）
     # 申购确认增加现金，赎回确认减少现金
-    cash_key = ("CASH", "")
     
-    # 获取前一日现金余额
-    prev_cash_amount = Decimal("0")
+    # 获取前一日各平台的现金余额
+    prev_cash_by_platform = {}
     if prev_snapshot:
-        prev_cash_pos = db.query(PortfolioPosition).filter(
+        prev_cash_positions = db.query(PortfolioPosition).filter(
             PortfolioPosition.portfolio_code == portfolio_code,
             PortfolioPosition.snapshot_date == prev_snapshot,
             PortfolioPosition.product_code == "CASH"
-        ).first()
-        if prev_cash_pos and prev_cash_pos.amount is not None:
-            prev_cash_amount = Decimal(str(prev_cash_pos.amount))
+        ).all()
+        for cpos in prev_cash_positions:
+            prev_cash_by_platform[cpos.platform_code] = Decimal(str(cpos.amount or 0))
     
-    # 如果没有前一日快照，检查是否有初始现金持仓
-    if not prev_snapshot and cash_key not in positions:
-        positions[cash_key] = {
-            "shares": None,
-            "amount": Decimal("0"),
-            "cost_price": None,
-            "asset_type": "cash",
-        }
-    elif cash_key not in positions:
-        positions[cash_key] = {
-            "shares": None,
-            "amount": prev_cash_amount,
-            "cost_price": None,
-            "asset_type": "cash",
-        }
+    # 为每个有前一日现金的平台初始化持仓
+    for plat_code, prev_amount in prev_cash_by_platform.items():
+        cash_key = ("CASH", "", plat_code)
+        if cash_key not in positions:
+            positions[cash_key] = {
+                "shares": None,
+                "amount": prev_amount,
+                "cost_price": None,
+                "asset_type": "cash",
+            }
     
-    # 处理申购确认（增加现金）
+    # 处理申购确认（增加对应平台的现金）
     confirmed_subs = db.query(Subscription).filter(
         Subscription.portfolio_code == portfolio_code,
         Subscription.sub_type == "subscribe",
@@ -496,9 +578,17 @@ def _generate_portfolio_position(
     ).all()
     
     for sub in confirmed_subs:
+        cash_key = ("CASH", "", sub.platform_code)
+        if cash_key not in positions:
+            positions[cash_key] = {
+                "shares": None,
+                "amount": Decimal("0"),
+                "cost_price": None,
+                "asset_type": "cash",
+            }
         positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) + Decimal(str(sub.amount or 0))
     
-    # 处理赎回确认（减少现金）
+    # 处理赎回确认（减少对应平台的现金）
     confirmed_redeems = db.query(Subscription).filter(
         Subscription.portfolio_code == portfolio_code,
         Subscription.sub_type == "redeem",
@@ -508,23 +598,51 @@ def _generate_portfolio_position(
     ).all()
     
     for sub in confirmed_redeems:
+        cash_key = ("CASH", "", sub.platform_code)
+        if cash_key not in positions:
+            positions[cash_key] = {
+                "shares": None,
+                "amount": Decimal("0"),
+                "cost_price": None,
+                "asset_type": "cash",
+            }
         positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) - Decimal(str(sub.amount or 0))
     
-    # 处理买入交易（减少现金）
+    # 处理买入交易（减少对应平台的现金）—— 排除 CASH 产品（已在上方处理）
     for trade in buy_trades:
+        if trade.product_code == "CASH":
+            continue  # 现金转移买入已直接修改 amount，无需再调整现金
         trade_amount = Decimal(str(trade.amount or 0))
         if trade_amount > 0:
+            cash_key = ("CASH", "", trade.platform_code)
+            if cash_key not in positions:
+                positions[cash_key] = {
+                    "shares": None,
+                    "amount": Decimal("0"),
+                    "cost_price": None,
+                    "asset_type": "cash",
+                }
             positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) - trade_amount
     
-    # 处理卖出交易（增加现金）
+    # 处理卖出交易（增加对应平台的现金）—— 排除 CASH 产品（已在上方处理）
     for trade in sell_trades:
+        if trade.product_code == "CASH":
+            continue  # 现金转移卖出已直接修改 amount，无需再调整现金
         trade_amount = Decimal(str(trade.amount or 0))
         if trade_amount > 0:
+            cash_key = ("CASH", "", trade.platform_code)
+            if cash_key not in positions:
+                positions[cash_key] = {
+                    "shares": None,
+                    "amount": Decimal("0"),
+                    "cost_price": None,
+                    "asset_type": "cash",
+                }
             positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) + trade_amount
     
     # 构建最终的持仓快照对象
     result_positions = []
-    for (product_code, market), pos_data in positions.items():
+    for (product_code, market, platform_code), pos_data in positions.items():
         # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
         is_cash = pos_data.get("asset_type") == "cash"
         if not is_cash:
@@ -570,6 +688,7 @@ def _generate_portfolio_position(
         
         position = PortfolioPosition(
             portfolio_code=portfolio_code,
+            platform_code=platform_code,
             product_code=product_code,
             market=market,
             shares=float(pos_data["shares"]) if pos_data["shares"] and not is_cash else None,
@@ -578,7 +697,7 @@ def _generate_portfolio_position(
             frozen_amount=0,  # 简化：暂不计算冻结金额
             cost_price=float(pos_data["cost_price"]) if pos_data["cost_price"] else None,
             unit_price=float(unit_price) if unit_price else None,
-            market_value=float(market_value) if market_value else None,
+            market_value=float(market_value) if market_value is not None else None,
             asset_type=pos_data["asset_type"],
             snapshot_date=target_date
         )
@@ -609,11 +728,19 @@ def _generate_portfolio_value_snapshot(
         elif pos.amount is not None:
             total_value += Decimal(str(pos.amount))
     
-    # 获取总份额（从投资人快照汇总，或使用前一日的值）
-    prev_holding = db.query(func.sum(InvestorHolding.shares)).filter(
+    # 获取总份额（从前一日投资人快照汇总，或使用前一日的值）
+    prev_holding_date = db.query(func.max(InvestorHolding.snapshot_date)).filter(
         InvestorHolding.portfolio_code == portfolio_code,
         InvestorHolding.snapshot_date < target_date
     ).scalar()
+    
+    if prev_holding_date:
+        prev_holding = db.query(func.sum(InvestorHolding.shares)).filter(
+            InvestorHolding.portfolio_code == portfolio_code,
+            InvestorHolding.snapshot_date == prev_holding_date
+        ).scalar()
+    else:
+        prev_holding = None
     
     total_shares = Decimal(str(prev_holding or 0))
     

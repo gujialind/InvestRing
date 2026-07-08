@@ -2,6 +2,7 @@ export interface Subscription {
   id: number;
   portfolio_code: string;
   investor_code: string;
+  platform_code: string;
   sub_type: string;
   amount?: number;
   shares?: number;
@@ -17,6 +18,7 @@ export interface Subscription {
 export interface SubscriptionCreate {
   portfolio_code: string;
   investor_code: string;
+  platform_code: string;
   sub_type: string;
   amount?: number;
   shares?: number;
@@ -26,6 +28,7 @@ export interface SubscriptionCreate {
 }
 
 export interface SubscriptionUpdate {
+  platform_code?: string;
   amount?: number;
   shares?: number;
   unit_price?: number;

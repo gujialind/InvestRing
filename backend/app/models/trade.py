@@ -11,6 +11,7 @@ class Trade(Base):
     product_code = Column(String(10), nullable=False)
     market = Column(String(20))
     trade_type = Column(String(10), nullable=False)
+    transfer_group = Column(String(36))  # 平台间现金转移配对标识
     shares = Column(Numeric(15, 4))
     amount = Column(Numeric(15, 4), nullable=False)
     price = Column(Numeric(10, 4))

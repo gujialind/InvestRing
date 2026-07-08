@@ -30,5 +30,5 @@ class PortfolioPosition(Base):
             '(shares IS NOT NULL AND amount IS NULL) OR (shares IS NULL AND amount IS NOT NULL)',
             name='check_nav_or_non_nav'
         ),
-        UniqueConstraint('portfolio_code', 'product_code', 'market', 'snapshot_date', name='uix_position_snapshot'),
+        UniqueConstraint('portfolio_code', 'product_code', 'market', 'platform_code', 'snapshot_date', name='uix_position_snapshot'),
     )
