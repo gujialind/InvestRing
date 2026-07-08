@@ -9,6 +9,7 @@ from app.models.portfolio import Portfolio
 from app.models.investor import Investor
 from app.models.investor_holding import InvestorHolding
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+from app.models.platform import Platform
 from app.services.trading_utils import is_trading_day
 from app.services.subscription_service import (
     confirm_single_subscription,
@@ -146,6 +147,18 @@ def create_subscription(
     if not investor:
         raise HTTPException(status_code=404, detail="Investor not found")
 
+    # 校验平台存在性
+    platform = (
+        db.query(Platform)
+        .filter(Platform.code == subscription.platform_code)
+        .first()
+    )
+    if not platform:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "PLATFORM_NOT_FOUND", "message": f"平台 {subscription.platform_code} 不存在"},
+        )
+
     if subscription.sub_type == "subscribe":
         # 申购输入金额，系统计算份额（确认时计算）
         if subscription.amount is None or subscription.amount <= 0:
@@ -156,6 +169,7 @@ def create_subscription(
         new_sub = Subscription(
             portfolio_code=subscription.portfolio_code,
             investor_code=subscription.investor_code,
+            platform_code=subscription.platform_code,
             sub_type="subscribe",
             amount=subscription.amount,
             apply_date=subscription.apply_date,
@@ -183,6 +197,7 @@ def create_subscription(
         new_sub = Subscription(
             portfolio_code=subscription.portfolio_code,
             investor_code=subscription.investor_code,
+            platform_code=subscription.platform_code,
             sub_type="redeem",
             shares=subscription.shares,
             apply_date=subscription.apply_date,

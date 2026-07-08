@@ -46,6 +46,7 @@ import {
   useDeleteTrade,
 } from "@/hooks/useTrade";
 import { useProductList } from "@/hooks/useProduct";
+import { usePlatformList } from "@/hooks/usePlatform";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 
@@ -85,9 +86,11 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const unconfirmTrade = useUnconfirmTrade();
   const deleteTradeMutation = useDeleteTrade();
   const { data: productsData } = useProductList({ page_size: 100 });
+  const { data: platformsData } = usePlatformList({ page_size: 100 });
 
   const trades = data?.items || [];
   const products = productsData?.items || [];
+  const platforms = platformsData?.items || [];
 
   const getProductName = (productCode: string, market?: string) => {
     const product = products.find((p) => p.code === productCode && p.market === market);
@@ -99,6 +102,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const [formData, setFormData] = useState({
     product_code: "",
     market: "",
+    platform_code: "",
     shares: "",
     amount: "",
     price: "",
@@ -114,6 +118,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
       portfolio_code: code,
       product_code: formData.product_code,
       market: formData.market || undefined,
+      platform_code: formData.platform_code || undefined,
       trade_type: tradeType,
       trade_date: formData.trade_date,
       price: formData.price ? parseFloat(formData.price) : undefined,
@@ -124,7 +129,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     createTrade.mutate(payload, {
       onSuccess: () => {
         setIsDialogOpen(false);
-        setFormData({ product_code: "", market: "", shares: "", amount: "", price: "", trade_date: toDateOnly(new Date()) });
+        setFormData({ product_code: "", market: "", platform_code: "", shares: "", amount: "", price: "", trade_date: toDateOnly(new Date()) });
       },
     });
   };
@@ -213,6 +218,22 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                     ))}
                   </select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="platform_code">交易平台</Label>
+                  <select
+                    id="platform_code"
+                    value={formData.platform_code}
+                    onChange={(e) => setFormData({ ...formData, platform_code: e.target.value })}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="">请选择平台</option>
+                    {platforms.map((plat) => (
+                      <option key={plat.code} value={plat.code}>
+                        {plat.name} ({plat.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 {tradeType === "buy" ? (
                   <div className="space-y-2">
                     <Label htmlFor="amount">金额（元）</Label>
@@ -282,6 +303,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                 <TableRow>
                   <TableHead>产品</TableHead>
                   <TableHead>市场</TableHead>
+                  <TableHead>平台</TableHead>
                   <TableHead>类型</TableHead>
                   <TableHead className="text-right">金额/份额</TableHead>
                   <TableHead className="text-right">价格</TableHead>
@@ -301,6 +323,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                       </div>
                     </TableCell>
                     <TableCell>{formatMarketName(trade.market)}</TableCell>
+                    <TableCell>{trade.platform_code || "-"}</TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         trade.trade_type === "buy" ? "bg-blue-100 text-blue-800" : "bg-orange-100 text-orange-800"

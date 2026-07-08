@@ -16,8 +16,17 @@
 - [backend/app/services/position_service.py](file://backend/app/services/position_service.py)
 - [backend/app/services/task_runner.py](file://backend/app/services/task_runner.py)
 - [backend/app/services/snapshot_service.py](file://backend/app/services/snapshot_service.py)
+- [backend/app/services/subscription_service.py](file://backend/app/services/subscription_service.py)
 - [backend/app/database.py](file://backend/app/database.py)
 </cite>
+
+## 更新摘要
+**变更内容**   
+- 增强了订阅处理逻辑，引入专门的 subscription_service 模块
+- 改进了错误处理机制，新增自定义异常类型和更详细的错误信息
+- 集成了新的服务层架构，将业务逻辑从命令层提取到独立服务模块
+- 添加了全面的日志记录功能，贯穿整个申购赎回生命周期
+- 优化了确认和取消确认流程的状态管理
 
 ## 目录
 1. [简介](#简介)
@@ -34,8 +43,10 @@
 ## 简介
 InvestRing Admin CLI 是一个面向 AI Agent 的原生命令行工具，基于 Typer 构建，直接导入后端服务层操作数据库，输出结构化 JSON。它覆盖组合管理、申购赎回、调仓交易、份额变动事件、快照生成、市场数据同步、任务管理等核心功能，提供约 14 个命令组、约 70 条命令，便于自动化编排与批处理。
 
+**最新更新**：增强了订阅处理逻辑，引入了专门的服务层架构，改进了错误处理和日志记录功能。
+
 ## 项目结构
-CLI 位于 backend/cli 目录，采用“入口 + 上下文 + 输出协议 + 公共辅助 + 命令组”的分层组织方式；业务逻辑复用自 app/services 层，避免重复实现。
+CLI 位于 backend/cli 目录，采用"入口 + 上下文 + 输出协议 + 公共辅助 + 命令组"的分层组织方式；业务逻辑复用自 app/services 层，避免重复实现。
 
 ```mermaid
 graph TB
@@ -51,6 +62,7 @@ TU["app/services/trading_utils.py<br/>交易日/净值查询等"]
 PS["app/services/position_service.py<br/>可用现金/份额计算"]
 TR["app/services/task_runner.py<br/>任务执行体"]
 SS["app/services/snapshot_service.py<br/>快照生成/重算/校验"]
+SUBS["app/services/subscription_service.py<br/>申购赎回确认服务"]
 end
 subgraph "基础设施"
 DB["app/database.py<br/>引擎/SessionLocal"]
@@ -65,18 +77,20 @@ Cmds --> TU
 Cmds --> PS
 Cmds --> TR
 Cmds --> SS
+Cmds --> SUBS
 PY --> M
 ```
 
 图表来源
 - [backend/cli/main.py:1-50](file://backend/cli/main.py#L1-L50)
-- [backend/cli/context.py:1-59](file://backend/cli/context.py#L1-L59)
+- [backend/cli/context.py:1-64](file://backend/cli/context.py#L1-L64)
 - [backend/cli/output.py:1-64](file://backend/cli/output.py#L1-L64)
 - [backend/cli/utils.py:1-67](file://backend/cli/utils.py#L1-L67)
 - [backend/app/services/trading_utils.py:1-69](file://backend/app/services/trading_utils.py#L1-L69)
 - [backend/app/services/position_service.py:1-211](file://backend/app/services/position_service.py#L1-L211)
 - [backend/app/services/task_runner.py:1-188](file://backend/app/services/task_runner.py#L1-L188)
-- [backend/app/services/snapshot_service.py:1-800](file://backend/app/services/snapshot_service.py#L1-L800)
+- [backend/app/services/snapshot_service.py:1-200](file://backend/app/services/snapshot_service.py#L1-L200)
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
 - [backend/app/database.py:1-43](file://backend/app/database.py#L1-L43)
 - [backend/pyproject.toml:1-16](file://backend/pyproject.toml#L1-L16)
 
@@ -89,17 +103,20 @@ PY --> M
 - 执行上下文：为每个命令创建 SessionLocal，自动 commit/rollback/close，并将常见异常映射为统一的错误码。
 - 输出协议：所有命令输出标准 JSON，成功返回 {"ok": true, "data": ...}，失败返回 {"ok": false, "error": {...}}，并设置不同退出码。
 - 公共辅助：模型序列化、分页、日期解析等通用能力。
-- 服务层复用：交易日判断、可用现金/份额计算、任务执行体、快照生成/重算/校验等。
+- 服务层复用：交易日判断、可用现金/份额计算、任务执行体、快照生成/重算/校验、申购赎回确认服务等。
+
+**更新**：新增了专门的申购赎回服务模块，提供了更完善的业务逻辑封装。
 
 章节来源
 - [backend/cli/main.py:1-50](file://backend/cli/main.py#L1-L50)
-- [backend/cli/context.py:1-59](file://backend/cli/context.py#L1-L59)
+- [backend/cli/context.py:1-64](file://backend/cli/context.py#L1-L64)
 - [backend/cli/output.py:1-64](file://backend/cli/output.py#L1-L64)
 - [backend/cli/utils.py:1-67](file://backend/cli/utils.py#L1-L67)
 - [backend/app/services/trading_utils.py:1-69](file://backend/app/services/trading_utils.py#L1-L69)
 - [backend/app/services/position_service.py:1-211](file://backend/app/services/position_service.py#L1-L211)
 - [backend/app/services/task_runner.py:1-188](file://backend/app/services/task_runner.py#L1-L188)
-- [backend/app/services/snapshot_service.py:1-800](file://backend/app/services/snapshot_service.py#L1-L800)
+- [backend/app/services/snapshot_service.py:1-200](file://backend/app/services/snapshot_service.py#L1-L200)
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
 
 ## 架构总览
 CLI 通过 Typer 暴露命令，命令内部使用 cli_context 获取数据库会话，调用 services 层完成业务逻辑，最终通过 output 输出 JSON。
@@ -109,16 +126,17 @@ sequenceDiagram
 participant User as "用户/AI Agent"
 participant CLI as "cli/main.py"
 participant Ctx as "cli/context.py"
+participant SubSvc as "subscription_service.py"
 participant Svc as "services/*.py"
 participant DB as "app/database.py"
-User->>CLI : 运行 ir <group> <command> [options]
+User->>CLI : 运行 ir sub confirm <id>
 CLI->>Ctx : 进入 cli_context()
 Ctx->>DB : 创建 SessionLocal
 Ctx-->>CLI : 返回 db 会话
-CLI->>Svc : 执行业务函数(如 calculate_available_cash)
-Svc->>DB : 查询/写入数据
-DB-->>Svc : 结果集
-Svc-->>CLI : 业务结果
+CLI->>SubSvc : confirm_single_subscription(db, sub)
+SubSvc->>DB : 查询净值快照/计算确认日
+DB-->>SubSvc : 结果集
+SubSvc-->>CLI : 确认后的订阅记录
 CLI->>Out : success()/error()
 Out-->>User : 标准JSON输出
 Ctx->>DB : commit/rollback + close
@@ -126,7 +144,8 @@ Ctx->>DB : commit/rollback + close
 
 图表来源
 - [backend/cli/main.py:1-50](file://backend/cli/main.py#L1-L50)
-- [backend/cli/context.py:1-59](file://backend/cli/context.py#L1-L59)
+- [backend/cli/context.py:1-64](file://backend/cli/context.py#L1-L64)
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
 - [backend/app/database.py:1-43](file://backend/app/database.py#L1-L43)
 - [backend/cli/output.py:1-64](file://backend/cli/output.py#L1-L64)
 
@@ -172,37 +191,46 @@ Ok --> End
 ### 申购赎回（sub）
 - list/create/get/confirm/cancel/unconfirm
 - 创建校验：非交易日拒绝；组合状态需 active/draft；赎回需校验投资人可用份额。
-- 确认逻辑：首次申购净值固定 1.0000；未指定确认日时按 T+1 交易日推算；首次申购确认后自动激活组合。
+- **更新**：确认逻辑现在通过专门的 subscription_service 模块处理，提供更完善的错误处理和日志记录。
+
+**更新**：申购赎回确认流程现已集成新的服务层架构，包含以下改进：
 
 ```mermaid
 sequenceDiagram
 participant U as "用户"
 participant Sub as "subscriptions.py"
-participant TU as "trading_utils.py"
-participant PS as "position_service.py"
-participant DB as "database.py"
-U->>Sub : sub create --type subscribe/redeem
-Sub->>TU : is_trading_day(apply_date)
-TU-->>Sub : 是否交易日
-alt 非交易日
-Sub-->>U : error(NON_TRADING_DAY)
-else 交易日
-Sub->>PS : 赎回时计算可用份额
-PS->>DB : 查询快照/待确认赎回
-DB-->>PS : 份额
-PS-->>Sub : 可用份额
-Sub->>DB : 插入pending记录
-Sub-->>U : success(新记录)
-end
+participant SubSvc as "subscription_service.py"
+param TU as "trading_utils.py"
+param PS as "position_service.py"
+param DB as "database.py"
+U->>Sub : sub confirm <id>
+Sub->>DB : 查询订阅记录
+DB-->>Sub : 订阅详情
+Sub->>SubSvc : confirm_single_subscription(db, sub)
+SubSvc->>DB : 检查状态/计算确认日
+SubSvc->>DB : 查询净值快照
+DB-->>SubSvc : 净值数据
+SubSvc->>SubSvc : 计算份额/金额
+SubSvc->>DB : 更新订阅状态
+SubSvc-->>Sub : 确认结果
+Sub->>Out : success()
+Out-->>U : 标准JSON输出
 ```
 
 图表来源
-- [backend/cli/commands/subscriptions.py:1-214](file://backend/cli/commands/subscriptions.py#L1-L214)
+- [backend/cli/commands/subscriptions.py:1-205](file://backend/cli/commands/subscriptions.py#L1-205)
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
 - [backend/app/services/trading_utils.py:1-69](file://backend/app/services/trading_utils.py#L1-L69)
 - [backend/app/services/position_service.py:1-211](file://backend/app/services/position_service.py#L1-L211)
 
+**新增错误处理**：
+- `NavNotAvailableError`：申请日组合快照不存在时抛出
+- `InvalidStatusError`：状态不符合要求时抛出
+- 详细的错误信息和日志记录
+
 章节来源
-- [backend/cli/commands/subscriptions.py:1-214](file://backend/cli/commands/subscriptions.py#L1-L214)
+- [backend/cli/commands/subscriptions.py:1-205](file://backend/cli/commands/subscriptions.py#L1-205)
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
 
 ### 调仓交易（trade）
 - list/create/get/confirm/cancel/unconfirm
@@ -285,16 +313,60 @@ Commit --> R["返回生成结果"]
 ```
 
 图表来源
-- [backend/app/services/snapshot_service.py:1-800](file://backend/app/services/snapshot_service.py#L1-L800)
+- [backend/app/services/snapshot_service.py:1-200](file://backend/app/services/snapshot_service.py#L1-L200)
 
 章节来源
-- [backend/app/services/snapshot_service.py:1-800](file://backend/app/services/snapshot_service.py#L1-L800)
+- [backend/app/services/snapshot_service.py:1-200](file://backend/app/services/snapshot_service.py#L1-L200)
+
+### 申购赎回服务（subscription_service）
+**新增**：专门的申购赎回确认服务模块，提供核心的业务逻辑封装。
+
+- `confirm_single_subscription`：确认单笔申购/赎回的核心逻辑
+  - 确认日期由后端自动计算（T+1）
+  - 净值自动确定（首次申购固定1.0000，否则取申请日组合快照净值）
+  - 首次申购确认后自动激活组合状态
+  - 完整的日志记录和错误处理
+
+- `unconfirm_single_subscription`：取消确认单笔申购/赎回的核心逻辑
+  - 将状态从 confirmed 回退至 pending
+  - 清空确认相关字段
+  - 支持自动 flush 选项
+
+```mermaid
+flowchart TD
+Start(["开始 confirm_single_subscription"]) --> CheckStatus["检查状态是否为pending"]
+CheckStatus --> |不是pending| RaiseInvalid["抛出InvalidStatusError"]
+CheckStatus --> |是pending| CalcConfirmDate["计算确认日期(T+1)"]
+CalcConfirmDate --> CheckFirst["判断是否为首次申购"]
+CheckFirst --> |是首次| SetNavFixed["设置净值为1.0000"]
+CheckFirst --> |非首次| GetSnapshot["获取申请日净值快照"]
+GetSnapshot --> |无快照| RaiseNavError["抛出NavNotAvailableError"]
+GetSnapshot --> |有快照| UseSnapshotNav["使用快照净值"]
+SetNavFixed --> CalcShares["计算份额/金额"]
+UseSnapshotNav --> CalcShares
+CalcShares --> UpdateStatus["更新确认状态"]
+UpdateStatus --> CheckActivate["检查是否需要激活组合"]
+CheckActivate --> |需要| ActivatePortfolio["激活组合状态"]
+CheckActivate --> |不需要| LogInfo["记录日志"]
+ActivatePortfolio --> LogInfo
+LogInfo --> Return["返回确认后的订阅记录"]
+RaiseInvalid --> End(["结束"])
+RaiseNavError --> End
+Return --> End
+```
+
+图表来源
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
+
+章节来源
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
 
 ## 依赖关系分析
 - CLI 层对 services 层为单向依赖，避免反向耦合。
 - context 层封装数据库会话生命周期与异常映射，降低命令层的样板代码。
 - output 层保证所有命令输出一致的结构化 JSON，便于机器解析。
 - pyproject.toml 定义 entry point，使安装后可直接使用 ir 命令。
+- **更新**：subscription_service 作为独立的服务模块，被多个命令层复用。
 
 ```mermaid
 graph LR
@@ -303,17 +375,20 @@ Main --> Out["cli/output.py"]
 Main --> Utils["cli/utils.py"]
 Main --> Cmds["cli/commands/*"]
 Cmds --> Services["app/services/*"]
+Cmds --> SubSvc["subscription_service.py"]
 Ctx --> DB["app/database.py"]
 PyProj["pyproject.toml"] --> Main
+SubSvc --> TradingUtils["trading_utils.py"]
 ```
 
 图表来源
 - [backend/cli/main.py:1-50](file://backend/cli/main.py#L1-L50)
-- [backend/cli/context.py:1-59](file://backend/cli/context.py#L1-L59)
+- [backend/cli/context.py:1-64](file://backend/cli/context.py#L1-L64)
 - [backend/cli/output.py:1-64](file://backend/cli/output.py#L1-L64)
 - [backend/cli/utils.py:1-67](file://backend/cli/utils.py#L1-L67)
 - [backend/app/database.py:1-43](file://backend/app/database.py#L1-L43)
 - [backend/pyproject.toml:1-16](file://backend/pyproject.toml#L1-L16)
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
 
 章节来源
 - [backend/cli/main.py:1-50](file://backend/cli/main.py#L1-L50)
@@ -324,6 +399,7 @@ PyProj["pyproject.toml"] --> Main
 - SQLite 优化：WAL 模式与 busy_timeout，减少锁竞争。
 - CLI 模式静默：CLI_MODE=1 时禁用 SQL echo，避免干扰 JSON 输出。
 - 可扩展点：新增命令只需在 main.py 注册对应命令组，并在 commands 下新建模块即可。
+- **更新**：服务层模块化设计，新业务逻辑可轻松添加到独立的 service 模块中。
 
 章节来源
 - [backend/app/database.py:1-43](file://backend/app/database.py#L1-L43)
@@ -339,20 +415,34 @@ PyProj["pyproject.toml"] --> Main
   - INSUFFICIENT_CASH / INSUFFICIENT_SHARES：可用资金/份额不足。
   - MISSING_NAV：净值尚未同步或未提供。
   - INVESTOR_HAS_SHARES：投资人仍有份额，禁止删除。
+  - **新增**：NAV_NOT_AVAILABLE：申请日净值快照不存在。
+  - **新增**：PORTFOLIO_NOT_ACTIVE：组合未激活。
+  - **新增**：INVALID_AMOUNT / INVALID_SHARES：金额或份额无效。
+  - **新增**：SNAPSHOT_DEPENDENCY：快照依赖冲突。
+
+**更新**：增强的错误处理包括：
+- 自定义异常类型：`NavNotAvailableError`、`InvalidStatusError`
+- 详细的错误消息和上下文信息
+- 完整的日志记录用于调试和问题追踪
+
 - 调试建议
   - 查看 stderr 堆栈：context 在非 SystemExit 异常时会打印完整堆栈到 stderr。
   - 使用 jq 解析 JSON 输出，快速定位 data/error 字段。
   - 对于 QDII 净值缺失，先执行市场数据同步再重试确认。
+  - **新增**：检查 subscription_service 的日志输出，了解确认过程的详细信息。
 
 章节来源
-- [backend/cli/context.py:1-59](file://backend/cli/context.py#L1-L59)
+- [backend/cli/context.py:1-64](file://backend/cli/context.py#L1-L64)
 - [backend/cli/output.py:1-64](file://backend/cli/output.py#L1-L64)
-- [backend/cli/commands/subscriptions.py:1-214](file://backend/cli/commands/subscriptions.py#L1-L214)
+- [backend/cli/commands/subscriptions.py:1-205](file://backend/cli/commands/subscriptions.py#L1-205)
 - [backend/cli/commands/trades.py:1-264](file://backend/cli/commands/trades.py#L1-L264)
 - [backend/cli/commands/investors.py:1-135](file://backend/cli/commands/investors.py#L1-L135)
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
 
 ## 结论
 InvestRing Admin CLI 将复杂业务逻辑下沉至服务层，并通过 Typer 暴露稳定、可解析的 JSON 接口，适合 AI Agent 自动化编排。其分层清晰、错误处理规范、输出格式统一，具备良好的可维护性与扩展性。
+
+**更新总结**：最新的增强包括专门的申购赎回服务模块、改进的错误处理机制、全面的日志记录功能，以及更好的服务层架构集成，进一步提升了系统的稳定性和可维护性。
 
 ## 附录：命令清单与用法要点
 - auth
@@ -363,6 +453,7 @@ InvestRing Admin CLI 将复杂业务逻辑下沉至服务层，并通过 Typer �
   - list/create/get/update/close/reactivate/nav-history/returns/cash-flow：close 前校验无 pending 交易。
 - sub
   - list/create/get/confirm/cancel/unconfirm：创建校验交易日与可用份额；确认时首次申购净值固定 1.0000。
+  - **更新**：确认流程现通过专门的 subscription_service 处理，提供更完善的错误处理和日志记录。
 - trade
   - list/create/get/confirm/cancel/unconfirm：创建校验可用现金/份额；确认时自动取净值，QDII 特殊处理。
 - share-event
@@ -376,7 +467,8 @@ InvestRing Admin CLI 将复杂业务逻辑下沉至服务层，并通过 Typer �
 - [backend/cli/commands/auth.py:1-39](file://backend/cli/commands/auth.py#L1-L39)
 - [backend/cli/commands/investors.py:1-135](file://backend/cli/commands/investors.py#L1-L135)
 - [backend/cli/commands/portfolios.py:1-241](file://backend/cli/commands/portfolios.py#L1-L241)
-- [backend/cli/commands/subscriptions.py:1-214](file://backend/cli/commands/subscriptions.py#L1-L214)
+- [backend/cli/commands/subscriptions.py:1-205](file://backend/cli/commands/subscriptions.py#L1-205)
 - [backend/cli/commands/trades.py:1-264](file://backend/cli/commands/trades.py#L1-L264)
 - [backend/app/services/task_runner.py:1-188](file://backend/app/services/task_runner.py#L1-L188)
-- [backend/app/services/snapshot_service.py:1-800](file://backend/app/services/snapshot_service.py#L1-L800)
+- [backend/app/services/snapshot_service.py:1-200](file://backend/app/services/snapshot_service.py#L1-L200)
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)

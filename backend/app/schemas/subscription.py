@@ -6,6 +6,7 @@ from datetime import date, datetime
 class SubscriptionBase(BaseModel):
     portfolio_code: str
     investor_code: str
+    platform_code: str  # 交易平台
     sub_type: str  # subscribe/redeem
     amount: Optional[float] = None
     shares: Optional[float] = None
@@ -21,6 +22,7 @@ class SubscriptionCreate(SubscriptionBase):
 
 
 class SubscriptionUpdate(BaseModel):
+    platform_code: Optional[str] = None
     amount: Optional[float] = None
     shares: Optional[float] = None
     unit_price: Optional[float] = None

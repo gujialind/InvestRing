@@ -48,6 +48,7 @@ import {
   useUnconfirmSubscription,
 } from "@/hooks/useTrade";
 import { useInvestorList } from "@/hooks/useInvestor";
+import { usePlatformList } from "@/hooks/usePlatform";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useUIStore } from "@/stores/uiStore";
 import LoadingState from "@/components/shared/LoadingState";
@@ -91,16 +92,19 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
   const cancelSubscription = useCancelSubscription();
   const unconfirmSubscription = useUnconfirmSubscription();
   const { data: investorsData } = useInvestorList({ page_size: 100 });
+  const { data: platformsData } = usePlatformList({ page_size: 100 });
   const { data: portfolio } = usePortfolio(code);
 
   const subscriptions = data?.items || [];
   const investors = investorsData?.items || [];
+  const platforms = platformsData?.items || [];
   const isDraft = portfolio?.status === "draft";
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [subType, setSubType] = useState<"subscribe" | "redeem">("subscribe");
   const [formData, setFormData] = useState({
     investor_code: "",
+    platform_code: "",
     amount: "",
     shares: "",
     apply_date: toDateOnly(new Date()),
@@ -130,6 +134,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     const payload = {
       portfolio_code: code,
       investor_code: formData.investor_code,
+      platform_code: formData.platform_code,
       sub_type: subType,
       apply_date: formData.apply_date,
       ...(subType === "subscribe" ? { amount: parseFloat(formData.amount) } : { shares: parseFloat(formData.shares) }),
@@ -137,7 +142,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     createSubscription.mutate(payload, {
       onSuccess: () => {
         setIsDialogOpen(false);
-        setFormData({ investor_code: "", amount: "", shares: "", apply_date: toDateOnly(new Date()) });
+        setFormData({ investor_code: "", platform_code: "", amount: "", shares: "", apply_date: toDateOnly(new Date()) });
         if (isDraft) router.push(`${basePath}/${code}`);
       },
     });
@@ -227,6 +232,23 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                     ))}
                   </select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="platform_code">交易平台</Label>
+                  <select
+                    id="platform_code"
+                    value={formData.platform_code}
+                    onChange={(e) => setFormData({ ...formData, platform_code: e.target.value })}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    required
+                  >
+                    <option value="">请选择平台</option>
+                    {platforms.map((plat) => (
+                      <option key={plat.code} value={plat.code}>
+                        {plat.name} ({plat.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 {subType === "subscribe" ? (
                   <div className="space-y-2">
                     <Label htmlFor="amount">金额（元）</Label>
@@ -284,6 +306,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
               <TableHeader>
                 <TableRow>
                   <TableHead>投资人</TableHead>
+                  <TableHead>平台</TableHead>
                   <TableHead>类型</TableHead>
                   <TableHead className="text-right">金额/份额</TableHead>
                   <TableHead className="text-right">净值</TableHead>
@@ -297,6 +320,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                 {subscriptions.map((sub) => (
                   <TableRow key={sub.id}>
                     <TableCell>{sub.investor_code}</TableCell>
+                    <TableCell>{sub.platform_code || "-"}</TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         sub.sub_type === "subscribe" ? "bg-blue-100 text-blue-800" : "bg-orange-100 text-orange-800"

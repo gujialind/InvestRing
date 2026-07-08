@@ -9,6 +9,7 @@ class TradeBase(BaseModel):
     market: Optional[str] = None
     platform_code: Optional[str] = None
     trade_type: str
+    transfer_group: Optional[str] = None  # 平台间现金转移配对标识
     shares: Optional[float] = None
     amount: Optional[float] = None
     price: Optional[float] = None

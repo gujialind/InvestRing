@@ -125,7 +125,7 @@ def _get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date
     return result
 
 
-def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
+def _calculate_available_cash(db: Session, portfolio_code: str, platform_code: Optional[str] = None) -> Decimal:
     """
     组合可用现金实时计算：
     最新快照现金
@@ -134,21 +134,45 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
     - SUM(pending买入金额)
     - SUM(confirmed买入金额 WHERE 快照未生成)
     + SUM(confirmed卖出金额 WHERE 快照未生成)
+    
+    若指定 platform_code，则只计算该平台的现金。
     """
     latest_date = _get_latest_snapshot_date(db, portfolio_code)
 
-    cash_position = (
+    from app.models.subscription import Subscription
+
+    # 最新快照现金
+    cash_query = (
         db.query(PortfolioPosition)
         .filter(
             PortfolioPosition.portfolio_code == portfolio_code,
             PortfolioPosition.product_code == "CASH",
         )
-        .order_by(PortfolioPosition.snapshot_date.desc())
-        .first()
     )
-    cash = Decimal(cash_position.amount) if cash_position and cash_position.amount else Decimal("0")
+    if platform_code:
+        cash_query = cash_query.filter(PortfolioPosition.platform_code == platform_code)
+    
+    if platform_code:
+        cash_position = cash_query.order_by(PortfolioPosition.snapshot_date.desc()).first()
+        cash = Decimal(cash_position.amount) if cash_position and cash_position.amount else Decimal("0")
+    else:
+        # 不指定平台时，汇总所有平台的现金
+        cash_positions = cash_query.order_by(PortfolioPosition.snapshot_date.desc()).all()
+        seen_platforms = set()
+        latest_positions = []
+        for pos in cash_positions:
+            if pos.platform_code not in seen_platforms:
+                seen_platforms.add(pos.platform_code)
+                latest_positions.append(pos)
+        cash = sum(Decimal(p.amount) if p.amount else Decimal("0") for p in latest_positions)
 
-    from app.models.subscription import Subscription
+    # 构建平台过滤条件
+    platform_filter = []
+    if platform_code:
+        platform_filter.append(Subscription.platform_code == platform_code)
+        trade_platform_filter = [Trade.platform_code == platform_code]
+    else:
+        trade_platform_filter = []
 
     confirmed_subs = (
         db.query(Subscription)
@@ -156,6 +180,7 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Subscription.portfolio_code == portfolio_code,
             Subscription.status == "confirmed",
             Subscription.sub_type == "subscribe",
+            *platform_filter,
         )
         .all()
     )
@@ -169,6 +194,7 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Subscription.portfolio_code == portfolio_code,
             Subscription.status == "confirmed",
             Subscription.sub_type == "redeem",
+            *platform_filter,
         )
         .all()
     )
@@ -182,6 +208,7 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Trade.portfolio_code == portfolio_code,
             Trade.status == "pending",
             Trade.trade_type == "buy",
+            *trade_platform_filter,
         )
         .all()
     )
@@ -194,12 +221,18 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Trade.portfolio_code == portfolio_code,
             Trade.status == "confirmed",
             Trade.trade_type == "buy",
+            *trade_platform_filter,
         )
         .all()
     )
     for t in confirmed_buys:
         if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
-            cash -= Decimal(t.amount) if t.amount else Decimal("0")
+            if t.product_code == "CASH":
+                # 现金转移买入：现金到达平台，增加可用现金
+                cash += Decimal(t.amount) if t.amount else Decimal("0")
+            else:
+                # 基金买入：消耗现金，减少可用现金
+                cash -= Decimal(t.amount) if t.amount else Decimal("0")
 
     confirmed_sells = (
         db.query(Trade)
@@ -207,12 +240,18 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Trade.portfolio_code == portfolio_code,
             Trade.status == "confirmed",
             Trade.trade_type == "sell",
+            *trade_platform_filter,
         )
         .all()
     )
     for t in confirmed_sells:
         if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
-            cash += Decimal(t.amount) if t.amount else Decimal("0")
+            if t.product_code == "CASH":
+                # 现金转移卖出：现金离开平台，减少可用现金
+                cash -= Decimal(t.amount) if t.amount else Decimal("0")
+            else:
+                # 基金卖出：释放现金，增加可用现金
+                cash += Decimal(t.amount) if t.amount else Decimal("0")
 
     return cash
 
@@ -325,13 +364,17 @@ def create_trade(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"error": "INVALID_AMOUNT", "message": "买入金额必须大于0"},
             )
-        available_cash = _calculate_available_cash(db, trade.portfolio_code)
+        # 按平台计算可用现金
+        available_cash = _calculate_available_cash(db, trade.portfolio_code, trade.platform_code)
         if Decimal(str(trade.amount)) > available_cash:
+            msg = "买入金额超过可用现金"
+            if trade.platform_code:
+                msg = f"平台 {trade.platform_code} 的可用现金不足"
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={
                     "error": "INSUFFICIENT_CASH",
-                    "message": "买入金额超过可用现金",
+                    "message": msg,
                 },
             )
         # amount = actual_amount - fee

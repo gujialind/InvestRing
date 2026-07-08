@@ -25,7 +25,7 @@ def _get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date
     return result
 
 
-def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
+def _calculate_available_cash(db: Session, portfolio_code: str, platform_code: Optional[str] = None) -> Decimal:
     """
     组合可用现金实时计算：
     最新快照现金
@@ -34,23 +34,44 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
     - SUM(pending买入金额)
     - SUM(confirmed买入金额 WHERE 快照未生成)
     + SUM(confirmed卖出金额 WHERE 快照未生成)
+    
+    若指定 platform_code，则只计算该平台的现金。
     """
     latest_date = _get_latest_snapshot_date(db, portfolio_code)
 
-    # 最新快照现金（从 portfolio_value_snapshot 中，现金产品 code 为 CASH）
-    # 这里简化：现金通过 portfolio_value_snapshot 的 total_value 反推
-    # 实际系统中现金可能单独存储，这里用快照 total_value - 持仓市值 近似
-    # 更合理的做法：从 portfolio_position 中找 CASH 产品的 amount
-    cash_position = (
+    # 最新快照现金
+    cash_query = (
         db.query(PortfolioPosition)
         .filter(
             PortfolioPosition.portfolio_code == portfolio_code,
             PortfolioPosition.product_code == "CASH",
         )
-        .order_by(PortfolioPosition.snapshot_date.desc())
-        .first()
     )
-    cash = Decimal(cash_position.amount) if cash_position and cash_position.amount else Decimal("0")
+    if platform_code:
+        cash_query = cash_query.filter(PortfolioPosition.platform_code == platform_code)
+    
+    if platform_code:
+        cash_position = cash_query.order_by(PortfolioPosition.snapshot_date.desc()).first()
+        cash = Decimal(cash_position.amount) if cash_position and cash_position.amount else Decimal("0")
+    else:
+        # 不指定平台时，汇总所有平台的现金
+        cash_positions = cash_query.order_by(PortfolioPosition.snapshot_date.desc()).all()
+        # 按 platform_code 分组取最新一条
+        seen_platforms = set()
+        latest_positions = []
+        for pos in cash_positions:
+            if pos.platform_code not in seen_platforms:
+                seen_platforms.add(pos.platform_code)
+                latest_positions.append(pos)
+        cash = sum(Decimal(p.amount) if p.amount else Decimal("0") for p in latest_positions)
+    
+    # 构建平台过滤条件
+    platform_filter = []
+    if platform_code:
+        platform_filter.append(Subscription.platform_code == platform_code)
+        trade_platform_filter = [Trade.platform_code == platform_code]
+    else:
+        trade_platform_filter = []
 
     # confirmed 申购未快照
     confirmed_subs = (
@@ -59,6 +80,7 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Subscription.portfolio_code == portfolio_code,
             Subscription.status == "confirmed",
             Subscription.sub_type == "subscribe",
+            *platform_filter,
         )
         .all()
     )
@@ -73,6 +95,7 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Subscription.portfolio_code == portfolio_code,
             Subscription.status == "confirmed",
             Subscription.sub_type == "redeem",
+            *platform_filter,
         )
         .all()
     )
@@ -87,6 +110,7 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Trade.portfolio_code == portfolio_code,
             Trade.status == "pending",
             Trade.trade_type == "buy",
+            *trade_platform_filter,
         )
         .all()
     )
@@ -100,6 +124,7 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Trade.portfolio_code == portfolio_code,
             Trade.status == "confirmed",
             Trade.trade_type == "buy",
+            *trade_platform_filter,
         )
         .all()
     )
@@ -114,6 +139,7 @@ def _calculate_available_cash(db: Session, portfolio_code: str) -> Decimal:
             Trade.portfolio_code == portfolio_code,
             Trade.status == "confirmed",
             Trade.trade_type == "sell",
+            *trade_platform_filter,
         )
         .all()
     )
@@ -280,6 +306,7 @@ def delete_position(
 @router.get("/portfolio/{portfolio_code}/available-cash")
 def get_available_cash(
     portfolio_code: str,
+    platform_code: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -289,8 +316,11 @@ def get_available_cash(
     if not portfolio:
         raise HTTPException(status_code=404, detail="Portfolio not found")
 
-    cash = _calculate_available_cash(db, portfolio_code)
-    return {"portfolio_code": portfolio_code, "available_cash": float(cash)}
+    cash = _calculate_available_cash(db, portfolio_code, platform_code)
+    result = {"portfolio_code": portfolio_code, "available_cash": float(cash)}
+    if platform_code:
+        result["platform_code"] = platform_code
+    return result
 
 
 @router.get("/portfolio/{portfolio_code}/product/{product_code}/available-shares")

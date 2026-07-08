@@ -4,6 +4,7 @@
 **本文引用的文件**
 - [backend/app/main.py](file://backend/app/main.py)
 - [backend/app/routers/subscriptions.py](file://backend/app/routers/subscriptions.py)
+- [backend/app/services/subscription_service.py](file://backend/app/services/subscription_service.py)
 - [backend/app/models/subscription.py](file://backend/app/models/subscription.py)
 - [backend/app/schemas/subscription.py](file://backend/app/schemas/subscription.py)
 - [backend/app/routers/share_change_events.py](file://backend/app/routers/share_change_events.py)
@@ -18,22 +19,24 @@
 
 ## 更新摘要
 **变更内容**
-- 新增订阅路由安全验证逻辑章节，详细说明已确认订阅事件的保护机制
-- 更新权限与约束部分，增加已确认状态的修改限制
-- 新增故障排查指南中的相关错误码说明
-- 更新架构概览图，体现安全验证流程
+- 新增服务层架构章节，详细说明业务逻辑从路由层提取到 subscription_service.py 的设计
+- 更新确认接口说明，移除手动 confirm_date/unit_price 参数的要求
+- 新增错误处理机制章节，详细说明 NavNotAvailableError 和 InvalidStatusError 的使用
+- 更新架构图表，体现服务层分离和业务逻辑复用
+- 增强安全验证机制，完善已确认事件的保护策略
 
 ## 目录
 1. [简介](#简介)
 2. [项目结构与入口](#项目结构与入口)
 3. [核心组件](#核心组件)
-4. [架构概览](#架构概览)
-5. [详细组件分析](#详细组件分析)
-6. [依赖关系分析](#依赖关系分析)
-7. [性能与并发特性](#性能与并发特性)
-8. [故障排查指南](#故障排查指南)
-9. [结论](#结论)
-10. [附录：接口清单与示例](#附录接口清单与示例)
+4. [服务层架构](#服务层架构)
+5. [架构概览](#架构概览)
+6. [详细组件分析](#详细组件分析)
+7. [依赖关系分析](#依赖关系分析)
+8. [性能与并发特性](#性能与并发特性)
+9. [故障排查指南](#故障排查指南)
+10. [结论](#结论)
+11. [附录：接口清单与示例](#附录接口清单与示例)
 
 ## 简介
 本文件为 InvestRing 申购赎回模块的详细API文档，覆盖以下主题：
@@ -42,11 +45,15 @@
 - 交易确认流程与净值/份额计算逻辑
 - 查询接口：申购赎回列表、份额变动事件列表、产品查询、组合查询
 - 权限控制与业务约束（交易日、可用份额/现金、状态机等）
+- **新增** 服务层架构设计，业务逻辑从路由层提取
+- **新增** 简化的确认接口，自动计算确认日期和单位净值
+- **新增** 增强的错误处理机制，提供具体的异常类型
 - **新增** 已确认订阅事件的安全保护机制
 
 ## 项目结构与入口
 - API 路由统一挂载于应用入口，其中"申购赎回"模块对应路由前缀为 /api/subscriptions，"份额变动事件"模块对应 /api/share-change-events。
 - 权限依赖通过依赖注入实现，普通用户仅能查看自身记录，管理员可执行写操作。
+- **新增** 服务层分离：核心业务逻辑从路由层提取到独立的服务模块，提高代码复用性和可测试性。
 
 ```mermaid
 graph TB
@@ -54,15 +61,19 @@ A["应用入口<br/>backend/app/main.py"] --> B["路由注册<br/>subscriptions 
 A --> C["路由注册<br/>share_change_events 路由"]
 B --> D["订阅模型<br/>subscription.py"]
 B --> E["订阅Schema<br/>subscription.py"]
-C --> F["份额变动事件模型<br/>share_change_event.py"]
-C --> G["份额变动事件Schema<br/>share_change_event.py"]
-A --> H["权限依赖<br/>dependencies.py"]
+B --> F["订阅服务层<br/>subscription_service.py"]
+C --> G["份额变动事件模型<br/>share_change_event.py"]
+C --> H["份额变动事件Schema<br/>share_change_event.py"]
+A --> I["权限依赖<br/>dependencies.py"]
+F --> J["交易工具服务<br/>trading_utils.py"]
+F --> K["投资组合快照<br/>portfolio_value_snapshot.py"]
 ```
 
 **图表来源**
 - [backend/app/main.py:32-48](file://backend/app/main.py#L32-L48)
 - [backend/app/routers/subscriptions.py:1-16](file://backend/app/routers/subscriptions.py#L1-L16)
 - [backend/app/routers/share_change_events.py:1-18](file://backend/app/routers/share_change_events.py#L1-L18)
+- [backend/app/services/subscription_service.py:1-20](file://backend/app/services/subscription_service.py#L1-L20)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 
 **章节来源**
@@ -75,6 +86,7 @@ A --> H["权限依赖<br/>dependencies.py"]
   - 主要功能：创建申购/赎回、确认、取消、更新、删除；查询列表与详情
   - 关键模型：Subscription
   - 关键Schema：SubscriptionCreate、SubscriptionUpdate、SubscriptionResponse
+  - **新增** 服务层：confirm_single_subscription、unconfirm_single_subscription
 - 份额变动事件模块
   - 路由：/api/share-change-events
   - 主要功能：创建、确认、取消、更新、删除；批量确认；同步分红
@@ -87,10 +99,54 @@ A --> H["权限依赖<br/>dependencies.py"]
 
 **章节来源**
 - [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
+- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
 - [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-L46)
-- [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-L45)
+- [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
 - [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
 - [backend/app/routers/trades.py:271-289](file://backend/app/routers/trades.py#L271-L289)
+
+## 服务层架构
+**新增** 为了提升代码复用性和可维护性，申购赎回的核心业务逻辑已从路由层提取到独立的服务模块中。
+
+### 服务层设计原则
+- **单一职责**：每个服务函数专注于特定的业务逻辑
+- **可复用性**：服务层函数可被HTTP API、CLI、定时任务等多处调用
+- **异常处理**：定义专门的异常类型，便于上层统一处理
+- **事务管理**：支持自动flush选项，由调用者控制事务边界
+
+### 核心服务函数
+- `confirm_single_subscription()`：确认单笔申购/赎回
+  - 自动计算确认日期（T+1）
+  - 自动确定单位净值（首次申购固定1.0000，否则取申请日组合快照净值）
+  - 首次申购确认后自动激活组合状态
+- `unconfirm_single_subscription()`：取消确认单笔申购/赎回
+  - 将状态从 confirmed 回退至 pending
+  - 清空确认相关字段（confirm_date、unit_price等）
+
+### 自定义异常类型
+- `NavNotAvailableError`：申请日组合快照不存在时抛出
+- `InvalidStatusError`：状态不符合要求时抛出
+
+```mermaid
+flowchart TD
+A["HTTP请求到达路由层"] --> B["路由层参数校验"]
+B --> C["调用服务层函数"]
+C --> D["业务逻辑处理"]
+D --> E{"是否成功？"}
+E --> |是| F["返回成功响应"]
+E --> |否| G["捕获特定异常"]
+G --> H["转换为HTTP错误响应"]
+H --> I["返回错误信息"]
+```
+
+**图表来源**
+- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
+- [backend/app/services/subscription_service.py:137-178](file://backend/app/services/subscription_service.py#L137-L178)
+- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-L253)
+
+**章节来源**
+- [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
+- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-L253)
 
 ## 架构概览
 - 认证与授权
@@ -101,6 +157,9 @@ A --> H["权限依赖<br/>dependencies.py"]
   - 份额变动事件：登记权益日 → 生成快照 → 确认事件 → 计算份额/现金变化
 - 数据一致性
   - 交易日校验、可用份额/现金实时计算、状态机约束
+- **新增** 服务层分离
+  - 业务逻辑从路由层解耦，提高代码复用性
+  - 统一的异常处理机制
 - **新增** 安全验证
   - 已确认订阅事件不可直接修改或删除，需先取消确认
 
@@ -109,34 +168,28 @@ sequenceDiagram
 participant 客户端 as "客户端"
 participant 认证 as "权限依赖"
 participant 路由 as "订阅路由"
+participant 服务 as "订阅服务层"
 participant 模型 as "Subscription模型"
 participant 日历 as "交易日历"
 participant 组合 as "Portfolio模型"
 participant 投资者 as "Investor模型"
 客户端->>认证 : "携带Bearer Token"
 认证-->>客户端 : "校验通过/拒绝"
-客户端->>路由 : "POST /api/subscriptions"
-路由->>日历 : "apply_date是否为交易日"
-日历-->>路由 : "是/否"
-路由->>组合 : "校验组合状态"
-组合-->>路由 : "active/draft/closed"
-路由->>投资者 : "校验投资人存在"
-投资者-->>路由 : "存在/不存在"
-路由->>模型 : "保存为pending"
-模型-->>客户端 : "返回创建成功"
-客户端->>路由 : "PUT /api/subscriptions/{id}"
-路由->>模型 : "检查状态是否为confirmed"
-模型-->>路由 : "pending/confirmed"
-alt 状态为confirmed
-路由-->>客户端 : "返回错误：已确认事件不可直接修改"
-else 状态为pending
-路由->>模型 : "更新字段"
-模型-->>客户端 : "返回更新成功"
-end
+客户端->>路由 : "POST /api/subscriptions/{id}/confirm"
+路由->>服务 : "confirm_single_subscription(db, subscription)"
+服务->>日历 : "get_next_trading_day(apply_date, days=1)"
+日历-->>服务 : "返回确认日期"
+服务->>组合 : "检查是否为首次申购"
+组合-->>服务 : "是/否"
+service->>模型 : "查询申请日快照获取净值"
+模型-->>服务 : "返回净值或抛出异常"
+service->>模型 : "更新确认状态和计算结果"
+模型-->>客户端 : "返回确认成功"
 ```
 
 **图表来源**
-- [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-L199)
+- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-L253)
+- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 - [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-L361)
 
@@ -161,9 +214,11 @@ end
   - **新增** 安全验证：已确认（confirmed）状态的订阅事件不可直接修改或删除
 
 - 份额/金额计算
+  - **更新** 确认接口简化：不再需要手动传入 confirm_date 和 unit_price 参数
+  - 确认日期：后端自动计算为申请日的下一个交易日（T+1）
+  - 单位净值：首次申购固定为 1.0000，其他情况取申请日组合快照净值
   - 申购：确认时按净值计算份额 = 申请金额 / 单位净值
   - 赎回：确认时按净值计算金额 = 申请份额 × 单位净值
-  - 首次申购且为 subscribe 时，确认净值默认为 1.0000
 
 - 可用份额计算逻辑（赎回时）
   - 可用份额 = 最新快照份额 − Σ(pending 赎回) − Σ(已确认赎回且确认日期 > 最新快照日期)
@@ -330,16 +385,25 @@ ProcessRequest --> End
 - 实时可用性计算
   - 申购/赎回：_calculate_investor_available_shares
   - 交易：_calculate_available_cash、_calculate_available_shares
+- **新增** 服务层依赖
+  - confirm_single_subscription：确认业务逻辑
+  - unconfirm_single_subscription：取消确认业务逻辑
+  - NavNotAvailableError：净值不可用异常
+  - InvalidStatusError：状态非法异常
 
 ```mermaid
 graph TB
 U["get_current_user"] --> R["路由函数"]
 A["get_current_admin"] --> R
-R --> T["交易日校验"]
-R --> C1["可用份额计算"]
-R --> C2["可用现金计算"]
-R --> M["模型持久化"]
-R --> S["安全验证已确认事件"]
+R --> S["服务层函数"]
+S --> T["交易日校验"]
+S --> C1["可用份额计算"]
+S --> C2["可用现金计算"]
+S --> M["模型持久化"]
+S --> E["异常处理"]
+R --> V["安全验证已确认事件"]
+E --> N["NavNotAvailableError"]
+E --> I["InvalidStatusError"]
 ```
 
 **图表来源**
@@ -348,6 +412,7 @@ R --> S["安全验证已确认事件"]
 - [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-L85)
 - [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-L32)
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
+- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
 
 **章节来源**
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
@@ -355,11 +420,14 @@ R --> S["安全验证已确认事件"]
 - [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-L85)
 - [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-L32)
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
+- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
 
 ## 性能与并发特性
 - 交易日历查询：每次操作均进行一次数据库查询，建议在上层缓存交易日历
 - 可用份额/现金计算：涉及多表聚合查询，建议在业务层做缓存或延迟计算
 - 批量确认：逐条校验，失败不影响其他事件，适合异步批处理
+- **新增** 服务层优化：业务逻辑集中管理，减少重复代码，提高执行效率
+- **新增** 异常处理优化：具体异常类型提供更精确的错误信息，减少不必要的重试
 - **新增** 安全验证：状态检查为轻量级操作，对性能影响极小
 
 ## 故障排查指南
@@ -372,6 +440,8 @@ R --> S["安全验证已确认事件"]
   - 422 缺少持仓快照：权益登记日快照不存在
   - 422 **新增** 已确认事件不可直接修改：CANNOT_MODIFY_CONFIRMED
   - 422 **新增** 已确认事件不可直接删除：CANNOT_DELETE_CONFIRMED
+  - 422 **新增** 净值不可用：NAV_NOT_AVAILABLE（申请日快照不存在）
+  - 422 **新增** 状态非法：INVALID_STATUS（状态不符合操作要求）
   - 404 未找到：组合/投资人/事件/交易不存在
   - 403 权限不足：非管理员或非本人记录
 - 排查步骤
@@ -379,8 +449,9 @@ R --> S["安全验证已确认事件"]
   - 检查组合状态与投资人是否存在
   - 核对可用份额/现金计算逻辑
   - 确认权益登记日快照是否已生成
-  - 检查状态机是否符合预期
+  - 确认状态机是否符合预期
   - **新增** 对于已确认事件的修改/删除操作，先执行取消确认操作
+  - **新增** 确认净值快照是否存在，必要时先生成快照
 
 **章节来源**
 - [backend/app/routers/subscriptions.py:121-126](file://backend/app/routers/subscriptions.py#L121-L126)
@@ -394,11 +465,15 @@ R --> S["安全验证已确认事件"]
 - [backend/app/routers/share_change_events.py:101-105](file://backend/app/routers/share_change_events.py#L101-L105)
 - [backend/app/routers/subscriptions.py:357-361](file://backend/app/routers/subscriptions.py#L357-L361)
 - [backend/app/routers/subscriptions.py:384-388](file://backend/app/routers/subscriptions.py#L384-L388)
+- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
 
 ## 结论
 - 申购/赎回与份额变动事件模块均采用严格的交易日与状态机约束，确保业务合规
 - 可用份额/现金的实时计算保障了交易与赎回的准确性
 - 管理员权限用于关键操作（确认、取消、删除），普通用户仅能查看自身记录
+- **新增** 服务层架构设计有效提升了代码复用性和可维护性
+- **新增** 简化的确认接口降低了前端集成复杂度，提高了用户体验
+- **新增** 增强的错误处理机制提供了更精确的错误信息和更好的调试体验
 - **新增** 已确认订阅事件的安全验证机制有效防止了数据篡改，维护了系统的数据完整性
 - 建议在前端与网关层增加必要的缓存与限流策略，提升整体性能与稳定性
 
@@ -414,7 +489,7 @@ R --> S["安全验证已确认事件"]
 - GET /api/subscriptions/{id}
   - 返回：订阅详情（本人或管理员）
 - POST /api/subscriptions/{id}/confirm
-  - 请求体：confirm_date、unit_price（确认净值）
+  - **更新** 无需请求体参数，确认日期和单位净值由后端自动计算
   - 返回：确认后的订阅详情
 - POST /api/subscriptions/{id}/cancel
   - 返回：取消成功消息

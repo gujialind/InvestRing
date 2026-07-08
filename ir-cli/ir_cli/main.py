@@ -28,6 +28,7 @@ from ir_cli.commands import (
     logs,
     tasks,
     snapshots,
+    cash_transfers,
 )
 
 app.add_typer(auth.app, name="auth", help="认证管理")
@@ -44,3 +45,4 @@ app.add_typer(system.app, name="system", help="系统管理")
 app.add_typer(logs.app, name="log", help="日志管理")
 app.add_typer(tasks.app, name="task", help="任务管理")
 app.add_typer(snapshots.app, name="snapshot", help="快照管理")
+app.add_typer(cash_transfers.app, name="cash-transfer", help="现金转移管理")

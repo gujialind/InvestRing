@@ -15,7 +15,7 @@ app = typer.Typer(
     rich_markup_mode=None,
 )
 
-# 注册 14 个命令组
+# 注册命令组
 from cli.commands import (
     auth,
     investors,
@@ -31,6 +31,7 @@ from cli.commands import (
     logs,
     tasks,
     snapshots,
+    cash_transfers,
 )
 
 app.add_typer(auth.app, name="auth", help="认证管理")
@@ -47,3 +48,4 @@ app.add_typer(system.app, name="system", help="系统管理")
 app.add_typer(logs.app, name="log", help="日志管理")
 app.add_typer(tasks.app, name="task", help="任务管理")
 app.add_typer(snapshots.app, name="snapshot", help="快照管理")
+app.add_typer(cash_transfers.app, name="cash-transfer", help="平台间现金转移")
