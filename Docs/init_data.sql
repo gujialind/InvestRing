@@ -265,7 +265,7 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_position_snapshot ON portfolio_position
 CREATE INDEX IF NOT EXISTS idx_price_record_product_date ON price_record(product_code, market, date DESC);
 
 -- 份额变动事件
-CREATE INDEX IF NOT EXISTS idx_share_change_portfolio_date ON share_change_event(portfolio_code, event_date DESC);
+CREATE INDEX IF NOT EXISTS idx_share_change_portfolio_date ON share_change_event(portfolio_code, ex_date DESC);
 CREATE INDEX IF NOT EXISTS idx_share_change_status ON share_change_event(status);
 
 -- 组合快照
