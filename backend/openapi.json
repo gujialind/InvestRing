@@ -2254,39 +2254,6 @@
               "type": "integer",
               "title": "Id"
             }
-          },
-          {
-            "name": "confirm_date",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Confirm Date"
-            }
-          },
-          {
-            "name": "unit_price",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Unit Price"
-            }
           }
         ],
         "responses": {
@@ -3522,6 +3489,22 @@
               "type": "string",
               "title": "Portfolio Code"
             }
+          },
+          {
+            "name": "platform_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Platform Code"
+            }
           }
         ],
         "responses": {
@@ -3622,7 +3605,7 @@
           "持仓管理"
         ],
         "summary": "Update Cash Position",
-        "description": "更新非净值型资产（现金）金额\n\n权限：仅admin\n规则：\n- 必须在交易日进行\n- 必须指定平台代码\n- 更新CASH产品的amount字段\n- 如果不存在则创建，存在则更新",
+        "description": "更新非净值型资产（现金）金额\n\n权限：仅admin\n规则：\n- 必须在交易日进行\n- 必须指定平台代码\n- 写入 manual_market_value 表（绝对替换），不再直接写 portfolio_position\n- 写入后提示用户重新生成快照（非强制）",
         "operationId": "update_cash_position_api_positions_portfolio__portfolio_code__cash_position_post",
         "security": [
           {
@@ -4542,7 +4525,7 @@
           "snapshots"
         ],
         "summary": "Delete Snapshot",
-        "description": "删除指定日期的快照\n\n权限：仅admin",
+        "description": "删除指定日期的快照\n\n删除前自动级联回退依赖该快照的已确认申购/赎回和份额变动事件。\n\n权限：仅admin",
         "operationId": "delete_snapshot_api_v1_snapshots__portfolio_code___snapshot_date__delete",
         "security": [
           {
@@ -4567,6 +4550,256 @@
               "type": "string",
               "format": "date",
               "title": "Snapshot Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/snapshots/{portfolio_code}/bulk/{from_date}": {
+      "delete": {
+        "tags": [
+          "快照管理",
+          "snapshots"
+        ],
+        "summary": "Delete Snapshots Bulk",
+        "description": "批量删除从 from_date 开始的所有快照（含 from_date）\n\n从最新快照日开始倒序删除，确保级联回退的顺序正确。\n每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。\n\n权限：仅admin",
+        "operationId": "delete_snapshots_bulk_api_v1_snapshots__portfolio_code__bulk__from_date__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          },
+          {
+            "name": "from_date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_code}/cash-transfer": {
+      "post": {
+        "tags": [
+          "现金转移"
+        ],
+        "summary": "Create Cash Transfer",
+        "description": "创建平台间现金转移\n\n生成两条 Trade 记录（卖出 CASH + 买入 CASH），通过 transfer_group 关联。\n- 当天完成：两条 Trade 立即 confirm\n- 跨天到账：卖出 Trade 立即 confirm，买入 Trade 保持 pending",
+        "operationId": "create_cash_transfer_api_portfolios__portfolio_code__cash_transfer_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashTransferCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashTransferResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_code}/cash-transfer/{transfer_group}/confirm": {
+      "post": {
+        "tags": [
+          "现金转移"
+        ],
+        "summary": "Confirm Cash Transfer",
+        "description": "确认跨天转移的两条 pending Trade\n\n对称状态改造后，两腿均 pending，需同时确认。",
+        "operationId": "confirm_cash_transfer_api_portfolios__portfolio_code__cash_transfer__transfer_group__confirm_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          },
+          {
+            "name": "transfer_group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Transfer Group"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_code}/cash-transfers": {
+      "get": {
+        "tags": [
+          "现金转移"
+        ],
+        "summary": "List Cash Transfers",
+        "description": "查询平台间现金转移记录\n\n通过 Trade.transfer_group IS NOT NULL AND Trade.product_code='CASH' 过滤，\n按 transfer_group 分组返回。",
+        "operationId": "list_cash_transfers_api_portfolios__portfolio_code__cash_transfers_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 20,
+              "title": "Page Size"
             }
           }
         ],
@@ -4658,6 +4891,112 @@
         ],
         "title": "CashPositionUpdate",
         "description": "非净值型资产（现金）更新请求"
+      },
+      "CashTransferCreate": {
+        "properties": {
+          "from_platform": {
+            "type": "string",
+            "title": "From Platform"
+          },
+          "to_platform": {
+            "type": "string",
+            "title": "To Platform"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "cross_day": {
+            "type": "boolean",
+            "title": "Cross Day",
+            "default": false
+          },
+          "transfer_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Transfer Date"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_platform",
+          "to_platform",
+          "amount",
+          "transfer_date"
+        ],
+        "title": "CashTransferCreate",
+        "description": "平台间现金转移请求"
+      },
+      "CashTransferResponse": {
+        "properties": {
+          "transfer_group": {
+            "type": "string",
+            "title": "Transfer Group"
+          },
+          "from_platform": {
+            "type": "string",
+            "title": "From Platform"
+          },
+          "to_platform": {
+            "type": "string",
+            "title": "To Platform"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "cross_day": {
+            "type": "boolean",
+            "title": "Cross Day"
+          },
+          "sell_trade_id": {
+            "type": "integer",
+            "title": "Sell Trade Id"
+          },
+          "buy_trade_id": {
+            "type": "integer",
+            "title": "Buy Trade Id"
+          },
+          "sell_status": {
+            "type": "string",
+            "title": "Sell Status"
+          },
+          "buy_status": {
+            "type": "string",
+            "title": "Buy Status"
+          },
+          "transfer_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Transfer Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transfer_group",
+          "from_platform",
+          "to_platform",
+          "amount",
+          "cross_day",
+          "sell_trade_id",
+          "buy_trade_id",
+          "sell_status",
+          "buy_status",
+          "transfer_date"
+        ],
+        "title": "CashTransferResponse",
+        "description": "现金转移响应"
       },
       "ChangePasswordRequest": {
         "properties": {
@@ -5854,7 +6193,6 @@
           },
           "errors": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -5908,15 +6246,37 @@
             "type": "string",
             "title": "Event Type"
           },
-          "event_date": {
+          "ex_date": {
             "type": "string",
             "format": "date",
-            "title": "Event Date"
+            "title": "Ex Date"
           },
           "entitlement_date": {
             "type": "string",
             "format": "date",
             "title": "Entitlement Date"
+          },
+          "platform_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Code"
+          },
+          "parent_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Event Id"
           },
           "product_code": {
             "anyOf": [
@@ -6076,7 +6436,7 @@
         "required": [
           "portfolio_code",
           "event_type",
-          "event_date",
+          "ex_date",
           "entitlement_date"
         ],
         "title": "ShareChangeEventCreate"
@@ -6091,15 +6451,37 @@
             "type": "string",
             "title": "Event Type"
           },
-          "event_date": {
+          "ex_date": {
             "type": "string",
             "format": "date",
-            "title": "Event Date"
+            "title": "Ex Date"
           },
           "entitlement_date": {
             "type": "string",
             "format": "date",
             "title": "Entitlement Date"
+          },
+          "platform_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Code"
+          },
+          "parent_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Event Id"
           },
           "product_code": {
             "anyOf": [
@@ -6287,7 +6669,7 @@
         "required": [
           "portfolio_code",
           "event_type",
-          "event_date",
+          "ex_date",
           "entitlement_date",
           "id"
         ],
@@ -6295,7 +6677,7 @@
       },
       "ShareChangeEventUpdate": {
         "properties": {
-          "event_date": {
+          "ex_date": {
             "anyOf": [
               {
                 "type": "string",
@@ -6305,7 +6687,7 @@
                 "type": "null"
               }
             ],
-            "title": "Event Date"
+            "title": "Ex Date"
           },
           "entitlement_date": {
             "anyOf": [
@@ -6636,6 +7018,10 @@
             "type": "string",
             "title": "Investor Code"
           },
+          "platform_code": {
+            "type": "string",
+            "title": "Platform Code"
+          },
           "sub_type": {
             "type": "string",
             "title": "Sub Type"
@@ -6711,6 +7097,7 @@
         "required": [
           "portfolio_code",
           "investor_code",
+          "platform_code",
           "sub_type",
           "apply_date"
         ],
@@ -6725,6 +7112,10 @@
           "investor_code": {
             "type": "string",
             "title": "Investor Code"
+          },
+          "platform_code": {
+            "type": "string",
+            "title": "Platform Code"
           },
           "sub_type": {
             "type": "string",
@@ -6829,6 +7220,7 @@
         "required": [
           "portfolio_code",
           "investor_code",
+          "platform_code",
           "sub_type",
           "apply_date",
           "id"
@@ -6837,6 +7229,17 @@
       },
       "SubscriptionUpdate": {
         "properties": {
+          "platform_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Code"
+          },
           "amount": {
             "anyOf": [
               {
@@ -7080,6 +7483,17 @@
             "type": "string",
             "title": "Trade Type"
           },
+          "transfer_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transfer Group"
+          },
           "shares": {
             "anyOf": [
               {
@@ -7207,6 +7621,17 @@
           "trade_type": {
             "type": "string",
             "title": "Trade Type"
+          },
+          "transfer_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transfer Group"
           },
           "shares": {
             "anyOf": [
@@ -7562,13 +7987,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",

@@ -941,8 +941,6 @@ def auto_confirm_after_snapshot(
                 f"自动确认异常: subscription_id={sub_id}, error={str(e)}"
             )
 
-    return results
-
     # Trade 自动确认（confirm_date == snapshot_date 的 pending trades）
     # 排除 transfer_group 非空的 CASH trade：
     #   - 跨天转移两腿：由下方 cross_day_transfers 分支处理
