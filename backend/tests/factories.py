@@ -357,9 +357,13 @@ def create_share_change_event(
     entitlement_date: date = date(2025, 1, 9),
     event_source: str = "manual",
     status: str = "pending",
+    platform_code: Optional[str] = None,  # 平台级事件必传，基金级事件不传
     **kwargs,
 ) -> ShareChangeEvent:
-    """创建份额变动事件"""
+    """创建份额变动事件。
+    平台级事件（cash_dividend/reinvest_dividend/forced_adjustment）须传 platform_code。
+    基金级事件（share_split/share_merge/bonus_share）不传 platform_code。
+    """
     event = ShareChangeEvent(
         portfolio_code=portfolio_code,
         product_code=product_code,
@@ -369,6 +373,7 @@ def create_share_change_event(
         entitlement_date=entitlement_date,
         event_source=event_source,
         status=status,
+        platform_code=platform_code,
         **kwargs,
     )
     db.add(event)

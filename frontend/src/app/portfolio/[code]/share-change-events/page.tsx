@@ -38,9 +38,13 @@ import { formatCurrency, formatNumber, toDateOnly, parseDateOnly } from "@/lib/u
 import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
 import { shareChangeEventApi, ShareChangeEvent, ShareChangeEventCreate, getErrorMessage } from "@/lib/api";
+import { platformApi } from "@/lib/api";
+import { Platform } from "@/types/platform";
 import { EventType } from "@/types/common";
 import { useUIStore } from "@/stores/uiStore";
 import { useQuery } from "@tanstack/react-query";
+
+const PLATFORM_LEVEL_TYPES: EventType[] = ["cash_dividend", "reinvest_dividend", "forced_adjustment"];
 
 const EVENT_TYPE_LABELS: Record<EventType, string> = {
   cash_dividend: "现金分红",
@@ -69,6 +73,7 @@ export default function ShareChangeEventsPage() {
     event_type: "cash_dividend",
     ex_date: toDateOnly(new Date()),
     entitlement_date: toDateOnly(new Date()),
+    platform_code: "",
     product_code: "",
     market: "",
     div_cash: 0,
@@ -84,6 +89,14 @@ export default function ShareChangeEventsPage() {
     queryKey: ["shareChangeEvents", code],
     queryFn: () => shareChangeEventApi.list({ portfolio_code: code, page_size: 100 }),
   });
+
+  // 查询平台列表
+  const { data: platformsData } = useQuery({
+    queryKey: ["platforms"],
+    queryFn: () => platformApi.list({ page_size: 100 }),
+  });
+
+  const platforms = platformsData?.items || [];
 
   const events = eventsData?.items || [];
 
@@ -155,7 +168,8 @@ export default function ShareChangeEventsPage() {
       event_type: "cash_dividend",
       ex_date: toDateOnly(new Date()),
       entitlement_date: toDateOnly(new Date()),
-      product_code: ""
+      platform_code: "",
+      product_code: "",
       market: "",
       div_cash: 0,
       reinvest_nav: 0,
@@ -241,6 +255,28 @@ export default function ShareChangeEventsPage() {
                       />
                     </div>
                   </div>
+
+                  {/* 平台选择器：仅平台级事件显示 */}
+                  {PLATFORM_LEVEL_TYPES.includes(formData.event_type) && (
+                    <div className="space-y-2">
+                      <Label htmlFor="platform_code">平台</Label>
+                      <Select
+                        value={formData.platform_code || ""}
+                        onValueChange={(value) => setFormData({ ...formData, platform_code: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择平台" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {platforms.map((p) => (
+                            <SelectItem key={p.code} value={p.code}>
+                              {p.name} ({p.code})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -376,6 +412,7 @@ export default function ShareChangeEventsPage() {
                     <TableRow>
                       <TableHead>事件类型</TableHead>
                       <TableHead>产品代码</TableHead>
+                      <TableHead>平台</TableHead>
                       <TableHead>除息日</TableHead>
                       <TableHead>权益登记日</TableHead>
                       <TableHead className="text-right">份额变化</TableHead>
@@ -389,6 +426,7 @@ export default function ShareChangeEventsPage() {
                       <TableRow key={event.id}>
                         <TableCell>{EVENT_TYPE_LABELS[event.event_type] || event.event_type}</TableCell>
                         <TableCell>{event.product_code || "--"}</TableCell>
+                        <TableCell>{event.platform_code || "全部"}</TableCell>
                         <TableCell>{event.ex_date}</TableCell>
                         <TableCell>{event.entitlement_date}</TableCell>
                         <TableCell className="text-right">

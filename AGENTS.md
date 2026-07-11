@@ -250,6 +250,12 @@ calculate_available_cash = compute_cash_balance(latest_snapshot_date)
 
 ### 3.4 份额变动事件边界
 
+**事件分级**：
+| event_type | 级别 | platform_code |
+|---|---|---|
+| `share_split`/`share_merge`/`bonus_share` | 基金级 | 空（录入1条，确认时自动拆分） |
+| `cash_dividend`/`reinvest_dividend`/`forced_adjustment` | 平台级 | 必填（每个有持仓的平台各录1条） |
+
 | 条件 | 处理方式 |
 |------|----------|
 | 权益登记日不是交易日 | 拒绝创建事件 |
@@ -257,14 +263,15 @@ calculate_available_cash = compute_cash_balance(latest_snapshot_date)
 | 除息日 ≤ 权益登记日 | 拒绝（必须严格大于：`ex_date > entitlement_date`） |
 | 除息日 ≤ 最新快照日 | 拒绝（`DATE_BEFORE_SNAPSHOT`） |
 | 确认事件时 entitlement_date 持仓快照不存在 | 返回 `MISSING_POSITION_SNAPSHOT` 错误 |
-| cash_dividend 缺少 platform_code | 拒绝（`PLATFORM_REQUIRED`） |
-| forced_adjustment(cash_change≠0) 缺少 platform_code | 拒绝（`PLATFORM_REQUIRED`） |
+| 平台级事件缺少 platform_code | 拒绝（`PLATFORM_REQUIRED`） |
+| 基金级事件指定了 platform_code | 拒绝（`PLATFORM_NOT_ALLOWED`） |
+| 平台级事件未全覆盖有持仓的平台 | warning（不阻断），列出未覆盖平台 |
 
 **双日期模型**：`ex_date`（除息/除权日，应用日）+ `entitlement_date`（权益登记日，基数日）。`ex_date > entitlement_date` 严格大于，保证快照生成时 `entitlement_date` 的快照已落库，`entitlement_shares` 可读取。
 
-**确认时自动回写**：确认事件时自动从 `entitlement_date` 快照读取 `entitlement_shares`，按 `event_type` 计算 `shares_before`/`shares_change`/`shares_after`/`cash_change`。`forced_adjustment` 由用户直接填写，不自动计算。
+**确认时自动回写**：确认事件时自动从 `entitlement_date` 快照读取 `entitlement_shares`，按 `event_type` 计算 `shares_before`/`shares_change`/`shares_after`/`cash_change`。`forced_adjustment` 由用户直接填写，不自动计算。基金级事件确认时自动拆分：为每个有持仓的平台生成子记录（`parent_event_id` 指向父记录），子记录的 `platform_code` 和计算值按该平台独立设置，父记录设汇总值。
 
-**事件在快照中的应用**：`_generate_portfolio_position` 对 `ex_date <= target_date` 的 confirmed 事件按 `entitlement_date` 升序应用。仅处理基金份额变更（reinvest/split/merge/bonus），现金侧由 `compute_cash_balance` 覆盖。
+**事件在快照中的应用**：`_generate_portfolio_position` 只读取 `platform_code IS NOT NULL` 的 confirmed 事件（跳过基金级父记录），按 `entitlement_date` 升序应用。`fund_key = (product_code, market, platform_code)` 按平台精确匹配。使用确认时预计算的 `shares_change`，不重算。
 
 **事件类型与计算**：
 
@@ -319,6 +326,8 @@ calculate_available_cash = compute_cash_balance(latest_snapshot_date)
 33. **份额变动事件双日期约束**：`ex_date`（除息日）必须严格大于 `entitlement_date`（权益登记日），两者均须为交易日。`event_date` 已全局改名为 `ex_date`
 34. **pending 事件拦截快照**：存在 `ex_date <= target_date` 的 pending 事件时，快照生成检查返回 failed（非仅 warning）
 35. **交易录入日期约束**：Trade `trade_date`、Subscription `apply_date`、ShareChangeEvent `ex_date` 均须晚于最新快照日（`DATE_BEFORE_SNAPSHOT`）
+36. **事件分级**：基金级事件（`share_split`/`share_merge`/`bonus_share`）录入时 `platform_code` 为空，确认时自动拆分为各平台子记录（`parent_event_id` 关联）；平台级事件（`cash_dividend`/`reinvest_dividend`/`forced_adjustment`）必须指定 `platform_code`，每个有持仓的平台各录 1 条
+37. **级联删除子记录**：删快照/删除事件时，基金级父记录的子记录被物理删除（`parent_event_id == event.id`），确保 regen 重确认不重复拆分
 
 ---
 
@@ -368,7 +377,8 @@ calculate_available_cash = compute_cash_balance(latest_snapshot_date)
 | `DATE_BEFORE_SNAPSHOT` | 422 | 交易/事件日期不晚于最新快照日 |
 | `INVALID_DATE_ORDER` | 422 | 除息日不严格大于权益登记日 |
 | `INVALID_EX_DATE` | 422 | 除息日不是交易日 |
-| `PLATFORM_REQUIRED` | 422 | 现金分红/现金调整事件缺少 platform_code |
+| `PLATFORM_REQUIRED` | 422 | 平台级事件缺少 platform_code |
+| `PLATFORM_NOT_ALLOWED` | 422 | 基金级事件不应指定 platform_code |
 
 **HTTP状态码通用定义**：
 - 400：参数错误
@@ -465,7 +475,8 @@ calculate_available_cash = compute_cash_balance(latest_snapshot_date)
 - `portfolio_position` 表唯一约束：`(portfolio_code, product_code, market, platform_code, snapshot_date)`，支持同一组合在同一天通过不同平台持有相同产品的多条记录
 - `trade` 表唯一约束：`(transfer_group, product_code, trade_type)`，防止重复确认生成重复 CASH trade（MySQL 中 NULL 值不参与唯一性检查，普通 trade 不受影响）
 - `manual_market_value` 表唯一约束：`(portfolio_code, platform_code, product_code, date)`
-- `share_change_event` 表新增 `platform_code` 字段（nullable），`cash_dividend` 时必填
+- `share_change_event` 表新增 `platform_code` 字段（nullable），平台级事件必填
+- `share_change_event` 表新增 `parent_event_id` 自引用 FK（nullable），基金级事件拆分的子记录指向父记录
 
 ### F. MySQL 连接池配置
 
