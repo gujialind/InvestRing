@@ -6,8 +6,9 @@ from datetime import date, datetime
 class ShareChangeEventBase(BaseModel):
     portfolio_code: str
     event_type: str  # cash_dividend/reinvest_dividend/share_split/share_merge/bonus_share/forced_adjustment
-    event_date: date
+    ex_date: date
     entitlement_date: date
+    platform_code: Optional[str] = None
     product_code: Optional[str] = None
     market: Optional[str] = None
     event_source: str = "manual"
@@ -30,8 +31,9 @@ class ShareChangeEventCreate(ShareChangeEventBase):
 
 
 class ShareChangeEventUpdate(BaseModel):
-    event_date: Optional[date] = None
+    ex_date: Optional[date] = None
     entitlement_date: Optional[date] = None
+    platform_code: Optional[str] = None
     shares_before: Optional[float] = None
     shares_change: Optional[float] = None
     shares_after: Optional[float] = None

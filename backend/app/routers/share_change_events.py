@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from app.database import get_db
 from app.models.share_change_event import ShareChangeEvent
@@ -14,6 +14,7 @@ from app.schemas.share_change_event import (
     ShareChangeEventResponse,
 )
 from app.dependencies import get_current_user, get_current_admin
+from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 
 router = APIRouter()
 
@@ -52,13 +53,49 @@ def create_share_change_event(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    # 权益登记日必须是交易日
+    # (e) 权益登记日必须是交易日
     if not _is_trading_day(db, event.entitlement_date):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "error": "INVALID_ENTITLEMENT_DATE",
                 "message": "权益登记日不是交易日",
+            },
+        )
+
+    # (e) 除息日必须是交易日
+    if not _is_trading_day(db, event.ex_date):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "INVALID_EX_DATE",
+                "message": "除息日不是交易日",
+            },
+        )
+
+    # (d) 除息日必须严格大于权益登记日
+    if event.ex_date <= event.entitlement_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "INVALID_DATE_ORDER",
+                "message": "除息日必须严格大于权益登记日（ex_date > entitlement_date）",
+            },
+        )
+
+    # (a) 除息日必须晚于最新快照日
+    latest_snapshot = (
+        db.query(PortfolioValueSnapshot.snapshot_date)
+        .filter(PortfolioValueSnapshot.portfolio_code == event.portfolio_code)
+        .order_by(PortfolioValueSnapshot.snapshot_date.desc())
+        .first()
+    )
+    if latest_snapshot and event.ex_date <= latest_snapshot[0]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "DATE_BEFORE_SNAPSHOT",
+                "message": f"除息日必须晚于最新快照日（{latest_snapshot[0]}）",
             },
         )
 
@@ -69,6 +106,24 @@ def create_share_change_event(
     )
     if not portfolio:
         raise HTTPException(status_code=404, detail="Portfolio not found")
+
+    # (f) cash_dividend / forced_adjustment(cash_change!=0) 的 platform_code 必填
+    if event.event_type == "cash_dividend" and not event.platform_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "PLATFORM_REQUIRED",
+                "message": "现金分红事件必须指定 platform_code",
+            },
+        )
+    if event.event_type == "forced_adjustment" and event.cash_change and event.cash_change != 0 and not event.platform_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "PLATFORM_REQUIRED",
+                "message": "涉及现金变动的强制调整必须指定 platform_code",
+            },
+        )
 
     new_event = ShareChangeEvent(**event.dict())
     db.add(new_event)
@@ -122,7 +177,46 @@ def confirm_share_change_event(
             },
         )
 
+    # 从 entitlement_date 快照读取 entitlement_shares
+    entitlement_position = (
+        db.query(PortfolioPosition)
+        .filter(
+            PortfolioPosition.portfolio_code == event.portfolio_code,
+            PortfolioPosition.product_code == event.product_code,
+            PortfolioPosition.snapshot_date == event.entitlement_date,
+        )
+        .first()
+    )
+    entitlement_shares = Decimal(str(entitlement_position.shares or 0)) if entitlement_position else Decimal("0")
+
+    event.entitlement_shares = entitlement_shares
+    event.shares_before = entitlement_shares
+
+    # 按 event_type 计算 shares_change / shares_after / cash_change
+    if event.event_type == "cash_dividend":
+        event.cash_change = entitlement_shares * Decimal(str(event.div_cash or 0))
+        event.shares_change = Decimal("0")
+        event.shares_after = entitlement_shares
+    elif event.event_type == "reinvest_dividend":
+        event.shares_change = entitlement_shares * Decimal(str(event.div_cash or 0)) / Decimal(str(event.reinvest_nav or 1))
+        event.shares_after = entitlement_shares + event.shares_change
+        event.cash_change = Decimal("0")
+    elif event.event_type == "share_split":
+        event.shares_after = entitlement_shares * Decimal(str(event.ratio or 1))
+        event.shares_change = event.shares_after - entitlement_shares
+        event.cash_change = Decimal("0")
+    elif event.event_type == "share_merge":
+        event.shares_after = entitlement_shares / Decimal(str(event.ratio or 1))
+        event.shares_change = event.shares_after - entitlement_shares
+        event.cash_change = Decimal("0")
+    elif event.event_type == "bonus_share":
+        event.shares_change = entitlement_shares * Decimal(str(event.ratio or 0))
+        event.shares_after = entitlement_shares + event.shares_change
+        event.cash_change = Decimal("0")
+    # forced_adjustment: shares_change / cash_change 由用户直接填写，不自动计算
+
     event.status = "confirmed"
+    event.confirmed_at = datetime.now()
     db.commit()
     db.refresh(event)
     return {"message": "Share change event confirmed successfully", "event": ShareChangeEventResponse.from_orm(event)}

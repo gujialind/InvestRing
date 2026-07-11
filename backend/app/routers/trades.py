@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date
 from decimal import Decimal
+import uuid
 from app.database import get_db
 from app.models.trade import Trade
 from app.models.portfolio import Portfolio
@@ -13,6 +14,7 @@ from app.models.trading_calendar import TradingCalendar
 from app.models.price_record import PriceRecord
 from app.schemas.trade import TradeCreate, TradeUpdate, TradeResponse
 from app.dependencies import get_current_user, get_current_admin
+from app.services.position_service import calculate_available_cash
 
 
 def _get_next_trading_day(db: Session, from_date: date, days: int = 1) -> date:
@@ -108,6 +110,33 @@ def _get_nav_for_trade_confirmation(
 router = APIRouter()
 
 
+def _sync_transfer_group(
+    db: Session, trade: Trade, target_status: str, confirm_date: Optional[date] = None
+):
+    """同步 transfer_group 关联的另一腿状态"""
+    if not trade.transfer_group:
+        return
+    paired = db.query(Trade).filter(
+        Trade.transfer_group == trade.transfer_group,
+        Trade.id != trade.id,
+    ).all()
+    for paired_trade in paired:
+        paired_trade.status = target_status
+        if confirm_date is not None:
+            paired_trade.confirm_date = confirm_date
+        elif target_status == "pending":
+            # unconfirm 时需要重新计算期望确认日
+            paired_product = db.query(Product).filter(
+                Product.code == paired_trade.product_code,
+                Product.market == paired_trade.market,
+            ).first()
+            if paired_product:
+                paired_confirm_days = paired_product.confirm_days or 0
+                paired_trade.confirm_date = _get_next_trading_day(
+                    db, paired_trade.trade_date, days=paired_confirm_days
+                )
+
+
 def _is_trading_day(db: Session, target_date: date) -> bool:
     cal = db.query(TradingCalendar).filter(TradingCalendar.date == target_date).first()
     if not cal:
@@ -123,137 +152,6 @@ def _get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date
         .scalar()
     )
     return result
-
-
-def _calculate_available_cash(db: Session, portfolio_code: str, platform_code: Optional[str] = None) -> Decimal:
-    """
-    组合可用现金实时计算：
-    最新快照现金
-    + SUM(confirmed申购金额 WHERE 快照未生成)
-    - SUM(confirmed赎回金额 WHERE 快照未生成)
-    - SUM(pending买入金额)
-    - SUM(confirmed买入金额 WHERE 快照未生成)
-    + SUM(confirmed卖出金额 WHERE 快照未生成)
-    
-    若指定 platform_code，则只计算该平台的现金。
-    """
-    latest_date = _get_latest_snapshot_date(db, portfolio_code)
-
-    from app.models.subscription import Subscription
-
-    # 最新快照现金
-    cash_query = (
-        db.query(PortfolioPosition)
-        .filter(
-            PortfolioPosition.portfolio_code == portfolio_code,
-            PortfolioPosition.product_code == "CASH",
-        )
-    )
-    if platform_code:
-        cash_query = cash_query.filter(PortfolioPosition.platform_code == platform_code)
-    
-    if platform_code:
-        cash_position = cash_query.order_by(PortfolioPosition.snapshot_date.desc()).first()
-        cash = Decimal(cash_position.amount) if cash_position and cash_position.amount else Decimal("0")
-    else:
-        # 不指定平台时，汇总所有平台的现金
-        cash_positions = cash_query.order_by(PortfolioPosition.snapshot_date.desc()).all()
-        seen_platforms = set()
-        latest_positions = []
-        for pos in cash_positions:
-            if pos.platform_code not in seen_platforms:
-                seen_platforms.add(pos.platform_code)
-                latest_positions.append(pos)
-        cash = sum(Decimal(p.amount) if p.amount else Decimal("0") for p in latest_positions)
-
-    # 构建平台过滤条件
-    platform_filter = []
-    if platform_code:
-        platform_filter.append(Subscription.platform_code == platform_code)
-        trade_platform_filter = [Trade.platform_code == platform_code]
-    else:
-        trade_platform_filter = []
-
-    confirmed_subs = (
-        db.query(Subscription)
-        .filter(
-            Subscription.portfolio_code == portfolio_code,
-            Subscription.status == "confirmed",
-            Subscription.sub_type == "subscribe",
-            *platform_filter,
-        )
-        .all()
-    )
-    for s in confirmed_subs:
-        if latest_date is None or (s.confirm_date and s.confirm_date > latest_date):
-            cash += Decimal(s.amount) if s.amount else Decimal("0")
-
-    confirmed_redeems = (
-        db.query(Subscription)
-        .filter(
-            Subscription.portfolio_code == portfolio_code,
-            Subscription.status == "confirmed",
-            Subscription.sub_type == "redeem",
-            *platform_filter,
-        )
-        .all()
-    )
-    for s in confirmed_redeems:
-        if latest_date is None or (s.confirm_date and s.confirm_date > latest_date):
-            cash -= Decimal(s.amount) if s.amount else Decimal("0")
-
-    pending_buys = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.status == "pending",
-            Trade.trade_type == "buy",
-            *trade_platform_filter,
-        )
-        .all()
-    )
-    for t in pending_buys:
-        cash -= Decimal(t.amount) if t.amount else Decimal("0")
-
-    confirmed_buys = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.status == "confirmed",
-            Trade.trade_type == "buy",
-            *trade_platform_filter,
-        )
-        .all()
-    )
-    for t in confirmed_buys:
-        if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
-            if t.product_code == "CASH":
-                # 现金转移买入：现金到达平台，增加可用现金
-                cash += Decimal(t.amount) if t.amount else Decimal("0")
-            else:
-                # 基金买入：消耗现金，减少可用现金
-                cash -= Decimal(t.amount) if t.amount else Decimal("0")
-
-    confirmed_sells = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.status == "confirmed",
-            Trade.trade_type == "sell",
-            *trade_platform_filter,
-        )
-        .all()
-    )
-    for t in confirmed_sells:
-        if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
-            if t.product_code == "CASH":
-                # 现金转移卖出：现金离开平台，减少可用现金
-                cash -= Decimal(t.amount) if t.amount else Decimal("0")
-            else:
-                # 基金卖出：释放现金，增加可用现金
-                cash += Decimal(t.amount) if t.amount else Decimal("0")
-
-    return cash
 
 
 def _calculate_available_shares(
@@ -350,6 +248,17 @@ def create_trade(
             detail={"error": "PORTFOLIO_NOT_ACTIVE", "message": "组合未激活"},
         )
 
+    # (a) 交易日必须晚于最新快照日
+    latest_snapshot_date = _get_latest_snapshot_date(db, trade.portfolio_code)
+    if latest_snapshot_date and trade.trade_date <= latest_snapshot_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "DATE_BEFORE_SNAPSHOT",
+                "message": f"交易日必须晚于最新快照日（{latest_snapshot_date}）",
+            },
+        )
+
     product = (
         db.query(Product)
         .filter(Product.code == trade.product_code, Product.market == trade.market)
@@ -358,6 +267,10 @@ def create_trade(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    # 计算预期确认日期（创建时即设定，满足规范1：日期字段齐备）
+    confirm_days = product.confirm_days or 0
+    expected_confirm_date = _get_next_trading_day(db, trade.trade_date, days=confirm_days)
+
     if trade.trade_type == "buy":
         if trade.amount is None or trade.amount <= 0:
             raise HTTPException(
@@ -365,7 +278,7 @@ def create_trade(
                 detail={"error": "INVALID_AMOUNT", "message": "买入金额必须大于0"},
             )
         # 按平台计算可用现金
-        available_cash = _calculate_available_cash(db, trade.portfolio_code, trade.platform_code)
+        available_cash = calculate_available_cash(db, trade.portfolio_code, trade.platform_code)
         if Decimal(str(trade.amount)) > available_cash:
             msg = "买入金额超过可用现金"
             if trade.platform_code:
@@ -395,6 +308,7 @@ def create_trade(
             fee=fee,
             actual_amount=actual_amount,
             trade_date=trade.trade_date,
+            confirm_date=expected_confirm_date,
             status="pending",
             notes=trade.notes,
         )
@@ -433,13 +347,41 @@ def create_trade(
             fee=fee,
             actual_amount=actual_amount,
             trade_date=trade.trade_date,
+            confirm_date=expected_confirm_date,
             status="pending",
             notes=trade.notes,
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid trade type")
 
-    db.add(new_trade)
+    # 为基金调仓生成配对 CASH trade（显式记录现金变动）
+    # CASH 产品（如现金转移）不生成配对，由各自创建逻辑处理
+    if trade.product_code != "CASH":
+        transfer_group = f"rebal_{uuid.uuid4().hex[:12]}"
+        new_trade.transfer_group = transfer_group
+
+        cash_trade_amount = actual_amount
+        cash_trade = Trade(
+            portfolio_code=trade.portfolio_code,
+            platform_code=trade.platform_code,
+            product_code="CASH",
+            market="",
+            trade_type="sell" if trade.trade_type == "buy" else "buy",
+            shares=None,
+            amount=cash_trade_amount,
+            price=Decimal("1"),
+            fee=Decimal("0"),
+            actual_amount=cash_trade_amount,
+            trade_date=trade.trade_date,
+            confirm_date=expected_confirm_date,
+            status="pending",
+            transfer_group=transfer_group,
+        )
+        db.add(new_trade)
+        db.add(cash_trade)
+    else:
+        db.add(new_trade)
+
     db.commit()
     db.refresh(new_trade)
     return new_trade
@@ -482,9 +424,10 @@ def confirm_trade(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    if confirm_date is None:
-        confirm_days = product.confirm_days or 0
-        confirm_date = _get_next_trading_day(db, trade.trade_date, days=confirm_days)
+    # confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
+    if confirm_date is not None:
+        trade.confirm_date = confirm_date
+    # 否则保留创建时已设定的 confirm_date
 
     # 净值型产品必须获取净值进行计算
     # 判断是否为净值型产品（场外基金）
@@ -532,7 +475,8 @@ def confirm_trade(
             trade.amount = amount
 
     trade.status = "confirmed"
-    trade.confirm_date = confirm_date
+    # confirm_date 已在上方处理（创建时设定或参数覆盖）
+    _sync_transfer_group(db, trade, "confirmed", trade.confirm_date)
     db.commit()
     db.refresh(trade)
     resp = TradeResponse.from_orm(trade)
@@ -571,6 +515,7 @@ def cancel_trade(
         )
 
     trade.status = "cancelled"
+    _sync_transfer_group(db, trade, "cancelled")
     db.commit()
     return {"message": "Trade cancelled successfully"}
 
@@ -591,7 +536,17 @@ def unconfirm_trade(
         )
     
     trade.status = "pending"
-    trade.confirm_date = None
+    # 重新计算期望确认日（创建时设定 confirm_date，unconfirm 后需恢复）
+    if trade.product_code and trade.market:
+        product_for_unconfirm = db.query(Product).filter(
+            Product.code == trade.product_code, Product.market == trade.market
+        ).first()
+        if product_for_unconfirm:
+            confirm_days_unconfirm = product_for_unconfirm.confirm_days or 0
+            trade.confirm_date = _get_next_trading_day(
+                db, trade.trade_date, days=confirm_days_unconfirm
+            )
+    _sync_transfer_group(db, trade, "pending")
     db.commit()
     return {"message": "Trade unconfirmed successfully"}
 

@@ -98,6 +98,23 @@ def create_cash_transfer(
             detail={"error": "NON_TRADING_DAY", "message": "非交易日，请等待交易日再提交"},
         )
 
+    # (a) 转移日必须晚于最新快照日
+    from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+    from sqlalchemy import func
+    latest_snapshot_date = (
+        db.query(func.max(PortfolioValueSnapshot.snapshot_date))
+        .filter(PortfolioValueSnapshot.portfolio_code == portfolio_code)
+        .scalar()
+    )
+    if latest_snapshot_date and request.transfer_date <= latest_snapshot_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "DATE_BEFORE_SNAPSHOT",
+                "message": f"转移日必须晚于最新快照日（{latest_snapshot_date}）",
+            },
+        )
+
     # 校验金额
     if request.amount <= 0:
         raise HTTPException(
@@ -166,11 +183,14 @@ def create_cash_transfer(
         buy_trade.status = "confirmed"
         buy_trade.confirm_date = request.transfer_date
     else:
-        # 跨天到账：卖出立即 confirm，买入 pending 至下一交易日
-        sell_trade.status = "confirmed"
-        sell_trade.confirm_date = request.transfer_date
+        # 跨天到账：两腿均 pending，confirm_date = 下一交易日（对称状态）
+        # D 日快照中两腿均 pending → compute_cash_balance 不计入 → NAV 不跌
+        # D+1 同时 confirm → 资金从 A 转移到 B
+        next_trading_day = _get_next_trading_day(db, request.transfer_date)
+        sell_trade.status = "pending"
+        sell_trade.confirm_date = next_trading_day
         buy_trade.status = "pending"
-        buy_trade.confirm_date = None  # 待后续手动确认或定时确认
+        buy_trade.confirm_date = next_trading_day
 
     db.commit()
     db.refresh(sell_trade)
@@ -198,34 +218,33 @@ def confirm_cash_transfer(
     current_user=Depends(get_current_admin),
 ):
     """
-    确认跨天转移的买入 Trade
+    确认跨天转移的两条 pending Trade
 
-    查找 transfer_group 匹配的 pending 买入 Trade，执行确认。
+    对称状态改造后，两腿均 pending，需同时确认。
     """
-    # 查找该 transfer_group 的买入 Trade
-    buy_trade = (
+    # 查找该 transfer_group 的所有 pending trade
+    pending_trades = (
         db.query(Trade)
         .filter(
             Trade.portfolio_code == portfolio_code,
             Trade.transfer_group == transfer_group,
             Trade.product_code == "CASH",
-            Trade.trade_type == "buy",
+            Trade.status == "pending",
         )
-        .first()
+        .all()
     )
-    if not buy_trade:
+    if not pending_trades:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "TRANSFER_NOT_FOUND", "message": f"未找到转移记录 {transfer_group}"},
-        )
-    if buy_trade.status != "pending":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "INVALID_STATUS", "message": "该买入交易已确认或已取消"},
+            detail={"error": "TRANSFER_NOT_FOUND", "message": f"未找到待确认的转移记录 {transfer_group}"},
         )
 
-    # 计算 confirm_date（trade_date 的下一个交易日）
-    confirm_date = _get_next_trading_day(db, buy_trade.trade_date)
+    # 取第一条 trade 的 confirm_date（两腿 confirm_date 相同）
+    confirm_date = pending_trades[0].confirm_date
+    if not confirm_date:
+        confirm_date = _get_next_trading_day(db, pending_trades[0].trade_date)
+
+    # TRANSFER_NOT_READY 守卫
     if confirm_date > date.today():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -235,17 +254,18 @@ def confirm_cash_transfer(
             },
         )
 
-    buy_trade.status = "confirmed"
-    buy_trade.confirm_date = confirm_date
+    # 同时确认两腿
+    for trade in pending_trades:
+        trade.status = "confirmed"
+        trade.confirm_date = confirm_date
+
     db.commit()
-    db.refresh(buy_trade)
 
     return {
         "message": "跨天转移确认成功",
         "transfer_group": transfer_group,
-        "buy_trade_id": buy_trade.id,
-        "status": buy_trade.status,
-        "confirm_date": buy_trade.confirm_date.isoformat() if buy_trade.confirm_date else None,
+        "confirmed_count": len(pending_trades),
+        "confirm_date": confirm_date.isoformat() if confirm_date else None,
     }
 
 
@@ -297,7 +317,8 @@ def list_cash_transfers(
             from_platform=sell.platform_code or "",
             to_platform=buy.platform_code or "",
             amount=float(sell.amount or 0),
-            cross_day=(sell.status == "confirmed" and buy.status == "pending") or (sell.confirm_date != buy.confirm_date),
+            # 对称状态后：跨天判断依据为 confirm_date > trade_date
+            cross_day=(sell.confirm_date is not None and sell.confirm_date > sell.trade_date),
             sell_status=sell.status,
             buy_status=buy.status,
             transfer_date=sell.trade_date,

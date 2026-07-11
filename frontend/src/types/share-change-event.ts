@@ -4,8 +4,9 @@ export interface ShareChangeEvent {
   id: number;
   portfolio_code: string;
   event_type: EventType;
-  event_date: string;
+  ex_date: string;
   entitlement_date: string;
+  platform_code?: string;
   product_code?: string;
   market?: string;
   shares_before?: number;
@@ -24,8 +25,9 @@ export interface ShareChangeEvent {
 export interface ShareChangeEventCreate {
   portfolio_code: string;
   event_type: EventType;
-  event_date: string;
+  ex_date: string;
   entitlement_date: string;
+  platform_code?: string;
   product_code?: string;
   market?: string;
   shares_before?: number;
@@ -40,7 +42,7 @@ export interface ShareChangeEventCreate {
 }
 
 export interface ShareChangeEventUpdate {
-  event_date?: string;
+  ex_date?: string;
   entitlement_date?: string;
   shares_before?: number;
   shares_change?: number;

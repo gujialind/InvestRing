@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.subscription import Subscription
 from app.models.portfolio import Portfolio
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+from app.models.trade import Trade
 from app.services.trading_utils import get_next_trading_day
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,24 @@ def confirm_single_subscription(
     subscription.status = "confirmed"
     subscription.confirm_date = confirm_date
 
+    # 5.5 生成配对 CASH trade（显式记录现金变动）
+    cash_trade = Trade(
+        portfolio_code=subscription.portfolio_code,
+        platform_code=subscription.platform_code,
+        product_code="CASH",
+        market="",
+        trade_type="buy" if subscription.sub_type == "subscribe" else "sell",
+        amount=Decimal(str(subscription.amount)),
+        price=Decimal("1"),
+        fee=Decimal("0"),
+        actual_amount=Decimal(str(subscription.amount)),
+        trade_date=subscription.apply_date,
+        confirm_date=confirm_date,
+        status="confirmed",
+        transfer_group=f"sub_{subscription.id}",
+    )
+    db.add(cash_trade)
+
     # 6. 首次申购激活组合
     if is_first and subscription.sub_type == "subscribe" and portfolio and portfolio.status == "draft":
         portfolio.status = "active"
@@ -168,6 +187,11 @@ def unconfirm_single_subscription(
     else:
         # 赎回时 amount 由确认计算得出，回退后应清空
         subscription.amount = None
+
+    # 物理删除配对 CASH trade（派生记录，生命周期跟随 subscription）
+    db.query(Trade).filter(
+        Trade.transfer_group == f"sub_{subscription.id}"
+    ).delete(synchronize_session=False)
 
     if auto_flush:
         db.flush()

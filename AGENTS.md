@@ -1,7 +1,7 @@
 # InvestRing 模块开发指南
 
-> 版本：v3.1
-> 更新日期：2026-06-26
+> 版本：v4.0
+> 更新日期：2026-07-12
 > 用途：为 AI 编程助手提供核心业务规则、约束边界与模块级开发规范的快速参考。前端架构详见 §2.3，详细技术文档参阅 `Docs/` 目录（见 §5.1）。
 
 ---
@@ -42,17 +42,28 @@
 
 **可用份额/现金必须实时计算**，不能仅读取快照中的 frozen 字段。
 
-**可用现金实时计算**（支持按平台维度查询）：
+**可用现金实时计算**（显式流水版，支持按平台维度查询）：
+
+现金变动采用显式流水设计——所有现金影响都有明确的记录来源，不再从申购/赎回/调仓隐式反推。
+
+**三类现金影响源**：
+| 来源 | 记录表 | 关联方式 |
+|---|---|---|
+| 交易（申购/赎回/调仓/转移） | trade 表（CASH buy/sell） | `transfer_group` 关联同组记录 |
+| 事件（现金分红/cash_change） | share_change_event 表 | `cash_change` 字段，按 `ex_date` 生效 |
+| 手动重估 | manual_market_value 表 | 按日期绝对替换，不进 trade |
+
 ```
-组合可用现金 = 最新快照现金
-            + SUM(confirmed申购金额 WHERE 快照未生成)
-            - SUM(confirmed赎回金额 WHERE 快照未生成)
-            - SUM(pending买入金额)
-            - SUM(confirmed买入金额 WHERE 快照未生成)
-            + SUM(confirmed卖出金额 WHERE 快照未生成)
+compute_cash_balance(T) = SUM(confirmed CASH trades WHERE confirm_date <= T)
+                        + SUM(confirmed events WHERE ex_date <= T, cash_change != 0)
+
+calculate_available_cash = compute_cash_balance(latest_snapshot_date)
+                          + SUM(confirmed CASH trades WHERE confirm_date > latest_snapshot_date)
+                          - SUM(pending CASH sells)
+                          + SUM(confirmed event cash_change WHERE ex_date > latest_snapshot_date)
 ```
 
-> 当指定 `platform_code` 时，仅计算该平台的现金（申购/赎回/买卖均按 `platform_code` 过滤）。
+> 实时预览调 `compute_cash_balance(today)`，快照生成调 `get_cash_value(date)`（含 `manual_market_value` 绝对替换）。对外披露读快照表，修正走 regen。
 
 **基金可用份额实时计算**：
 ```
@@ -80,13 +91,23 @@
 - **净值计算**：`unit_price = total_value / total_shares`（保留 4 位小数）
 - **成本价计算**：首次 = 组合净值；后续 = `(old×cost + new×price) / (old + new)`
 
-### 1.4 现金中转约束（调仓）
+### 1.4 现金显式流水（核心设计）
 
-**调仓必须通过现金中转，不能直接基金对基金转换**：
-- 卖出基金：所得资金进入组合现金池（需等待确认）
-- 买入基金：从组合现金池支出（只能使用已有可用现金）
-- 卖出 pending **不自动增加可用现金**
-- 现金不足时需分两步操作（先卖后买）
+**所有现金变动通过显式 CASH trade 或 event cash_change 记录，不再隐式反推：**
+
+| 业务操作 | CASH trade | transfer_group | 说明 |
+|---|---|---|---|
+| 申购确认 | CASH buy | `sub_{subscription.id}` | 1条，status 直接 confirmed |
+| 赎回确认 | CASH sell | `sub_{subscription.id}` | 1条，status 直接 confirmed |
+| 基金买入 | CASH sell | `rebal_{uuid}` | 2条（基金buy + CASH sell），同 status/confirm_date |
+| 基金卖出 | CASH buy | `rebal_{uuid}` | 2条（基金sell + CASH buy），同 status/confirm_date |
+| 跨平台转移 | CASH sell + CASH buy | uuid | 2条，当天或跨天到账 |
+
+**transfer_group 原子翻转**：confirm/unconfirm/cancel 基金腿时，配对 CASH 腿自动同步。
+
+**快照表中 CASH 持仓**：由 `get_cash_value` → `compute_cash_balance` 统一计算，不再在 `_generate_portfolio_position` 中增量累加。事件 `cash_dividend` / `forced_adjustment` 的 `cash_change` 由 `compute_cash_balance` 直接从 event 表读取，不生成 CASH trade。
+
+**现金中转约束**：卖出 pending 不自动增加可用现金，买入只能用已有可用现金。现金不足时需分两步操作（先卖后买）。
 
 ### 1.5 交易日校验
 
@@ -101,11 +122,14 @@
 
 **实现方式**：复用 Trade 表，一次转移生成两条 CASH 交易记录（卖出 + 买入），通过 `transfer_group` 字段关联。
 
-**确认策略**：
-- **当天完成**（`cross_day=False`）：两条 Trade 立即 confirm
-- **跨天到账**（`cross_day=True`）：卖出 Trade 立即 confirm（转出日现金减少），买入 Trade 保持 pending（次日确认，到账日现金增加）
+**确认策略（对称状态）**：
+- **当天完成**（`cross_day=False`）：两条 Trade 立即 confirm，`confirm_date = transfer_date`
+- **跨天到账**（`cross_day=True`）：两腿均 `pending`，`confirm_date = next_trading_day(transfer_date)`，次日同时 confirm
+- 对称状态保证 D 日 NAV 不因在途转移虚跌（两腿均 pending → `compute_cash_balance` 不计入）
 
-**现金在途**：跨天转移期间，卖出已确认但买入 pending，在途资金不计入任何平台的可用现金。
+**跨天判断**：`cross_day = (confirm_date > trade_date)`
+
+**现金在途**：跨天转移期间，两腿均 pending，在途资金不计入任何平台的可用现金。pending CASH sell 会预留可用金额。
 
 ---
 
@@ -202,6 +226,10 @@
 - 买入：`amount = actual_amount - fee`，`shares = amount / price`
 - 卖出：`amount = actual_amount + fee`，`shares = amount / price`
 
+**confirm_date 创建时设定**：Trade 创建时即根据 `product.confirm_days` 计算 `confirm_date`，不留空后补。`confirm_trade` 可覆盖 `confirm_date` 参数（补录场景）。unconfirm 后重新计算期望确认日。
+
+**配对 CASH trade**：基金买入/卖出创建时自动生成配对 CASH trade（`transfer_group = "rebal_{uuid}"`），CASH trade 的 `status`/`trade_date`/`confirm_date` 与基金腿完全同步。confirm/unconfirm/cancel 基金腿时，配对 CASH 腿自动同步（原子翻转）。
+
 **确认规则**：
 - 场内：当天确认（使用收盘价）
 - 场外：T+1确认（使用T日净值）
@@ -223,9 +251,20 @@
 ### 3.4 份额变动事件边界
 
 | 条件 | 处理方式 |
-|------|---------|
+|------|----------|
 | 权益登记日不是交易日 | 拒绝创建事件 |
-| 确认事件时持仓快照不存在 | 返回 `MISSING_POSITION_SNAPSHOT` 错误 |
+| 除息日不是交易日 | 拒绝创建事件 |
+| 除息日 ≤ 权益登记日 | 拒绝（必须严格大于：`ex_date > entitlement_date`） |
+| 除息日 ≤ 最新快照日 | 拒绝（`DATE_BEFORE_SNAPSHOT`） |
+| 确认事件时 entitlement_date 持仓快照不存在 | 返回 `MISSING_POSITION_SNAPSHOT` 错误 |
+| cash_dividend 缺少 platform_code | 拒绝（`PLATFORM_REQUIRED`） |
+| forced_adjustment(cash_change≠0) 缺少 platform_code | 拒绝（`PLATFORM_REQUIRED`） |
+
+**双日期模型**：`ex_date`（除息/除权日，应用日）+ `entitlement_date`（权益登记日，基数日）。`ex_date > entitlement_date` 严格大于，保证快照生成时 `entitlement_date` 的快照已落库，`entitlement_shares` 可读取。
+
+**确认时自动回写**：确认事件时自动从 `entitlement_date` 快照读取 `entitlement_shares`，按 `event_type` 计算 `shares_before`/`shares_change`/`shares_after`/`cash_change`。`forced_adjustment` 由用户直接填写，不自动计算。
+
+**事件在快照中的应用**：`_generate_portfolio_position` 对 `ex_date <= target_date` 的 confirmed 事件按 `entitlement_date` 升序应用。仅处理基金份额变更（reinvest/split/merge/bonus），现金侧由 `compute_cash_balance` 覆盖。
 
 **事件类型与计算**：
 
@@ -266,12 +305,20 @@
 19. **组合关闭前检查**：pending交易、投资人份额、持仓状态
 20. **移除投资人创建特殊快照**：shares=0，标记已退出，后续快照跳过
 21. **非净值资产更新必须指定平台**：更新现金等非净值型资产时，platform_code 为必填项，同一组合可在不同平台分别持有现金
-22. **快照删除自动级联回退**：删除D日快照时自动回退 `confirm_date==D` 的申购至 pending，清空确认相关字段
-23. **快照重算自动重确认**：重算每个交易日后自动确认 `apply_date==D` 的 pending 申购，单笔失败不影响整批
+22. **快照删除自动级联回退**：删除D日快照时自动回退 `confirm_date==D` 的申购至 pending 并删除关联 CASH trade（`transfer_group="sub_{id}"`），同时回退 `ex_date==D` 或 `entitlement_date==D` 的 confirmed 事件至 pending
+23. **快照重算自动重确认**：重算每个交易日后自动确认 `apply_date==D` 的 pending 申购、`confirm_date==D` 的 pending Trade、`ex_date==D` 的 pending Event，单笔失败不影响整批
 24. **申购取消确认快照保护**：unconfirm 前检查 confirm_date 及之后是否已有快照，有则拒绝（`SNAPSHOT_DEPENDENCY`）
 25. **申购/赎回必须指定平台**：每笔申赎必须关联 `platform_code`，现金变动归属到对应平台
 26. **现金按平台拆分追踪**：`portfolio_position` 的 CASH 记录按 `platform_code` 分平台存储，唯一约束为 `(portfolio_code, product_code, market, platform_code, snapshot_date)`
-27. **平台间现金转移**：复用 Trade 表（`transfer_group` 关联），支持当天完成和跨天到账两种模式
+27. **平台间现金转移**：复用 Trade 表（`transfer_group` 关联），支持当天完成和跨天到账两种模式，跨天采用对称状态（两腿均 pending）
+28. **现金变动显式流水**：所有现金影响通过 CASH trade（trade 表）或 `cash_change`（event 表）显式记录，不再隐式反推。`compute_cash_balance` = SUM(confirmed CASH trades) + SUM(event cash_change)
+29. **Trade confirm_date 创建时设定**：交易录入时所有日期字段齐备，`confirm_date` 按 `product.confirm_days` 自动计算，不留空后补
+30. **transfer_group 原子翻转**：confirm/unconfirm/cancel 基金腿时，配对 CASH 腿自动同步状态和 confirm_date
+31. **持仓表禁止手动操作**：`create_position`/`update_position`/`delete_position` 返回 `POSITION_TABLE_PROTECTED` 错误，快照只能由系统生成
+32. **现金市值覆盖**：`update_cash_position` 写入 `manual_market_value` 表（绝对替换），不再直接改 `portfolio_position`，写入后提示用户重新生成快照
+33. **份额变动事件双日期约束**：`ex_date`（除息日）必须严格大于 `entitlement_date`（权益登记日），两者均须为交易日。`event_date` 已全局改名为 `ex_date`
+34. **pending 事件拦截快照**：存在 `ex_date <= target_date` 的 pending 事件时，快照生成检查返回 failed（非仅 warning）
+35. **交易录入日期约束**：Trade `trade_date`、Subscription `apply_date`、ShareChangeEvent `ex_date` 均须晚于最新快照日（`DATE_BEFORE_SNAPSHOT`）
 
 ---
 
@@ -283,7 +330,7 @@
 |----------|------|
 | `AGENTS.md` §2.3 | 前端架构、技术栈、组件复用策略、API 层、质量保障 |
 | `Docs/00-开发总览.md` | 开发阶段、核心规则总结 |
-| `Docs/02-数据库设计.md` | 21 张表完整结构、索引定义、外键约束、MySQL 连接池配置 |
+| `Docs/02-数据库设计.md` | 22 张表完整结构、索引定义、外键约束、MySQL 连接池配置 |
 | `Docs/03-业务流程设计.md` | 详细业务流程图、状态机、每日计算流程 |
 | `Docs/04-后端开发.md` | 89 个 API 接口完整规范、枚举值定义、错误码、分页规范 |
 | `Docs/05-前端开发.md` | 前端架构、组件策略、页面设计、路由规则 |
@@ -317,6 +364,11 @@
 | `INVALID_ENTITLEMENT_DATE` | 422 | 权益登记日不是交易日 |
 | `NAV_NOT_AVAILABLE` | 422 | 申请日组合快照不存在，请先生成快照 |
 | `SNAPSHOT_DEPENDENCY` | 422 | 申赎已被快照纳入，请先删除对应快照 |
+| `POSITION_TABLE_PROTECTED` | 422 | 持仓快照表禁止手动 CRUD |
+| `DATE_BEFORE_SNAPSHOT` | 422 | 交易/事件日期不晚于最新快照日 |
+| `INVALID_DATE_ORDER` | 422 | 除息日不严格大于权益登记日 |
+| `INVALID_EX_DATE` | 422 | 除息日不是交易日 |
+| `PLATFORM_REQUIRED` | 422 | 现金分红/现金调整事件缺少 platform_code |
 
 **HTTP状态码通用定义**：
 - 400：参数错误
@@ -340,11 +392,11 @@
 
 ## 附录：快速参考
 
-### A. 21 张数据库表分类
+### A. 22 张数据库表分类
 
 | 类别 | 表名 |
 |------|------|
-| 核心业务（13张） | `investor`, `portfolio`, `investor_holding`, `platform`, `product`, `asset_classification`, `portfolio_position`, `subscription`, `trade`, `price_record`, `share_change_event`, `portfolio_value_snapshot`, `trading_calendar` |
+| 核心业务（14张） | `investor`, `portfolio`, `investor_holding`, `platform`, `product`, `asset_classification`, `portfolio_position`, `subscription`, `trade`, `price_record`, `share_change_event`, `portfolio_value_snapshot`, `manual_market_value`, `trading_calendar` |
 | 日志系统（7张） | `login_log`, `audit_log`, `scheduled_task`, `task_execution_log`, `nav_sync_detail`, `system_error_log`, `notification` |
 | 其他（1张） | `idempotency_cache` |
 
@@ -396,6 +448,7 @@
 | `portfolio` | `investor_holding` | `portfolio_code` | RESTRICT |
 | `portfolio` | `subscription` | `portfolio_code` | RESTRICT |
 | `portfolio` | `share_change_event` | `portfolio_code` | RESTRICT |
+| `portfolio` | `manual_market_value` | `portfolio_code` | RESTRICT |
 | `product` | `portfolio_position` | `(code, market)` | RESTRICT |
 | `product` | `price_record` | `(code, market)` | RESTRICT |
 | `product` | `trade` | `(code, market)` | RESTRICT |
@@ -403,12 +456,16 @@
 | `investor` | `subscription` | `investor_code` | RESTRICT |
 | `platform` | `portfolio_position` | `platform_code` | RESTRICT |
 | `platform` | `trade` | `platform_code` | RESTRICT |
+| `platform` | `manual_market_value` | `platform_code` | RESTRICT |
+| `platform` | `share_change_event` | `platform_code` | RESTRICT |
 
 **说明**：所有实体均采用 RESTRICT 策略，通过业务流程（关闭/停用）来管理生命周期，保留历史数据。
 
 **唯一约束说明**：
-- `portfolio_position` 表唯一约束：`(portfolio_code, product_code, market, platform_code, snapshot_date)`
-- 支持同一组合在同一天通过不同平台持有相同产品的多条记录
+- `portfolio_position` 表唯一约束：`(portfolio_code, product_code, market, platform_code, snapshot_date)`，支持同一组合在同一天通过不同平台持有相同产品的多条记录
+- `trade` 表唯一约束：`(transfer_group, product_code, trade_type)`，防止重复确认生成重复 CASH trade（MySQL 中 NULL 值不参与唯一性检查，普通 trade 不受影响）
+- `manual_market_value` 表唯一约束：`(portfolio_code, platform_code, product_code, date)`
+- `share_change_event` 表新增 `platform_code` 字段（nullable），`cash_dividend` 时必填
 
 ### F. MySQL 连接池配置
 

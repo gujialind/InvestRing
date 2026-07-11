@@ -19,6 +19,7 @@ from app.models.nav_sync_detail import NavSyncDetail
 from app.models.system_error_log import SystemErrorLog
 from app.models.notification import Notification
 from app.models.idempotency_cache import IdempotencyCache
+from app.models.manual_market_value import ManualMarketValue
 
 __all__ = [
     "Investor",
@@ -42,4 +43,5 @@ __all__ = [
     "SystemErrorLog",
     "Notification",
     "IdempotencyCache",
+    "ManualMarketValue",
 ]

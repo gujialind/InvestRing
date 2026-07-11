@@ -38,8 +38,9 @@ def create_event(
     market: str = typer.Option(..., "--market"),
     event_type: str = typer.Option(..., "--event-type",
         help="cash_dividend/reinvest_dividend/share_split/share_merge/bonus_share/forced_adjustment"),
-    event_date: str = typer.Option(..., "--event-date", help="YYYY-MM-DD"),
+    ex_date: str = typer.Option(..., "--ex-date", help="YYYY-MM-DD"),
     entitlement_date: str = typer.Option(..., "--entitlement-date", help="YYYY-MM-DD"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="现金分红归属平台"),
     entitlement_shares: Optional[float] = typer.Option(None, "--entitlement-shares"),
     shares_before: Optional[float] = typer.Option(None, "--shares-before"),
     shares_change: Optional[float] = typer.Option(None, "--shares-change"),
@@ -58,7 +59,7 @@ def create_event(
         from app.models.portfolio import Portfolio
         from app.services.trading_utils import is_trading_day
 
-        event_date = parse_date(event_date)
+        ex_date = parse_date(ex_date)
         entitlement_date = parse_date(entitlement_date)
 
         if not is_trading_day(db, entitlement_date):
@@ -73,7 +74,8 @@ def create_event(
 
         event = ShareChangeEvent(
             portfolio_code=portfolio_code, product_code=product_code, market=market,
-            event_type=event_type, event_date=event_date, entitlement_date=entitlement_date,
+            event_type=event_type, ex_date=ex_date, entitlement_date=entitlement_date,
+            platform_code=platform_code,
             entitlement_shares=to_d(entitlement_shares),
             shares_before=to_d(shares_before), shares_change=to_d(shares_change),
             shares_after=to_d(shares_after), ratio=to_d(ratio),
@@ -104,7 +106,7 @@ def get_event(
 @app.command("update")
 def update_event(
     id: int = typer.Argument(...),
-    event_date: Optional[str] = typer.Option(None, "--event-date", help="YYYY-MM-DD"),
+    ex_date: Optional[str] = typer.Option(None, "--ex-date", help="YYYY-MM-DD"),
     entitlement_shares: Optional[float] = typer.Option(None, "--entitlement-shares"),
     ratio: Optional[float] = typer.Option(None, "--ratio"),
     div_cash: Optional[float] = typer.Option(None, "--div-cash"),
@@ -124,8 +126,8 @@ def update_event(
         def to_d(v):
             return Decimal(str(v)) if v is not None else None
 
-        if event_date is not None:
-            event.event_date = parse_date(event_date)
+        if ex_date is not None:
+            event.ex_date = parse_date(ex_date)
         if entitlement_shares is not None:
             event.entitlement_shares = to_d(entitlement_shares)
         if ratio is not None:

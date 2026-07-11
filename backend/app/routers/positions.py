@@ -7,10 +7,10 @@ from decimal import Decimal
 from app.database import get_db
 from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
-from app.models.subscription import Subscription
 from app.models.trade import Trade
 from app.models.product import Product
 from app.schemas.position import PositionCreate, PositionUpdate, PositionResponse, CashPositionUpdate
+from app.services.position_service import calculate_available_cash
 from app.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
@@ -23,131 +23,6 @@ def _get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date
         .scalar()
     )
     return result
-
-
-def _calculate_available_cash(db: Session, portfolio_code: str, platform_code: Optional[str] = None) -> Decimal:
-    """
-    组合可用现金实时计算：
-    最新快照现金
-    + SUM(confirmed申购金额 WHERE 快照未生成)
-    - SUM(confirmed赎回金额 WHERE 快照未生成)
-    - SUM(pending买入金额)
-    - SUM(confirmed买入金额 WHERE 快照未生成)
-    + SUM(confirmed卖出金额 WHERE 快照未生成)
-    
-    若指定 platform_code，则只计算该平台的现金。
-    """
-    latest_date = _get_latest_snapshot_date(db, portfolio_code)
-
-    # 最新快照现金
-    cash_query = (
-        db.query(PortfolioPosition)
-        .filter(
-            PortfolioPosition.portfolio_code == portfolio_code,
-            PortfolioPosition.product_code == "CASH",
-        )
-    )
-    if platform_code:
-        cash_query = cash_query.filter(PortfolioPosition.platform_code == platform_code)
-    
-    if platform_code:
-        cash_position = cash_query.order_by(PortfolioPosition.snapshot_date.desc()).first()
-        cash = Decimal(cash_position.amount) if cash_position and cash_position.amount else Decimal("0")
-    else:
-        # 不指定平台时，汇总所有平台的现金
-        cash_positions = cash_query.order_by(PortfolioPosition.snapshot_date.desc()).all()
-        # 按 platform_code 分组取最新一条
-        seen_platforms = set()
-        latest_positions = []
-        for pos in cash_positions:
-            if pos.platform_code not in seen_platforms:
-                seen_platforms.add(pos.platform_code)
-                latest_positions.append(pos)
-        cash = sum(Decimal(p.amount) if p.amount else Decimal("0") for p in latest_positions)
-    
-    # 构建平台过滤条件
-    platform_filter = []
-    if platform_code:
-        platform_filter.append(Subscription.platform_code == platform_code)
-        trade_platform_filter = [Trade.platform_code == platform_code]
-    else:
-        trade_platform_filter = []
-
-    # confirmed 申购未快照
-    confirmed_subs = (
-        db.query(Subscription)
-        .filter(
-            Subscription.portfolio_code == portfolio_code,
-            Subscription.status == "confirmed",
-            Subscription.sub_type == "subscribe",
-            *platform_filter,
-        )
-        .all()
-    )
-    for s in confirmed_subs:
-        if latest_date is None or (s.confirm_date and s.confirm_date > latest_date):
-            cash += Decimal(s.amount) if s.amount else Decimal("0")
-
-    # confirmed 赎回未快照
-    confirmed_redeems = (
-        db.query(Subscription)
-        .filter(
-            Subscription.portfolio_code == portfolio_code,
-            Subscription.status == "confirmed",
-            Subscription.sub_type == "redeem",
-            *platform_filter,
-        )
-        .all()
-    )
-    for s in confirmed_redeems:
-        if latest_date is None or (s.confirm_date and s.confirm_date > latest_date):
-            cash -= Decimal(s.amount) if s.amount else Decimal("0")
-
-    # pending 买入金额
-    pending_buys = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.status == "pending",
-            Trade.trade_type == "buy",
-            *trade_platform_filter,
-        )
-        .all()
-    )
-    for t in pending_buys:
-        cash -= Decimal(t.amount) if t.amount else Decimal("0")
-
-    # confirmed 买入未快照
-    confirmed_buys = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.status == "confirmed",
-            Trade.trade_type == "buy",
-            *trade_platform_filter,
-        )
-        .all()
-    )
-    for t in confirmed_buys:
-        if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
-            cash -= Decimal(t.amount) if t.amount else Decimal("0")
-
-    # confirmed 卖出未快照
-    confirmed_sells = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.status == "confirmed",
-            Trade.trade_type == "sell",
-            *trade_platform_filter,
-        )
-        .all()
-    )
-    for t in confirmed_sells:
-        if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
-            cash += Decimal(t.amount) if t.amount else Decimal("0")
-
-    return cash
 
 
 def _calculate_available_shares(
@@ -250,11 +125,14 @@ def create_position(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    new_position = PortfolioPosition(**position.dict())
-    db.add(new_position)
-    db.commit()
-    db.refresh(new_position)
-    return new_position
+    # (g) 禁止直接操作 portfolio_position 表（快照为系统生成，不可手动创建）
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "error": "POSITION_TABLE_PROTECTED",
+            "message": "持仓快照由系统自动生成，不可手动创建。如需修改现金持仓，请使用 /portfolio/{portfolio_code}/cash-position 端点",
+        },
+    )
 
 
 @router.get("/{id}", response_model=PositionResponse)
@@ -276,16 +154,14 @@ def update_position(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    db_position = db.query(PortfolioPosition).filter(PortfolioPosition.id == id).first()
-    if not db_position:
-        raise HTTPException(status_code=404, detail="Position not found")
-
-    for field, value in position.dict(exclude_unset=True).items():
-        setattr(db_position, field, value)
-
-    db.commit()
-    db.refresh(db_position)
-    return db_position
+    # (g) 禁止直接操作 portfolio_position 表
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "error": "POSITION_TABLE_PROTECTED",
+            "message": "持仓快照由系统自动生成，不可手动修改。如需修改现金持仓，请使用 /portfolio/{portfolio_code}/cash-position 端点",
+        },
+    )
 
 
 @router.delete("/{id}")
@@ -294,13 +170,14 @@ def delete_position(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    position = db.query(PortfolioPosition).filter(PortfolioPosition.id == id).first()
-    if not position:
-        raise HTTPException(status_code=404, detail="Position not found")
-
-    db.delete(position)
-    db.commit()
-    return {"message": "Position deleted successfully"}
+    # (g) 禁止直接操作 portfolio_position 表
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "error": "POSITION_TABLE_PROTECTED",
+            "message": "持仓快照由系统自动生成，不可手动删除。如需删除快照，请使用 DELETE /snapshots/{portfolio_code}/{snapshot_date}",
+        },
+    )
 
 
 @router.get("/portfolio/{portfolio_code}/available-cash")
@@ -316,7 +193,7 @@ def get_available_cash(
     if not portfolio:
         raise HTTPException(status_code=404, detail="Portfolio not found")
 
-    cash = _calculate_available_cash(db, portfolio_code, platform_code)
+    cash = calculate_available_cash(db, portfolio_code, platform_code)
     result = {"portfolio_code": portfolio_code, "available_cash": float(cash)}
     if platform_code:
         result["platform_code"] = platform_code
@@ -360,12 +237,14 @@ def update_cash_position(
     规则：
     - 必须在交易日进行
     - 必须指定平台代码
-    - 更新CASH产品的amount字段
-    - 如果不存在则创建，存在则更新
+    - 写入 manual_market_value 表（绝对替换），不再直接写 portfolio_position
+    - 写入后提示用户重新生成快照（非强制）
     """
     from app.models.portfolio import Portfolio
     from app.models.platform import Platform
     from app.models.trading_calendar import TradingCalendar
+    from app.models.manual_market_value import ManualMarketValue
+    from app.services.position_service import compute_cash_balance
     
     # 检查组合是否存在
     portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
@@ -401,39 +280,42 @@ def update_cash_position(
             }
         )
     
-    # 查找或创建CASH持仓记录（包含platform_code）
-    cash_position = db.query(PortfolioPosition).filter(
-        PortfolioPosition.portfolio_code == portfolio_code,
-        PortfolioPosition.product_code == "CASH",
-        PortfolioPosition.market == "",
-        PortfolioPosition.platform_code == request.platform_code,
-        PortfolioPosition.snapshot_date == update_date
+    # 计算当前隐式值（用于审计）
+    computed = compute_cash_balance(db, portfolio_code, request.platform_code, update_date)
+
+    # 查找或创建 manual_market_value 记录（upsert）
+    manual = db.query(ManualMarketValue).filter(
+        ManualMarketValue.portfolio_code == portfolio_code,
+        ManualMarketValue.platform_code == request.platform_code,
+        ManualMarketValue.product_code == "CASH",
+        ManualMarketValue.date == update_date,
     ).first()
     
-    if cash_position:
-        # 更新现有记录
-        cash_position.amount = Decimal(str(request.amount))
+    if manual:
+        manual.market_value = Decimal(str(request.amount))
+        manual.computed_value = computed
     else:
-        # 创建新记录（非净值型资产，shares 必须为 NULL）
-        cash_position = PortfolioPosition(
+        manual = ManualMarketValue(
             portfolio_code=portfolio_code,
-            product_code="CASH",
-            market="",
             platform_code=request.platform_code,
-            amount=Decimal(str(request.amount)),
-            shares=None,  # 明确设置为 NULL，满足 check_nav_or_non_nav 约束
-            snapshot_date=update_date
+            product_code="CASH",
+            date=update_date,
+            market_value=Decimal(str(request.amount)),
+            computed_value=computed,
+            created_by=current_user.code if hasattr(current_user, 'code') else None,
         )
-        db.add(cash_position)
+        db.add(manual)
     
     db.commit()
-    db.refresh(cash_position)
+    db.refresh(manual)
     
     return {
         "success": True,
-        "message": "非净值资产更新成功",
+        "message": "现金市值覆盖已写入 manual_market_value，建议重新生成快照以更新持仓",
         "portfolio_code": portfolio_code,
         "platform_code": request.platform_code,
-        "amount": float(cash_position.amount),
-        "update_date": update_date.isoformat()
+        "amount": float(manual.market_value),
+        "computed_value": float(computed) if computed is not None else None,
+        "update_date": update_date.isoformat(),
+        "requires_snapshot_regen": True,
     }
