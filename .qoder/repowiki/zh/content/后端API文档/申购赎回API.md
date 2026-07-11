@@ -14,16 +14,24 @@
 - [backend/app/routers/portfolios.py](file://backend/app/routers/portfolios.py)
 - [backend/app/routers/trades.py](file://backend/app/routers/trades.py)
 - [backend/app/dependencies.py](file://backend/app/dependencies.py)
+- [backend/app/models/platform.py](file://backend/app/models/platform.py)
+- [backend/app/routers/cash_transfers.py](file://backend/app/routers/cash_transfers.py)
+- [backend/app/schemas/cash_transfer.py](file://backend/app/schemas/cash_transfer.py)
+- [backend/app/models/portfolio_position.py](file://backend/app/models/portfolio_position.py)
+- [backend/app/services/position_service.py](file://backend/app/services/position_service.py)
+- [backend/app/services/snapshot_service.py](file://backend/app/services/snapshot_service.py)
+- [frontend/src/types/subscription.ts](file://frontend/src/types/subscription.ts)
 - [Docs/04-后端开发.md](file://Docs/04-后端开发.md)
 </cite>
 
 ## 更新摘要
 **变更内容**
-- 新增服务层架构章节，详细说明业务逻辑从路由层提取到 subscription_service.py 的设计
-- 更新确认接口说明，移除手动 confirm_date/unit_price 参数的要求
-- 新增错误处理机制章节，详细说明 NavNotAvailableError 和 InvalidStatusError 的使用
-- 更新架构图表，体现服务层分离和业务逻辑复用
-- 增强安全验证机制，完善已确认事件的保护策略
+- **新增** platform_code参数要求：所有申购赎回操作现在必须指定交易平台代码
+- **新增** 平台维度现金追踪：支持按平台拆分计算可用现金和持仓
+- **新增** 平台间现金转移功能：通过Trade表实现跨平台资金调拨
+- **新增** 数据库模型变更：Subscription模型添加platform_code字段，PortfolioPosition唯一约束包含platform_code
+- **新增** 前端类型更新：Subscription接口增加platform_code字段
+- **更新** 可用现金计算逻辑：支持按平台过滤的现金计算
 
 ## 目录
 1. [简介](#简介)
@@ -40,11 +48,13 @@
 
 ## 简介
 本文件为 InvestRing 申购赎回模块的详细API文档，覆盖以下主题：
-- 申购/赎回操作接口：创建、确认、取消、更新、删除
+- 申购/赎回操作接口：创建、确认、取消、更新、删除（**已更新** 现要求platform_code参数）
 - 份额变更事件接口：创建、确认、取消、更新、删除、批量确认、同步分红
 - 交易确认流程与净值/份额计算逻辑
 - 查询接口：申购赎回列表、份额变动事件列表、产品查询、组合查询
 - 权限控制与业务约束（交易日、可用份额/现金、状态机等）
+- **新增** 平台维度现金追踪：支持按平台拆分计算可用现金
+- **新增** 平台间现金转移功能：实现跨平台资金调拨
 - **新增** 服务层架构设计，业务逻辑从路由层提取
 - **新增** 简化的确认接口，自动计算确认日期和单位净值
 - **新增** 增强的错误处理机制，提供具体的异常类型
@@ -54,19 +64,23 @@
 - API 路由统一挂载于应用入口，其中"申购赎回"模块对应路由前缀为 /api/subscriptions，"份额变动事件"模块对应 /api/share-change-events。
 - 权限依赖通过依赖注入实现，普通用户仅能查看自身记录，管理员可执行写操作。
 - **新增** 服务层分离：核心业务逻辑从路由层提取到独立的服务模块，提高代码复用性和可测试性。
+- **新增** 平台关联：所有申购赎回操作现在必须关联具体交易平台，支持平台维度的现金追踪。
 
 ```mermaid
 graph TB
 A["应用入口<br/>backend/app/main.py"] --> B["路由注册<br/>subscriptions 路由"]
 A --> C["路由注册<br/>share_change_events 路由"]
-B --> D["订阅模型<br/>subscription.py"]
-B --> E["订阅Schema<br/>subscription.py"]
+B --> D["订阅模型<br/>subscription.py (含platform_code)"]
+B --> E["订阅Schema<br/>subscription.py (含platform_code)"]
 B --> F["订阅服务层<br/>subscription_service.py"]
 C --> G["份额变动事件模型<br/>share_change_event.py"]
 C --> H["份额变动事件Schema<br/>share_change_event.py"]
 A --> I["权限依赖<br/>dependencies.py"]
 F --> J["交易工具服务<br/>trading_utils.py"]
 F --> K["投资组合快照<br/>portfolio_value_snapshot.py"]
+L["平台模型<br/>platform.py"] --> D
+M["现金转移路由<br/>cash_transfers.py"] --> N["平台间转账功能"]
+O["位置服务<br/>position_service.py"] --> P["按平台计算可用现金"]
 ```
 
 **图表来源**
@@ -75,6 +89,10 @@ F --> K["投资组合快照<br/>portfolio_value_snapshot.py"]
 - [backend/app/routers/share_change_events.py:1-18](file://backend/app/routers/share_change_events.py#L1-L18)
 - [backend/app/services/subscription_service.py:1-20](file://backend/app/services/subscription_service.py#L1-L20)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
+- [backend/app/models/subscription.py:11](file://backend/app/models/subscription.py#L11)
+- [backend/app/models/platform.py:5-12](file://backend/app/models/platform.py#L5-L12)
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
 
 **章节来源**
 - [backend/app/main.py:32-48](file://backend/app/main.py#L32-L48)
@@ -84,8 +102,8 @@ F --> K["投资组合快照<br/>portfolio_value_snapshot.py"]
 - 申购/赎回模块
   - 路由：/api/subscriptions
   - 主要功能：创建申购/赎回、确认、取消、更新、删除；查询列表与详情
-  - 关键模型：Subscription
-  - 关键Schema：SubscriptionCreate、SubscriptionUpdate、SubscriptionResponse
+  - 关键模型：Subscription（**已更新** 含platform_code字段）
+  - 关键Schema：SubscriptionCreate、SubscriptionUpdate、SubscriptionResponse（**已更新** 含platform_code）
   - **新增** 服务层：confirm_single_subscription、unconfirm_single_subscription
 - 份额变动事件模块
   - 路由：/api/share-change-events
@@ -96,6 +114,10 @@ F --> K["投资组合快照<br/>portfolio_value_snapshot.py"]
   - 产品查询：/api/products
   - 组合查询：/api/portfolios
   - 交易确认与净值计算：/api/trades
+- **新增** 平台间现金转移模块
+  - 路由：/api/cash-transfers
+  - 主要功能：创建平台间现金转移、确认跨天转账、查询转账记录
+  - 关键Schema：CashTransferCreate、CashTransferResponse、CashTransferListItem
 
 **章节来源**
 - [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
@@ -104,6 +126,7 @@ F --> K["投资组合快照<br/>portfolio_value_snapshot.py"]
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
 - [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
 - [backend/app/routers/trades.py:271-289](file://backend/app/routers/trades.py#L271-L289)
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
 
 ## 服务层架构
 **新增** 为了提升代码复用性和可维护性，申购赎回的核心业务逻辑已从路由层提取到独立的服务模块中。
@@ -155,8 +178,10 @@ H --> I["返回错误信息"]
 - 业务流程
   - 申购/赎回：提交申请 → 等待确认 → 确认时按净值计算份额/金额
   - 份额变动事件：登记权益日 → 生成快照 → 确认事件 → 计算份额/现金变化
+  - **新增** 平台间现金转移：创建转账 → 当天/T+1到账 → 确认完成
 - 数据一致性
   - 交易日校验、可用份额/现金实时计算、状态机约束
+  - **新增** 平台维度数据隔离：所有现金和持仓计算支持按平台过滤
 - **新增** 服务层分离
   - 业务逻辑从路由层解耦，提高代码复用性
   - 统一的异常处理机制
@@ -173,9 +198,12 @@ participant 模型 as "Subscription模型"
 participant 日历 as "交易日历"
 participant 组合 as "Portfolio模型"
 participant 投资者 as "Investor模型"
+participant 平台 as "Platform模型"
 客户端->>认证 : "携带Bearer Token"
 认证-->>客户端 : "校验通过/拒绝"
-客户端->>路由 : "POST /api/subscriptions/{id}/confirm"
+客户端->>路由 : "POST /api/subscriptions (含platform_code)"
+路由->>平台 : "校验平台存在性"
+平台-->>路由 : "平台存在/不存在"
 路由->>服务 : "confirm_single_subscription(db, subscription)"
 服务->>日历 : "get_next_trading_day(apply_date, days=1)"
 日历-->>服务 : "返回确认日期"
@@ -192,13 +220,14 @@ service->>模型 : "更新确认状态和计算结果"
 - [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 - [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-L361)
+- [backend/app/models/subscription.py:11](file://backend/app/models/subscription.py#L11)
 
 ## 详细组件分析
 
 ### 申购/赎回模块（/api/subscriptions）
 - 接口总览
   - GET /api/subscriptions：查询申购赎回列表（支持组合/投资人过滤）
-  - POST /api/subscriptions：创建申购/赎回（管理员）
+  - POST /api/subscriptions：创建申购/赎回（**已更新** 必需platform_code参数）
   - GET /api/subscriptions/{id}：查询详情（本人或管理员）
   - POST /api/subscriptions/{id}/confirm：确认（管理员）
   - POST /api/subscriptions/{id}/cancel：取消（管理员）
@@ -211,6 +240,7 @@ service->>模型 : "更新确认状态和计算结果"
   - 申购：金额必须 > 0
   - 赎回：份额必须 > 0，且不超过可用份额（含pending/未生成快照的已确认赎回）
   - 状态机：仅 pending 可 confirm/cancel
+  - **新增** 平台校验：platform_code 必须指向存在的平台
   - **新增** 安全验证：已确认（confirmed）状态的订阅事件不可直接修改或删除
 
 - 份额/金额计算
@@ -228,7 +258,10 @@ flowchart TD
 Start(["开始"]) --> CheckApplyDate["校验申请日期为交易日"]
 CheckApplyDate --> ApplyDateOK{"通过？"}
 ApplyDateOK --> |否| Err1["返回错误：非交易日"]
-ApplyDateOK --> |是| CheckPortfolio["校验组合状态"]
+ApplyDateOK --> |是| CheckPlatform["校验平台存在性"]
+CheckPlatform --> PlatformOK{"平台存在？"}
+PlatformOK --> |否| ErrP["返回错误：平台不存在"]
+PlatformOK --> |是| CheckPortfolio["校验组合状态"]
 CheckPortfolio --> PortfolioOK{"active/draft？"}
 PortfolioOK --> |否| Err2["返回错误：组合未激活"]
 PortfolioOK --> |是| CheckInvestor["校验投资人存在"]
@@ -330,14 +363,65 @@ participant 日历 as "交易日历"
   - GET /api/portfolios/{code}/cash-flow：资金流入流出
 
 **章节来源**
-- [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-L45)
-- [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-L92)
+- [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
+- [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-92)
 - [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-L122)
 - [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
-- [backend/app/routers/portfolios.py:61-70](file://backend/app/routers/portfolios.py#L61-L70)
+- [backend/app/routers/portfolios.py:61-70](file://backend/app/routers/portfolios.py#L61-70)
 - [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-L191)
 - [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-L241)
 - [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-L275)
+
+### **新增** 平台间现金转移模块（/api/cash-transfers）
+- 接口总览
+  - POST /api/cash-transfers/portfolios/{portfolio_code}/cash-transfer：创建平台间现金转移
+  - POST /api/cash-transfers/portfolios/{portfolio_code}/cash-transfer/{transfer_group}/confirm：确认跨天转账
+  - GET /api/cash-transfers/portfolios/{portfolio_code}/cash-transfers：查询转账记录
+
+- 功能特性
+  - **当天完成模式**：转出和转入交易同时确认
+  - **跨天到账模式**：转出交易立即确认，转入交易待下一交易日确认
+  - **平台校验**：确保转出和转入平台不同且存在
+  - **可用现金校验**：检查转出平台的可用现金余额
+  - **交易关联**：通过transfer_group字段关联一对买卖交易
+
+- 业务规则
+  - 转账金额必须大于0
+  - 转出平台和转入平台不能相同
+  - 转账日期必须为交易日
+  - 转出平台必须有足够的可用现金
+  - 组合必须处于active状态
+
+```mermaid
+sequenceDiagram
+participant 客户端 as "客户端"
+participant 路由 as "现金转移路由"
+participant 平台 as "Platform模型"
+participant 组合 as "Portfolio模型"
+participant 交易 as "Trade模型"
+participant 现金服务 as "calculate_available_cash"
+客户端->>路由 : "POST /cash-transfer (from_platform, to_platform, amount)"
+路由->>平台 : "校验两个平台存在且不同"
+平台-->>路由 : "平台存在/不存在"
+路由->>组合 : "校验组合状态"
+组合-->>路由 : "active/draft"
+路由->>现金服务 : "计算转出平台可用现金"
+现金服务-->>路由 : "返回可用金额"
+路由->>交易 : "创建卖出CASH交易"
+路由->>交易 : "创建买入CASH交易"
+路由->>交易 : "根据cross_day设置确认状态"
+交易-->>客户端 : "返回转账结果"
+```
+
+**图表来源**
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
+
+**章节来源**
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
+- [backend/app/routers/cash_transfers.py:193-249](file://backend/app/routers/cash_transfers.py#L193-L249)
+- [backend/app/routers/cash_transfers.py:252-317](file://backend/app/routers/cash_transfers.py#L252-L317)
+- [backend/app/schemas/cash_transfer.py:6-43](file://backend/app/schemas/cash_transfer.py#L6-L43)
 
 ### **新增** 已确认订阅事件的安全验证机制
 - **安全验证规则**
@@ -385,6 +469,7 @@ ProcessRequest --> End
 - 实时可用性计算
   - 申购/赎回：_calculate_investor_available_shares
   - 交易：_calculate_available_cash、_calculate_available_shares
+  - **新增** 平台维度现金计算：calculate_available_cash支持platform_code参数
 - **新增** 服务层依赖
   - confirm_single_subscription：确认业务逻辑
   - unconfirm_single_subscription：取消确认业务逻辑
@@ -398,12 +483,14 @@ A["get_current_admin"] --> R
 R --> S["服务层函数"]
 S --> T["交易日校验"]
 S --> C1["可用份额计算"]
-S --> C2["可用现金计算"]
+S --> C2["可用现金计算 (含platform_code)"]
 S --> M["模型持久化"]
 S --> E["异常处理"]
 R --> V["安全验证已确认事件"]
 E --> N["NavNotAvailableError"]
 E --> I["InvalidStatusError"]
+P["Platform模型"] --> R
+PC["platform_code参数"] --> R
 ```
 
 **图表来源**
@@ -413,6 +500,7 @@ E --> I["InvalidStatusError"]
 - [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-L32)
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
 - [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
 
 **章节来源**
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
@@ -421,6 +509,7 @@ E --> I["InvalidStatusError"]
 - [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-L32)
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
 - [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
 
 ## 性能与并发特性
 - 交易日历查询：每次操作均进行一次数据库查询，建议在上层缓存交易日历
@@ -429,6 +518,7 @@ E --> I["InvalidStatusError"]
 - **新增** 服务层优化：业务逻辑集中管理，减少重复代码，提高执行效率
 - **新增** 异常处理优化：具体异常类型提供更精确的错误信息，减少不必要的重试
 - **新增** 安全验证：状态检查为轻量级操作，对性能影响极小
+- **新增** 平台维度计算：按平台过滤的现金计算可能增加数据库查询复杂度
 
 ## 故障排查指南
 - 常见错误码与原因
@@ -438,11 +528,14 @@ E --> I["InvalidStatusError"]
   - 422 份额超可用：赎回份额超过可用份额
   - 422 仅 pending 可确认/取消：状态不符
   - 422 缺少持仓快照：权益登记日快照不存在
+  - 422 **新增** 平台不存在：PLATFORM_NOT_FOUND
   - 422 **新增** 已确认事件不可直接修改：CANNOT_MODIFY_CONFIRMED
   - 422 **新增** 已确认事件不可直接删除：CANNOT_DELETE_CONFIRMED
   - 422 **新增** 净值不可用：NAV_NOT_AVAILABLE（申请日快照不存在）
   - 422 **新增** 状态非法：INVALID_STATUS（状态不符合操作要求）
-  - 404 未找到：组合/投资人/事件/交易不存在
+  - 422 **新增** 同一平台转账：SAME_PLATFORM（转出和转入平台相同）
+  - 422 **新增** 现金不足：INSUFFICIENT_CASH（转出平台可用现金不足）
+  - 404 未找到：组合/投资人/事件/交易/平台不存在
   - 403 权限不足：非管理员或非本人记录
 - 排查步骤
   - 确认 apply_date/entitlement_date 是否为交易日
@@ -452,6 +545,8 @@ E --> I["InvalidStatusError"]
   - 确认状态机是否符合预期
   - **新增** 对于已确认事件的修改/删除操作，先执行取消确认操作
   - **新增** 确认净值快照是否存在，必要时先生成快照
+  - **新增** 确认platform_code指向的平台是否存在
+  - **新增** 检查平台间转账的可用现金是否充足
 
 **章节来源**
 - [backend/app/routers/subscriptions.py:121-126](file://backend/app/routers/subscriptions.py#L121-L126)
@@ -466,11 +561,14 @@ E --> I["InvalidStatusError"]
 - [backend/app/routers/subscriptions.py:357-361](file://backend/app/routers/subscriptions.py#L357-L361)
 - [backend/app/routers/subscriptions.py:384-388](file://backend/app/routers/subscriptions.py#L384-L388)
 - [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
+- [backend/app/routers/cash_transfers.py:76-117](file://backend/app/routers/cash_transfers.py#L76-L117)
 
 ## 结论
 - 申购/赎回与份额变动事件模块均采用严格的交易日与状态机约束，确保业务合规
 - 可用份额/现金的实时计算保障了交易与赎回的准确性
 - 管理员权限用于关键操作（确认、取消、删除），普通用户仅能查看自身记录
+- **新增** 平台维度现金追踪：所有申购赎回操作现在必须关联具体平台，支持平台级别的资金管理
+- **新增** 平台间现金转移：实现了跨平台资金调拨功能，支持当天和跨天到账模式
 - **新增** 服务层架构设计有效提升了代码复用性和可维护性
 - **新增** 简化的确认接口降低了前端集成复杂度，提高了用户体验
 - **新增** 增强的错误处理机制提供了更精确的错误信息和更好的调试体验
@@ -484,7 +582,7 @@ E --> I["InvalidStatusError"]
   - 查询参数：portfolio_code、investor_code、page、page_size
   - 返回：items、total、page、page_size
 - POST /api/subscriptions
-  - 请求体：portfolio_code、investor_code、sub_type、amount/shares、apply_date、notes
+  - **已更新** 请求体必需包含：portfolio_code、investor_code、**platform_code**、sub_type、amount/shares、apply_date、notes
   - 返回：新建记录（status=pending）
 - GET /api/subscriptions/{id}
   - 返回：订阅详情（本人或管理员）
@@ -539,6 +637,23 @@ E --> I["InvalidStatusError"]
 - [backend/app/routers/share_change_events.py:170-182](file://backend/app/routers/share_change_events.py#L170-L182)
 - [Docs/04-后端开发.md:543-646](file://Docs/04-后端开发.md#L543-L646)
 
+### **新增** 平台间现金转移接口
+- POST /api/cash-transfers/portfolios/{portfolio_code}/cash-transfer
+  - 请求体：from_platform、to_platform、amount、cross_day、transfer_date、notes
+  - 返回：转账组ID、两条交易ID、交易状态
+- POST /api/cash-transfers/portfolios/{portfolio_code}/cash-transfer/{transfer_group}/confirm
+  - 确认跨天转账的买入交易
+  - 返回：确认成功消息
+- GET /api/cash-transfers/portfolios/{portfolio_code}/cash-transfers
+  - 查询参数：page、page_size
+  - 返回：转账记录列表（按transfer_group分组）
+
+**章节来源**
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
+- [backend/app/routers/cash_transfers.py:193-249](file://backend/app/routers/cash_transfers.py#L193-L249)
+- [backend/app/routers/cash_transfers.py:252-317](file://backend/app/routers/cash_transfers.py#L252-L317)
+- [backend/app/schemas/cash_transfer.py:6-43](file://backend/app/schemas/cash_transfer.py#L6-L43)
+
 ### 查询接口
 - 产品查询
   - GET /api/products：分页查询产品
@@ -553,7 +668,7 @@ E --> I["InvalidStatusError"]
   - GET /api/portfolios/{code}/cash-flow：资金流入流出
 
 **章节来源**
-- [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-L45)
+- [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
 - [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-L92)
 - [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-L122)
 - [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
@@ -561,3 +676,13 @@ E --> I["InvalidStatusError"]
 - [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-L191)
 - [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-L241)
 - [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-L275)
+
+### **新增** 前端类型变更
+- Subscription 类型
+  - 文件：frontend/src/types/subscription.ts
+  - Subscription 接口添加 platform_code: string
+  - SubscriptionCreate 接口添加 platform_code: string
+  - SubscriptionUpdate 接口添加 platform_code?: string
+
+**章节来源**
+- [frontend/src/types/subscription.ts:1-39](file://frontend/src/types/subscription.ts#L1-L39)

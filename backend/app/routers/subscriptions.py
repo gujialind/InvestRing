@@ -139,6 +139,17 @@ def create_subscription(
             detail={"error": "PORTFOLIO_NOT_ACTIVE", "message": "组合未激活"},
         )
 
+    # (a) 申请日必须晚于最新快照日
+    latest_snapshot_date = _get_latest_snapshot_date(db, subscription.portfolio_code)
+    if latest_snapshot_date and subscription.apply_date <= latest_snapshot_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "DATE_BEFORE_SNAPSHOT",
+                "message": f"申请日必须晚于最新快照日（{latest_snapshot_date}）",
+            },
+        )
+
     investor = (
         db.query(Investor)
         .filter(Investor.code == subscription.investor_code)

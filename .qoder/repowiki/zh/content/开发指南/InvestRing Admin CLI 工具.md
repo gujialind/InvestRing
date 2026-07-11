@@ -396,7 +396,7 @@ SubSvc --> TradingUtils["trading_utils.py"]
 
 ## 性能与扩展性
 - 数据库连接池：engine 配置 pool_size/max_overflow/pool_pre_ping/pool_recycle，提升并发稳定性。
-- SQLite 优化：WAL 模式与 busy_timeout，减少锁竞争。
+- MySQL 连接池：QueuePool 配置 pool_size/max_overflow/pool_pre_ping/pool_recycle，提升并发稳定性。
 - CLI 模式静默：CLI_MODE=1 时禁用 SQL echo，避免干扰 JSON 输出。
 - 可扩展点：新增命令只需在 main.py 注册对应命令组，并在 commands 下新建模块即可。
 - **更新**：服务层模块化设计，新业务逻辑可轻松添加到独立的 service 模块中。

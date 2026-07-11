@@ -26,7 +26,19 @@
 - [backend/openapi.json](file://backend/openapi.json)
 - [backend/nginx/nginx.conf](file://backend/nginx/nginx.conf)
 - [backend/requirements.txt](file://backend/requirements.txt)
+- [backend/app/models/share_change_event.py](file://backend/app/models/share_change_event.py)
+- [backend/app/schemas/share_change_event.py](file://backend/app/schemas/share_change_event.py)
+- [backend/cli/commands/share_events.py](file://backend/cli/commands/share_events.py)
+- [frontend/src/types/share-change-event.ts](file://frontend/src/types/share-change-event.ts)
+- [Docs/init_data.sql](file://Docs/init_data.sql)
 </cite>
+
+## 更新摘要
+**所做更改**
+- 更新了份额变动事件相关API的字段说明，从event_date更新为ex_date
+- 修正了ShareChangeEvent数据模型的字段定义
+- 更新了API请求/响应示例中的字段名称
+- 保持了与其他模块的一致性
 
 ## 目录
 1. [简介](#简介)
@@ -549,7 +561,7 @@ Nginx --> Spec
 - [backend/app/routers/logs.py#L1-L200:1-200](file://backend/app/routers/logs.py#L1-L200)
 
 ### 通知管理
-- 村章来源
+- 权限：管理员
 - 接口清单
   - GET /api/notifications
     - 查询参数：investor_code、read_status、start_time、end_time、page、page_size
@@ -571,26 +583,39 @@ Nginx --> Spec
 - 权限：管理员
 - 接口清单
   - GET /api/share-change-events
-    - 查询参数：portfolio_code、product_code、event_type、start_date、end_date、page、page_size
+    - 查询参数：portfolio_code、page、page_size
     - 响应体：份额变动事件分页列表
-    - 示例路径：[份额事件列表示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+    - 示例路径：[份额事件列表示例:28-46](file://backend/app/routers/share_change_events.py#L28-L46)
   - POST /api/share-change-events
-    - 请求体：份额变动事件创建请求
+    - 请求体：ShareChangeEventCreate（包含 portfolio_code、event_type、ex_date、entitlement_date 等）
     - 响应体：创建后的事件
-    - 示例路径：[创建份额事件示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+    - 示例路径：[创建份额事件示例:49-77](file://backend/app/routers/share_change_events.py#L49-L77)
   - GET /api/share-change-events/{id}
     - 响应体：单个份额变动事件
-    - 示例路径：[份额事件详情示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+    - 示例路径：[份额事件详情示例:80-89](file://backend/app/routers/share_change_events.py#L80-L89)
   - PUT /api/share-change-events/{id}
-    - 请求体：份额变动事件更新请求
+    - 请求体：ShareChangeEventUpdate
     - 响应体：更新后的事件
-    - 示例路径：[更新份额事件示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+    - 示例路径：[更新份额事件示例:151-167](file://backend/app/routers/share_change_events.py#L151-L167)
   - DELETE /api/share-change-events/{id}
     - 响应体：删除结果
-    - 示例路径：[删除份额事件示例:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+    - 示例路径：[删除份额事件示例:170-182](file://backend/app/routers/share_change_events.py#L170-L182)
+  - POST /api/share-change-events/{id}/confirm
+    - 响应体：确认结果
+    - 权限：管理员；校验权益登记日持仓快照存在
+    - 示例路径：[确认份额事件示例:92-128](file://backend/app/routers/share_change_events.py#L92-L128)
+  - POST /api/share-change-events/{id}/cancel
+    - 响应体：{"message": "..."}
+    - 权限：管理员；仅 pending 状态可取消
+    - 示例路径：[取消份额事件示例:131-148](file://backend/app/routers/share_change_events.py#L131-L148)
+
+**更新** 字段说明：ShareChangeEvent数据模型中的event_date字段已在数据库设计层面重命名为ex_date，但在后端API层仍保持event_date以保持向后兼容。ex_date表示除息/除权日（应用日），是事件生效的关键日期。
 
 **章节来源**
-- [backend/app/routers/share_change_events.py#L1-L200:1-200](file://backend/app/routers/share_change_events.py#L1-L200)
+- [backend/app/routers/share_change_events.py#L28-L183:28-183](file://backend/app/routers/share_change_events.py#L28-L183)
+- [backend/app/models/share_change_event.py#L13](file://backend/app/models/share_change_event.py#L13)
+- [backend/app/schemas/share_change_event.py#L9](file://backend/app/schemas/share_change_event.py#L9)
+- [Docs/init_data.sql#L268](file://Docs/init_data.sql#L268)
 
 ### 交易日历
 - 权限：GET 对普通用户开放；其余对管理员开放
@@ -620,8 +645,8 @@ Nginx --> Spec
 
 **章节来源**
 - [backend/app/utils/security.py#L29-L46:29-46](file://backend/app/utils/security.py#L29-L46)
-- [backend/app/dependencies.py#L49-137:49-137](file://backend/app/dependencies.py#L49-L137)
-- [backend/app/config.py#L14-16:14-16](file://backend/app/config.py#L14-L16)
+- [backend/app/dependencies.py#L49-L137:49-137](file://backend/app/dependencies.py#L49-L137)
+- [backend/app/config.py#L14-L16:14-16](file://backend/app/config.py#L14-L16)
 - [backend/nginx/nginx.conf#L85-L86:85-86](file://backend/nginx/nginx.conf#L85-L86)
 - [backend/nginx/nginx.conf#L94-L103:94-103](file://backend/nginx/nginx.conf#L94-L103)
 
@@ -857,3 +882,22 @@ H --> I["CI/CD集成"]
 **图表来源**
 - [backend/export_openapi.py#L1-L46:1-46](file://backend/export_openapi.py#L1-L46)
 - [backend/openapi.json#L1-L200:1-200](file://backend/openapi.json#L1-L200)
+
+- **份额变动事件字段重命名说明**
+
+```mermaid
+flowchart LR
+A["数据库设计文档<br/>ex_date字段"] --> B["初始化脚本<br/>ex_date索引"]
+C["后端模型<br/>event_date字段"] --> D["后端Schema<br/>event_date字段"]
+E["前端类型定义<br/>event_date字段"] --> F["OpenAPI规范<br/>event_date字段"]
+B -.->|字段重命名| A
+D -.->|向后兼容| C
+F -.->|API兼容性| E
+```
+
+**图表来源**
+- [Docs/init_data.sql#L268](file://Docs/init_data.sql#L268)
+- [backend/app/models/share_change_event.py#L13](file://backend/app/models/share_change_event.py#L13)
+- [backend/app/schemas/share_change_event.py#L9](file://backend/app/schemas/share_change_event.py#L9)
+- [frontend/src/types/share-change-event.ts#L7](file://frontend/src/types/share-change-event.ts#L7)
+- [backend/openapi.json#L5911](file://backend/openapi.json#L5911)

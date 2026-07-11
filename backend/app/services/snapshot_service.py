@@ -5,7 +5,7 @@
 三张快照表按固定顺序生成：portfolio_position → portfolio_value_snapshot → investor_holding
 """
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -19,8 +19,30 @@ from app.models import (
 )
 from app.services.trading_utils import is_trading_day as _trading_utils_is_trading_day
 from app.services.subscription_service import unconfirm_single_subscription
+from app.services.position_service import compute_cash_balance
 
 logger = logging.getLogger(__name__)
+
+
+def get_cash_value(
+    db: Session, portfolio_code: str, platform_code: Optional[str], target_date: date
+) -> Decimal:
+    """
+    获取快照生成用的现金值。
+    基础 = compute_cash_balance(target_date)
+    若存在 manual_market_value 覆盖，则绝对替换。
+    """
+    v = compute_cash_balance(db, portfolio_code, platform_code, target_date)
+    from app.models.manual_market_value import ManualMarketValue
+    manual = db.query(ManualMarketValue).filter(
+        ManualMarketValue.portfolio_code == portfolio_code,
+        ManualMarketValue.platform_code == platform_code,
+        ManualMarketValue.product_code == "CASH",
+        ManualMarketValue.date == target_date,
+    ).first()
+    if manual:
+        v = Decimal(str(manual.market_value))  # 绝对替换
+    return v
 
 
 def generate_daily_snapshots(
@@ -314,6 +336,7 @@ def _cascade_unconfirm_subscriptions(
 
     查找所有 status='confirmed' 且 apply_date == snapshot_date 的记录，
     因为它们使用了该快照的 NAV 进行确认，快照被删后必须回退。
+    同时删除关联的 CASH trade（transfer_group = "sub_{id}"）。
 
     Returns:
         被回退的记录信息列表
@@ -352,6 +375,43 @@ def _cascade_unconfirm_subscriptions(
     return unconfirmed_list
 
 
+def _cascade_unconfirm_share_change_events(
+    db: Session, portfolio_code: str, snapshot_date: date
+) -> List[Dict[str, Any]]:
+    """
+    级联回退依赖指定日期快照的 confirmed 事件（双日期 OR）。
+    ex_date == snapshot_date 或 entitlement_date == snapshot_date 的事件需回退。
+    因事件不生成 CASH trade，无需级联 trade。
+    """
+    from sqlalchemy import or_
+
+    events = db.query(ShareChangeEvent).filter(
+        ShareChangeEvent.portfolio_code == portfolio_code,
+        ShareChangeEvent.status == "confirmed",
+        or_(
+            ShareChangeEvent.ex_date == snapshot_date,
+            ShareChangeEvent.entitlement_date == snapshot_date,
+        ),
+    ).all()
+
+    result = []
+    for event in events:
+        event.status = "pending"
+        event.confirmed_at = None
+        event.entitlement_shares = None
+        event.shares_before = None
+        event.shares_change = None
+        event.shares_after = None
+        event.cash_change = None
+        result.append({"id": event.id, "action": "unconfirmed"})
+        logger.info(
+            f"级联取消确认事件: event_id={event.id}, "
+            f"portfolio={portfolio_code}, snapshot_date={snapshot_date}"
+        )
+
+    return result
+
+
 def _delete_existing_snapshots(
     db: Session, portfolio_code: str, target_date: date
 ) -> Dict[str, Any]:
@@ -360,8 +420,10 @@ def _delete_existing_snapshots(
 
     删除前先级联回退依赖该快照的已确认申购/赎回。
     """
-    # 先级联回退依赖该快照的申购
+    # 先级联回退依赖该快照的申购（含 CASH trade）
     cascaded = _cascade_unconfirm_subscriptions(db, portfolio_code, target_date)
+    # 级联回退依赖该快照的事件
+    cascaded_events = _cascade_unconfirm_share_change_events(db, portfolio_code, target_date)
 
     pp_deleted = db.query(PortfolioPosition).filter(
         PortfolioPosition.portfolio_code == portfolio_code,
@@ -380,6 +442,7 @@ def _delete_existing_snapshots(
 
     return {
         "cascaded_subscriptions": cascaded,
+        "cascaded_events": cascaded_events,
         "deleted": {
             "portfolio_position": pp_deleted,
             "portfolio_value_snapshot": nav_deleted,
@@ -417,12 +480,11 @@ def _generate_portfolio_position(
         ).all()
         
         for pos in prev_positions:
-            key = (pos.product_code, pos.market, pos.platform_code)
-            # 如果 asset_type 为空或为中文，统一规范化
-            pos_asset_type = pos.asset_type
             if pos.product_code == "CASH":
-                pos_asset_type = "cash"
-            elif not pos_asset_type:
+                continue  # CASH 持仓由 get_cash_value 统一计算
+            key = (pos.product_code, pos.market, pos.platform_code)
+            pos_asset_type = pos.asset_type
+            if not pos_asset_type:
                 product = db.query(Product).filter(
                     Product.code == pos.product_code,
                     Product.market == pos.market
@@ -453,6 +515,8 @@ def _generate_portfolio_position(
     ).all()
     
     for trade in buy_trades:
+        if trade.product_code == "CASH":
+            continue  # CASH 交易由 get_cash_value 统一计算
         key = (trade.product_code, trade.market, trade.platform_code)
         if key not in positions:
             product = db.query(Product).filter(
@@ -463,25 +527,21 @@ def _generate_portfolio_position(
                 "shares": Decimal("0"),
                 "amount": None,
                 "cost_price": None,
-                "asset_type": "cash" if trade.product_code == "CASH" else (_get_product_asset_type(db, product) if product else "stock"),
+                "asset_type": _get_product_asset_type(db, product) if product else "stock",
             }
-        
-        if trade.product_code == "CASH":
-            # 现金转移买入：增加平台现金
-            positions[key]["amount"] = (positions[key]["amount"] or Decimal("0")) + Decimal(str(trade.amount or 0))
+
+        new_shares = Decimal(str(trade.shares or 0))
+        new_price = Decimal(str(trade.price or 0))
+        old_shares = positions[key]["shares"]
+        old_cost = positions[key]["cost_price"] or Decimal("0")
+
+        # 加权平均成本价
+        if old_shares > 0:
+            positions[key]["cost_price"] = (old_shares * old_cost + new_shares * new_price) / (old_shares + new_shares)
         else:
-            new_shares = Decimal(str(trade.shares or 0))
-            new_price = Decimal(str(trade.price or 0))
-            old_shares = positions[key]["shares"]
-            old_cost = positions[key]["cost_price"] or Decimal("0")
-            
-            # 加权平均成本价
-            if old_shares > 0:
-                positions[key]["cost_price"] = (old_shares * old_cost + new_shares * new_price) / (old_shares + new_shares)
-            else:
-                positions[key]["cost_price"] = new_price
-            
-            positions[key]["shares"] += new_shares
+            positions[key]["cost_price"] = new_price
+
+        positions[key]["shares"] += new_shares
     
     # 处理卖出交易
     sell_trades = db.query(Trade).filter(
@@ -493,117 +553,93 @@ def _generate_portfolio_position(
     ).all()
     
     for trade in sell_trades:
-        key = (trade.product_code, trade.market, trade.platform_code)
         if trade.product_code == "CASH":
-            # 现金转移卖出：减少平台现金
-            if key not in positions:
-                positions[key] = {
-                    "shares": None,
-                    "amount": Decimal("0"),
-                    "cost_price": None,
-                    "asset_type": "cash",
-                }
-            positions[key]["amount"] = (positions[key]["amount"] or Decimal("0")) - Decimal(str(trade.amount or 0))
-        elif key in positions:
+            continue  # CASH 交易由 get_cash_value 统一计算
+        key = (trade.product_code, trade.market, trade.platform_code)
+        if key in positions:
             positions[key]["shares"] -= Decimal(str(trade.shares or 0))
-    
-    # 处理申购/赎回对组合现金的影响（按平台拆分）
-    # 申购确认增加现金，赎回确认减少现金
-    
-    # 获取前一日各平台的现金余额
-    prev_cash_by_platform = {}
+
+    # 应用份额变动事件（ex_date <= target_date 且 confirmed）
+    # 只处理基金份额变更，现金由 get_cash_value → compute_cash_balance 覆盖
+    # 按 entitlement_date 升序处理
+    confirmed_events = db.query(ShareChangeEvent).filter(
+        ShareChangeEvent.portfolio_code == portfolio_code,
+        ShareChangeEvent.status == "confirmed",
+        ShareChangeEvent.ex_date <= target_date,
+    ).order_by(ShareChangeEvent.entitlement_date.asc()).all()
+
+    for event in confirmed_events:
+        if event.event_type in ("cash_dividend", "forced_adjustment"):
+            continue  # 现金变动由 compute_cash_balance 覆盖，不处理基金份额
+
+        # 找到对应基金持仓（基金份额不分平台）
+        fund_keys = [k for k in positions if k[0] == event.product_code and k[1] == event.market]
+        if not fund_keys:
+            # 持仓不存在，创建
+            fund_key = (event.product_code, event.market, None)
+            product = db.query(Product).filter(
+                Product.code == event.product_code,
+                Product.market == event.market
+            ).first()
+            positions[fund_key] = {
+                "shares": Decimal("0"),
+                "amount": None,
+                "cost_price": None,
+                "asset_type": _get_product_asset_type(db, product) if product else "stock",
+            }
+        else:
+            fund_key = fund_keys[0]
+
+        old_shares = Decimal(str(positions[fund_key]["shares"] or 0))
+        positions[fund_key]["shares_before"] = old_shares
+
+        if event.event_type == "reinvest_dividend":
+            shares_change = old_shares * Decimal(str(event.div_cash or 0)) / Decimal(str(event.reinvest_nav or 1))
+            positions[fund_key]["shares"] = old_shares + shares_change
+            positions[fund_key]["shares_change"] = shares_change
+        elif event.event_type == "share_split":
+            shares_after = old_shares * Decimal(str(event.ratio or 1))
+            positions[fund_key]["shares"] = shares_after
+            positions[fund_key]["shares_change"] = shares_after - old_shares
+        elif event.event_type == "share_merge":
+            shares_after = old_shares / Decimal(str(event.ratio or 1))
+            positions[fund_key]["shares"] = shares_after
+            positions[fund_key]["shares_change"] = shares_after - old_shares
+        elif event.event_type == "bonus_share":
+            shares_change = old_shares * Decimal(str(event.ratio or 0))
+            positions[fund_key]["shares"] = old_shares + shares_change
+            positions[fund_key]["shares_change"] = shares_change
+
+    # CASH 持仓：直接调用 get_cash_value（显式计算）
+    # 收集所有涉及现金的平台
+    trade_platforms = db.query(Trade.platform_code).filter(
+        Trade.portfolio_code == portfolio_code,
+        Trade.product_code == "CASH",
+    ).distinct().all()
+    event_platforms = db.query(ShareChangeEvent.platform_code).filter(
+        ShareChangeEvent.portfolio_code == portfolio_code,
+        ShareChangeEvent.platform_code.isnot(None),
+    ).distinct().all()
+    all_platforms = set(p[0] for p in trade_platforms) | set(p[0] for p in event_platforms if p[0])
+    # 也包含前一日快照中已有的 CASH 平台
     if prev_snapshot:
-        prev_cash_positions = db.query(PortfolioPosition).filter(
+        prev_cash_platforms = db.query(PortfolioPosition.platform_code).filter(
             PortfolioPosition.portfolio_code == portfolio_code,
             PortfolioPosition.snapshot_date == prev_snapshot,
-            PortfolioPosition.product_code == "CASH"
-        ).all()
-        for cpos in prev_cash_positions:
-            prev_cash_by_platform[cpos.platform_code] = Decimal(str(cpos.amount or 0))
-    
-    # 为每个有前一日现金的平台初始化持仓
-    for plat_code, prev_amount in prev_cash_by_platform.items():
+            PortfolioPosition.product_code == "CASH",
+        ).distinct().all()
+        all_platforms |= set(p[0] for p in prev_cash_platforms if p[0])
+
+    for plat_code in all_platforms:
+        cash_amount = get_cash_value(db, portfolio_code, plat_code, target_date)
         cash_key = ("CASH", "", plat_code)
-        if cash_key not in positions:
-            positions[cash_key] = {
-                "shares": None,
-                "amount": prev_amount,
-                "cost_price": None,
-                "asset_type": "cash",
-            }
-    
-    # 处理申购确认（增加对应平台的现金）
-    confirmed_subs = db.query(Subscription).filter(
-        Subscription.portfolio_code == portfolio_code,
-        Subscription.sub_type == "subscribe",
-        Subscription.status == "confirmed",
-        Subscription.confirm_date >= start_apply_date,
-        Subscription.confirm_date <= target_date
-    ).all()
-    
-    for sub in confirmed_subs:
-        cash_key = ("CASH", "", sub.platform_code)
-        if cash_key not in positions:
-            positions[cash_key] = {
-                "shares": None,
-                "amount": Decimal("0"),
-                "cost_price": None,
-                "asset_type": "cash",
-            }
-        positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) + Decimal(str(sub.amount or 0))
-    
-    # 处理赎回确认（减少对应平台的现金）
-    confirmed_redeems = db.query(Subscription).filter(
-        Subscription.portfolio_code == portfolio_code,
-        Subscription.sub_type == "redeem",
-        Subscription.status == "confirmed",
-        Subscription.confirm_date >= start_apply_date,
-        Subscription.confirm_date <= target_date
-    ).all()
-    
-    for sub in confirmed_redeems:
-        cash_key = ("CASH", "", sub.platform_code)
-        if cash_key not in positions:
-            positions[cash_key] = {
-                "shares": None,
-                "amount": Decimal("0"),
-                "cost_price": None,
-                "asset_type": "cash",
-            }
-        positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) - Decimal(str(sub.amount or 0))
-    
-    # 处理买入交易（减少对应平台的现金）—— 排除 CASH 产品（已在上方处理）
-    for trade in buy_trades:
-        if trade.product_code == "CASH":
-            continue  # 现金转移买入已直接修改 amount，无需再调整现金
-        trade_amount = Decimal(str(trade.amount or 0))
-        if trade_amount > 0:
-            cash_key = ("CASH", "", trade.platform_code)
-            if cash_key not in positions:
-                positions[cash_key] = {
-                    "shares": None,
-                    "amount": Decimal("0"),
-                    "cost_price": None,
-                    "asset_type": "cash",
-                }
-            positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) - trade_amount
-    
-    # 处理卖出交易（增加对应平台的现金）—— 排除 CASH 产品（已在上方处理）
-    for trade in sell_trades:
-        if trade.product_code == "CASH":
-            continue  # 现金转移卖出已直接修改 amount，无需再调整现金
-        trade_amount = Decimal(str(trade.amount or 0))
-        if trade_amount > 0:
-            cash_key = ("CASH", "", trade.platform_code)
-            if cash_key not in positions:
-                positions[cash_key] = {
-                    "shares": None,
-                    "amount": Decimal("0"),
-                    "cost_price": None,
-                    "asset_type": "cash",
-                }
-            positions[cash_key]["amount"] = (positions[cash_key]["amount"] or Decimal("0")) + trade_amount
-    
+        positions[cash_key] = {
+            "shares": None,
+            "amount": cash_amount,
+            "cost_price": None,
+            "asset_type": "cash",
+        }
+
     # 构建最终的持仓快照对象
     result_positions = []
     for (product_code, market, platform_code), pos_data in positions.items():
@@ -915,6 +951,147 @@ def auto_confirm_after_snapshot(
 
     return results
 
+    # Trade 自动确认（confirm_date == snapshot_date 的 pending trades）
+    # 排除 transfer_group 非空的 CASH trade：
+    #   - 跨天转移两腿：由下方 cross_day_transfers 分支处理
+    #   - 基金调仓配对 CASH 腿：由原子翻转跟随基金腿
+    pending_trades = db.query(Trade).filter(
+        Trade.portfolio_code == portfolio_code,
+        Trade.status == "pending",
+        Trade.confirm_date == snapshot_date,
+        Trade.transfer_group.is_(None) | (Trade.product_code != "CASH"),
+    ).all()
+
+    for trade in pending_trades:
+        try:
+            trade.status = "confirmed"
+            # 同步 transfer_group 关联的配对 CASH 腿
+            if trade.transfer_group:
+                paired_trades = db.query(Trade).filter(
+                    Trade.transfer_group == trade.transfer_group,
+                    Trade.id != trade.id,
+                ).all()
+                for pt in paired_trades:
+                    pt.status = "confirmed"
+            results.append({
+                "id": trade.id,
+                "type": "trade",
+                "action": "auto_confirmed",
+                "status": "success",
+            })
+            logger.info(f"自动确认 Trade: trade_id={trade.id}, portfolio={portfolio_code}")
+        except Exception as e:
+            results.append({
+                "id": trade.id,
+                "type": "trade",
+                "action": "auto_confirm_failed",
+                "error": str(e),
+            })
+            logger.warning(f"Trade auto-confirm failed: trade_id={trade.id}, {e}")
+
+    # 跨天转移 auto_confirm（两腿均 pending，需同时确认）
+    # 仅当 confirm_date <= snapshot_date（即已到确认日）时处理
+    cross_day_pending = db.query(Trade).filter(
+        Trade.portfolio_code == portfolio_code,
+        Trade.status == "pending",
+        Trade.product_code == "CASH",
+        Trade.transfer_group.isnot(None),
+        Trade.confirm_date <= snapshot_date,
+    ).all()
+    processed_groups = set()
+    for trade in cross_day_pending:
+        if trade.transfer_group in processed_groups:
+            continue
+        processed_groups.add(trade.transfer_group)
+        try:
+            # TRANSFER_NOT_READY 守卫
+            if trade.confirm_date and trade.confirm_date > date.today():
+                logger.info(f"跨天转移 {trade.transfer_group} 未到确认日，跳过")
+                continue
+            # 同时确认两腿
+            paired_trades = db.query(Trade).filter(
+                Trade.transfer_group == trade.transfer_group,
+                Trade.status == "pending",
+            ).all()
+            for pt in paired_trades:
+                pt.status = "confirmed"
+            results.append({
+                "transfer_group": trade.transfer_group,
+                "type": "cross_day_transfer",
+                "action": "auto_confirmed",
+                "status": "success",
+            })
+            logger.info(f"自动确认跨天转移: transfer_group={trade.transfer_group}")
+        except Exception as e:
+            results.append({
+                "transfer_group": trade.transfer_group,
+                "type": "cross_day_transfer",
+                "action": "auto_confirm_failed",
+                "error": str(e),
+            })
+            logger.warning(f"Cross-day transfer auto-confirm failed: {trade.transfer_group}, {e}")
+
+    # Event 自动确认（ex_date == snapshot_date 的 pending events）
+    pending_events = db.query(ShareChangeEvent).filter(
+        ShareChangeEvent.portfolio_code == portfolio_code,
+        ShareChangeEvent.status == "pending",
+        ShareChangeEvent.ex_date == snapshot_date,
+    ).all()
+
+    for event in pending_events:
+        try:
+            # 从 entitlement_date 快照读取 entitlement_shares
+            ent_position = db.query(PortfolioPosition).filter(
+                PortfolioPosition.portfolio_code == event.portfolio_code,
+                PortfolioPosition.product_code == event.product_code,
+                PortfolioPosition.snapshot_date == event.entitlement_date,
+            ).first()
+            entitlement_shares = Decimal(str(ent_position.shares or 0)) if ent_position else Decimal("0")
+
+            event.entitlement_shares = entitlement_shares
+            event.shares_before = entitlement_shares
+
+            if event.event_type == "cash_dividend":
+                event.cash_change = entitlement_shares * Decimal(str(event.div_cash or 0))
+                event.shares_change = Decimal("0")
+                event.shares_after = entitlement_shares
+            elif event.event_type == "reinvest_dividend":
+                event.shares_change = entitlement_shares * Decimal(str(event.div_cash or 0)) / Decimal(str(event.reinvest_nav or 1))
+                event.shares_after = entitlement_shares + event.shares_change
+                event.cash_change = Decimal("0")
+            elif event.event_type == "share_split":
+                event.shares_after = entitlement_shares * Decimal(str(event.ratio or 1))
+                event.shares_change = event.shares_after - entitlement_shares
+                event.cash_change = Decimal("0")
+            elif event.event_type == "share_merge":
+                event.shares_after = entitlement_shares / Decimal(str(event.ratio or 1))
+                event.shares_change = event.shares_after - entitlement_shares
+                event.cash_change = Decimal("0")
+            elif event.event_type == "bonus_share":
+                event.shares_change = entitlement_shares * Decimal(str(event.ratio or 0))
+                event.shares_after = entitlement_shares + event.shares_change
+                event.cash_change = Decimal("0")
+
+            event.status = "confirmed"
+            event.confirmed_at = datetime.now()
+            results.append({
+                "id": event.id,
+                "type": "event",
+                "action": "auto_confirmed",
+                "status": "success",
+            })
+            logger.info(f"自动确认 Event: event_id={event.id}, portfolio={portfolio_code}")
+        except Exception as e:
+            results.append({
+                "id": event.id,
+                "type": "event",
+                "action": "auto_confirm_failed",
+                "error": str(e),
+            })
+            logger.warning(f"Event auto-confirm failed: event_id={event.id}, {e}")
+
+    return results
+
 
 # ==================== 校验函数 ====================
 
@@ -941,7 +1118,7 @@ def _check_pending_transactions(
     """检查是否存在pending交易"""
     pending_trades = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
-        Trade.trade_date < target_date,
+        Trade.confirm_date <= target_date,
         Trade.status == "pending"
     ).count()
     
@@ -954,7 +1131,7 @@ def _check_pending_transactions(
     if pending_trades > 0 or pending_subs > 0:
         details = []
         if pending_trades > 0:
-            details.append(f"{pending_trades}笔apply_date<{target_date}的待确认交易")
+            details.append(f"{pending_trades}笔confirm_date<={target_date}的待确认交易")
         if pending_subs > 0:
             details.append(f"{pending_subs}笔apply_date<{target_date}的待确认申赎")
         return {
@@ -1047,15 +1224,15 @@ def _check_share_change_events(
     """检查分红事件状态"""
     pending_events = db.query(ShareChangeEvent).filter(
         ShareChangeEvent.portfolio_code == portfolio_code,
-        ShareChangeEvent.entitlement_date <= target_date,
+        ShareChangeEvent.ex_date <= target_date,
         ShareChangeEvent.status == "pending"
     ).count()
     
     if pending_events > 0:
         return {
             "check_type": "share_change_events",
-            "status": "warning",
-            "message": f"存在{pending_events}笔未确认的份额变动事件，可能影响快照准确性"
+            "status": "failed",
+            "message": f"存在{pending_events}笔未确认的份额变动事件（ex_date <= {target_date}），请先确认或取消后再生成快照"
         }
     return {"check_type": "share_change_events", "status": "passed", "message": "无未确认的份额变动事件"}
 

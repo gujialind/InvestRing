@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Numeric, Date, DateTime, Integer, ForeignKey, ForeignKeyConstraint, func
+from sqlalchemy import Column, String, Text, Numeric, Date, DateTime, Integer, ForeignKey, ForeignKeyConstraint, UniqueConstraint, func
 from app.database import Base
 
 
@@ -29,4 +29,7 @@ class Trade(Base):
             ["product_code", "market"],
             ["product.code", "product.market"]
         ),
+        # transfer_group 唯一约束：防止重复确认生成重复 CASH trade
+        # MySQL 中 NULL 值不参与唯一性检查，故 transfer_group 为空的普通 trade 不受影响
+        UniqueConstraint('transfer_group', 'product_code', 'trade_type', name='uq_trade_transfer_group'),
     )

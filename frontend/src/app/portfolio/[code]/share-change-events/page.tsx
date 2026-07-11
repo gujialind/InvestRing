@@ -67,7 +67,7 @@ export default function ShareChangeEventsPage() {
   const [formData, setFormData] = useState<ShareChangeEventCreate>({
     portfolio_code: code,
     event_type: "cash_dividend",
-    event_date: toDateOnly(new Date()),
+    ex_date: toDateOnly(new Date()),
     entitlement_date: toDateOnly(new Date()),
     product_code: "",
     market: "",
@@ -153,9 +153,9 @@ export default function ShareChangeEventsPage() {
     setFormData({
       portfolio_code: code,
       event_type: "cash_dividend",
-      event_date: toDateOnly(new Date()),
+      ex_date: toDateOnly(new Date()),
       entitlement_date: toDateOnly(new Date()),
-      product_code: "",
+      product_code: ""
       market: "",
       div_cash: 0,
       reinvest_nav: 0,
@@ -244,11 +244,11 @@ export default function ShareChangeEventsPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="event_date">事件日期</Label>
+                      <Label htmlFor="ex_date">除息日</Label>
                       <DatePicker
-                        date={parseDateOnly(formData.event_date)}
+                        date={parseDateOnly(formData.ex_date)}
                         onSelect={(date) => {
-                          setFormData({ ...formData, event_date: toDateOnly(date) })
+                          setFormData({ ...formData, ex_date: toDateOnly(date) })
                         }}
                       />
                     </div>
@@ -376,7 +376,7 @@ export default function ShareChangeEventsPage() {
                     <TableRow>
                       <TableHead>事件类型</TableHead>
                       <TableHead>产品代码</TableHead>
-                      <TableHead>事件日期</TableHead>
+                      <TableHead>除息日</TableHead>
                       <TableHead>权益登记日</TableHead>
                       <TableHead className="text-right">份额变化</TableHead>
                       <TableHead className="text-right">现金变化</TableHead>
@@ -389,7 +389,7 @@ export default function ShareChangeEventsPage() {
                       <TableRow key={event.id}>
                         <TableCell>{EVENT_TYPE_LABELS[event.event_type] || event.event_type}</TableCell>
                         <TableCell>{event.product_code || "--"}</TableCell>
-                        <TableCell>{event.event_date}</TableCell>
+                        <TableCell>{event.ex_date}</TableCell>
                         <TableCell>{event.entitlement_date}</TableCell>
                         <TableCell className="text-right">
                           {event.shares_change ? formatNumber(event.shares_change) : "--"}

@@ -167,7 +167,7 @@ def delete_snapshot(
     """
     删除指定日期的快照
     
-    删除前自动级联回退依赖该快照的已确认申购/赎回。
+    删除前自动级联回退依赖该快照的已确认申购/赎回和份额变动事件。
     
     权限：仅admin
     """
@@ -188,6 +188,11 @@ def delete_snapshot(
             response["cascaded_subscriptions"] = cascaded
             response["message"] += f"（级联回退了 {len(cascaded)} 笔申购/赎回）"
         
+        cascaded_events = result.get("cascaded_events", [])
+        if cascaded_events:
+            response["cascaded_events"] = cascaded_events
+            response["message"] += f"（级联回退了 {len(cascaded_events)} 笔份额变动事件）"
+        
         return response
     except Exception as e:
         db.rollback()
@@ -195,3 +200,78 @@ def delete_snapshot(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "DELETE_FAILED", "message": str(e)},
         )
+
+
+@router.delete("/{portfolio_code}/bulk/{from_date}")
+def delete_snapshots_bulk(
+    portfolio_code: str,
+    from_date: date,
+    db: Session = Depends(get_db),
+    current_user: Investor = Depends(get_current_admin),
+):
+    """
+    批量删除从 from_date 开始的所有快照（含 from_date）
+    
+    从最新快照日开始倒序删除，确保级联回退的顺序正确。
+    每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。
+    
+    权限：仅admin
+    """
+    from app.services.snapshot_service import _delete_existing_snapshots
+    from sqlalchemy import func
+    from app.models import PortfolioPosition
+    
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise HTTPException(status_code=404, detail={"error": "PORTFOLIO_NOT_FOUND", "message": f"组合 {portfolio_code} 不存在"})
+    
+    # 获取所有需要删除的快照日期（从 from_date 开始，按日期降序）
+    snapshot_dates = [
+        row[0] for row in db.query(PortfolioValueSnapshot.snapshot_date)
+        .filter(
+            PortfolioValueSnapshot.portfolio_code == portfolio_code,
+            PortfolioValueSnapshot.snapshot_date >= from_date,
+        )
+        .order_by(PortfolioValueSnapshot.snapshot_date.desc())
+        .all()
+    ]
+    
+    if not snapshot_dates:
+        return {
+            "success": True,
+            "message": f"组合 {portfolio_code} 在 {from_date} 之后无快照可删除",
+            "deleted_count": 0,
+        }
+    
+    results = []
+    total_cascaded_subs = 0
+    total_cascaded_events = 0
+    
+    for snap_date in snapshot_dates:
+        try:
+            result = _delete_existing_snapshots(db, portfolio_code, snap_date)
+            cascaded_subs = result.get("cascaded_subscriptions", [])
+            cascaded_events = result.get("cascaded_events", [])
+            total_cascaded_subs += len(cascaded_subs)
+            total_cascaded_events += len(cascaded_events)
+            results.append({
+                "snapshot_date": snap_date.isoformat(),
+                "deleted": result["deleted"],
+                "cascaded_subs": len(cascaded_subs),
+                "cascaded_events": len(cascaded_events),
+            })
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"error": "BULK_DELETE_FAILED", "message": f"删除 {snap_date} 快照失败: {str(e)}"},
+            )
+    
+    db.commit()
+    return {
+        "success": True,
+        "message": f"已删除组合 {portfolio_code} 从 {from_date} 起的 {len(snapshot_dates)} 个快照"
+                   f"（级联回退 {total_cascaded_subs} 笔申购/赎回，{total_cascaded_events} 笔事件）",
+        "deleted_count": len(snapshot_dates),
+        "details": results,
+    }
