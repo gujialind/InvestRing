@@ -9,6 +9,7 @@ class ShareChangeEventBase(BaseModel):
     ex_date: date
     entitlement_date: date
     platform_code: Optional[str] = None
+    parent_event_id: Optional[int] = None
     product_code: Optional[str] = None
     market: Optional[str] = None
     event_source: str = "manual"
@@ -33,7 +34,6 @@ class ShareChangeEventCreate(ShareChangeEventBase):
 class ShareChangeEventUpdate(BaseModel):
     ex_date: Optional[date] = None
     entitlement_date: Optional[date] = None
-    platform_code: Optional[str] = None
     shares_before: Optional[float] = None
     shares_change: Optional[float] = None
     shares_after: Optional[float] = None

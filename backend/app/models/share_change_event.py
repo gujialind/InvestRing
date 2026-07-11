@@ -13,6 +13,7 @@ class ShareChangeEvent(Base):
     ex_date = Column(Date, nullable=False)
     entitlement_date = Column(Date, nullable=False)
     platform_code = Column(String(20), ForeignKey("platform.code"), nullable=True)
+    parent_event_id = Column(Integer, ForeignKey("share_change_event.id"), nullable=True)
     event_source = Column(String(20), nullable=False)
     entitlement_shares = Column(Numeric(15, 4))
     shares_before = Column(Numeric(15, 4))

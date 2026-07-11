@@ -381,13 +381,14 @@ def _cascade_unconfirm_share_change_events(
     """
     级联回退依赖指定日期快照的 confirmed 事件（双日期 OR）。
     ex_date == snapshot_date 或 entitlement_date == snapshot_date 的事件需回退。
-    因事件不生成 CASH trade，无需级联 trade。
+    只处理父/独立记录（parent_event_id IS NULL），子记录被物理删除。
     """
     from sqlalchemy import or_
 
     events = db.query(ShareChangeEvent).filter(
         ShareChangeEvent.portfolio_code == portfolio_code,
         ShareChangeEvent.status == "confirmed",
+        ShareChangeEvent.parent_event_id.is_(None),  # 只处理父/独立记录
         or_(
             ShareChangeEvent.ex_date == snapshot_date,
             ShareChangeEvent.entitlement_date == snapshot_date,
@@ -396,6 +397,12 @@ def _cascade_unconfirm_share_change_events(
 
     result = []
     for event in events:
+        # 父记录：先物理删除所有子记录（确保 regen 重确认不重复拆分）
+        db.query(ShareChangeEvent).filter(
+            ShareChangeEvent.parent_event_id == event.id
+        ).delete(synchronize_session=False)
+
+        # 然后回退父记录本身
         event.status = "pending"
         event.confirmed_at = None
         event.entitlement_shares = None
@@ -560,23 +567,24 @@ def _generate_portfolio_position(
             positions[key]["shares"] -= Decimal(str(trade.shares or 0))
 
     # 应用份额变动事件（ex_date <= target_date 且 confirmed）
-    # 只处理基金份额变更，现金由 get_cash_value → compute_cash_balance 覆盖
+    # 只读取 platform_code IS NOT NULL 的子记录/平台级记录，跳过基金级父记录
     # 按 entitlement_date 升序处理
     confirmed_events = db.query(ShareChangeEvent).filter(
         ShareChangeEvent.portfolio_code == portfolio_code,
         ShareChangeEvent.status == "confirmed",
         ShareChangeEvent.ex_date <= target_date,
+        ShareChangeEvent.platform_code.isnot(None),  # 跳过基金级父记录
     ).order_by(ShareChangeEvent.entitlement_date.asc()).all()
 
     for event in confirmed_events:
         if event.event_type in ("cash_dividend", "forced_adjustment"):
             continue  # 现金变动由 compute_cash_balance 覆盖，不处理基金份额
 
-        # 找到对应基金持仓（基金份额不分平台）
-        fund_keys = [k for k in positions if k[0] == event.product_code and k[1] == event.market]
-        if not fund_keys:
+        # 按平台精确匹配持仓
+        fund_key = (event.product_code, event.market, event.platform_code)
+
+        if fund_key not in positions:
             # 持仓不存在，创建
-            fund_key = (event.product_code, event.market, None)
             product = db.query(Product).filter(
                 Product.code == event.product_code,
                 Product.market == event.market
@@ -587,28 +595,12 @@ def _generate_portfolio_position(
                 "cost_price": None,
                 "asset_type": _get_product_asset_type(db, product) if product else "stock",
             }
-        else:
-            fund_key = fund_keys[0]
 
         old_shares = Decimal(str(positions[fund_key]["shares"] or 0))
-        positions[fund_key]["shares_before"] = old_shares
 
-        if event.event_type == "reinvest_dividend":
-            shares_change = old_shares * Decimal(str(event.div_cash or 0)) / Decimal(str(event.reinvest_nav or 1))
-            positions[fund_key]["shares"] = old_shares + shares_change
-            positions[fund_key]["shares_change"] = shares_change
-        elif event.event_type == "share_split":
-            shares_after = old_shares * Decimal(str(event.ratio or 1))
-            positions[fund_key]["shares"] = shares_after
-            positions[fund_key]["shares_change"] = shares_after - old_shares
-        elif event.event_type == "share_merge":
-            shares_after = old_shares / Decimal(str(event.ratio or 1))
-            positions[fund_key]["shares"] = shares_after
-            positions[fund_key]["shares_change"] = shares_after - old_shares
-        elif event.event_type == "bonus_share":
-            shares_change = old_shares * Decimal(str(event.ratio or 0))
-            positions[fund_key]["shares"] = old_shares + shares_change
-            positions[fund_key]["shares_change"] = shares_change
+        # 使用确认时预计算的 shares_change（不重算）
+        if event.shares_change is not None:
+            positions[fund_key]["shares"] = old_shares + Decimal(str(event.shares_change))
 
     # CASH 持仓：直接调用 get_cash_value（显式计算）
     # 收集所有涉及现金的平台
@@ -1032,48 +1024,37 @@ def auto_confirm_after_snapshot(
             logger.warning(f"Cross-day transfer auto-confirm failed: {trade.transfer_group}, {e}")
 
     # Event 自动确认（ex_date == snapshot_date 的 pending events）
+    # 只处理父/独立记录（跳过子记录，子记录由父记录确认时自动生成）
     pending_events = db.query(ShareChangeEvent).filter(
         ShareChangeEvent.portfolio_code == portfolio_code,
         ShareChangeEvent.status == "pending",
         ShareChangeEvent.ex_date == snapshot_date,
+        ShareChangeEvent.parent_event_id.is_(None),  # 只处理父/独立记录
     ).all()
 
     for event in pending_events:
         try:
-            # 从 entitlement_date 快照读取 entitlement_shares
-            ent_position = db.query(PortfolioPosition).filter(
-                PortfolioPosition.portfolio_code == event.portfolio_code,
-                PortfolioPosition.product_code == event.product_code,
-                PortfolioPosition.snapshot_date == event.entitlement_date,
-            ).first()
-            entitlement_shares = Decimal(str(ent_position.shares or 0)) if ent_position else Decimal("0")
+            if event.platform_code is None:
+                # 基金级事件：自动拆分为各平台子记录
+                from app.routers.share_change_events import _confirm_fund_level_event
+                _confirm_fund_level_event(db, event)
+            else:
+                # 平台级事件：按 platform_code 过滤读取 entitlement_shares
+                ent_position = db.query(PortfolioPosition).filter(
+                    PortfolioPosition.portfolio_code == event.portfolio_code,
+                    PortfolioPosition.product_code == event.product_code,
+                    PortfolioPosition.platform_code == event.platform_code,
+                    PortfolioPosition.snapshot_date == event.entitlement_date,
+                ).first()
+                entitlement_shares = Decimal(str(ent_position.shares or 0)) if ent_position else Decimal("0")
 
-            event.entitlement_shares = entitlement_shares
-            event.shares_before = entitlement_shares
+                event.entitlement_shares = entitlement_shares
+                event.shares_before = entitlement_shares
 
-            if event.event_type == "cash_dividend":
-                event.cash_change = entitlement_shares * Decimal(str(event.div_cash or 0))
-                event.shares_change = Decimal("0")
-                event.shares_after = entitlement_shares
-            elif event.event_type == "reinvest_dividend":
-                event.shares_change = entitlement_shares * Decimal(str(event.div_cash or 0)) / Decimal(str(event.reinvest_nav or 1))
-                event.shares_after = entitlement_shares + event.shares_change
-                event.cash_change = Decimal("0")
-            elif event.event_type == "share_split":
-                event.shares_after = entitlement_shares * Decimal(str(event.ratio or 1))
-                event.shares_change = event.shares_after - entitlement_shares
-                event.cash_change = Decimal("0")
-            elif event.event_type == "share_merge":
-                event.shares_after = entitlement_shares / Decimal(str(event.ratio or 1))
-                event.shares_change = event.shares_after - entitlement_shares
-                event.cash_change = Decimal("0")
-            elif event.event_type == "bonus_share":
-                event.shares_change = entitlement_shares * Decimal(str(event.ratio or 0))
-                event.shares_after = entitlement_shares + event.shares_change
-                event.cash_change = Decimal("0")
-
-            event.status = "confirmed"
-            event.confirmed_at = datetime.now()
+                from app.routers.share_change_events import _compute_event_fields
+                _compute_event_fields(event)
+                event.status = "confirmed"
+                event.confirmed_at = datetime.now()
             results.append({
                 "id": event.id,
                 "type": "event",

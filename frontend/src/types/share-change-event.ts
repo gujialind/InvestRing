@@ -7,6 +7,7 @@ export interface ShareChangeEvent {
   ex_date: string;
   entitlement_date: string;
   platform_code?: string;
+  parent_event_id?: number;
   product_code?: string;
   market?: string;
   shares_before?: number;
