@@ -26,10 +26,11 @@ def list_events(
 def create(
     portfolio_code: str = typer.Option(..., "--portfolio-code", help="组合代码"),
     event_type: str = typer.Option(..., "--event-type", help="事件类型"),
-    event_date: str = typer.Option(..., "--event-date", help="事件日期(YYYY-MM-DD)"),
+    ex_date: str = typer.Option(..., "--ex-date", help="除息日(YYYY-MM-DD)"),
     entitlement_date: str = typer.Option(..., "--entitlement-date", help="权益登记日(YYYY-MM-DD)"),
     product_code: Optional[str] = typer.Option(None, "--product-code", help="产品代码"),
     market: Optional[str] = typer.Option(None, "--market", help="市场类型"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码(平台级事件必填: cash_dividend/reinvest_dividend/forced_adjustment)"),
     entitlement_shares: Optional[float] = typer.Option(None, "--entitlement-shares", help="权益份额"),
     div_cash: Optional[float] = typer.Option(None, "--div-cash", help="每股分红金额"),
     reinvest_nav: Optional[float] = typer.Option(None, "--reinvest-nav", help="再投资净值"),
@@ -43,11 +44,12 @@ def create(
     body = {
         "portfolio_code": portfolio_code,
         "event_type": event_type,
-        "event_date": event_date,
+        "ex_date": ex_date,
         "entitlement_date": entitlement_date,
     }
     for k, v in {
         "product_code": product_code, "market": market,
+        "platform_code": platform_code,
         "entitlement_shares": entitlement_shares, "div_cash": div_cash,
         "reinvest_nav": reinvest_nav, "ratio": ratio,
         "shares_change": shares_change, "cash_change": cash_change,
@@ -70,7 +72,7 @@ def get(id: int = typer.Argument(..., help="事件ID")):
 @app.command("update")
 def update(
     id: int = typer.Argument(..., help="事件ID"),
-    event_date: Optional[str] = typer.Option(None, "--event-date", help="事件日期"),
+    ex_date: Optional[str] = typer.Option(None, "--ex-date", help="除息日"),
     entitlement_date: Optional[str] = typer.Option(None, "--entitlement-date", help="权益登记日"),
     div_cash: Optional[float] = typer.Option(None, "--div-cash", help="每股分红金额"),
     reinvest_nav: Optional[float] = typer.Option(None, "--reinvest-nav", help="再投资净值"),
@@ -83,7 +85,7 @@ def update(
     client = APIClient.from_config()
     body = {}
     for k, v in {
-        "event_date": event_date, "entitlement_date": entitlement_date,
+        "ex_date": ex_date, "entitlement_date": entitlement_date,
         "div_cash": div_cash, "reinvest_nav": reinvest_nav,
         "ratio": ratio, "shares_change": shares_change,
         "cash_change": cash_change, "notes": notes,

@@ -34,7 +34,7 @@ def create(
     amount: Optional[float] = typer.Option(None, "--amount", help="金额(申购用)"),
     shares: Optional[float] = typer.Option(None, "--shares", help="份额(赎回用)"),
     unit_price: Optional[float] = typer.Option(None, "--unit-price", help="净值"),
-    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="交易平台代码"),
+    platform_code: str = typer.Option(..., "--platform-code", help="交易平台代码"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
 ):
     """创建申赎申请"""
@@ -44,6 +44,7 @@ def create(
         "investor_code": investor_code,
         "sub_type": sub_type,
         "apply_date": apply_date,
+        "platform_code": platform_code,
     }
     if amount is not None:
         body["amount"] = amount
@@ -51,8 +52,6 @@ def create(
         body["shares"] = shares
     if unit_price is not None:
         body["unit_price"] = unit_price
-    if platform_code is not None:
-        body["platform_code"] = platform_code
     if notes is not None:
         body["notes"] = notes
     result = client.post("/api/subscriptions", json_data=body)
