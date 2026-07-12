@@ -20,8 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 先复制依赖文件，利用 Docker 层缓存
 COPY backend/requirements.txt .
 
-# 安装 Python 依赖到指定目录（方便后续复制）
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# 安装 Python 依赖（仅用预编译 wheel，避免源码编译超时）
+RUN pip install --no-cache-dir --prefix=/install --only-binary :all: -r requirements.txt
 
 # ------------------------------------------------------------------
 # 阶段 2：生产运行层（最小化镜像体积）
@@ -43,13 +43,9 @@ COPY --from=deps /install /usr/local
 # 复制后端应用代码
 COPY backend/ .
 
-# 复制项目根目录可能需要的文件（如 alembic.ini 如果在根目录）
-# COPY backend/alembic.ini . 2>/dev/null || true
-
 # 设置 Python 环境变量
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/app \
-    # 禁止 Python 生成 .pyc 文件
+    PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1
 
 # 创建日志目录
