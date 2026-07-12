@@ -1,0 +1,66 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Node / Frontend (not needed for backend build)
+frontend/
+node_modules/
+.next/
+package-lock.json
+package.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+
+# Vendored deps (migrated away, may still exist locally)
+backend/deps/
+
+# Tests (not needed in production image)
+backend/tests/
+
+# Environment (secrets should not leak into image layers!)
+.env
+*.env
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+.trae/
+.hermes/
+.qwen/
+.qoder/
+.lingma/
+.agents/
+.apifox/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# Docs & specs (not runtime)
+Docs/
+*.md
+AGENTS.md
+
+# CLI (not needed in backend image)
+ir-cli/
+backend/cli/
+
+# DB files
+*.db
+*.sqlite3
+
+# Logs
+logs/
