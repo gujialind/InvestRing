@@ -40,6 +40,19 @@ yarn.lock
 # AI IDE
 .trae/
 
+# AI Coding Assistants (multi-IDE)
+.hermes/
+.qwen/
+.qoder/
+.lingma/
+.agents/
+.apifox/
+.qoderignore
+
+# Hermes skills (project-level)
+skills/
+skills-lock.json
+
 # Logs
 logs/
 *.log
@@ -89,3 +102,9 @@ frontend/playwright/.cache/
 *.tmp
 *.temp
 .cache/
+
+# One-off/test scripts (not part of test suite)
+/test_login.py
+/check_db.py
+/backend/test_update_cash_detailed.py
+/backend/test_update_cash_api.py
