@@ -7,8 +7,7 @@
 import sys
 import os
 
-# 添加 deps 目录到路径
-sys.path.insert(0, 'deps')
+sys.path.insert(0, os.path.dirname(__file__))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

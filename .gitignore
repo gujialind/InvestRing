@@ -16,6 +16,8 @@ ruff_cache/
 
 # Backend dependencies (local package cache - DO NOT COMMIT!)
 backend/.packages/
+# Vendored dependencies (migrated to pip + requirements.txt)
+backend/deps/
 
 # Node.js
 node_modules/
