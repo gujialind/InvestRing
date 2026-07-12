@@ -24,14 +24,17 @@ echo ""
 echo "🚀 启动后端服务..."
 cd backend
 
-# 检查并安装依赖
-if [ ! -d "deps" ]; then
-    echo "📦 安装后端依赖..."
-    pip3 install -q -r requirements.txt -t deps
+# 创建并激活虚拟环境
+if [ ! -d ".venv" ]; then
+    echo "📦 创建 Python 虚拟环境..."
+    python3 -m venv .venv
 fi
 
-# 设置 PYTHONPATH
-export PYTHONPATH="$(pwd)/deps:$(pwd)/app:$PYTHONPATH"
+source .venv/bin/activate
+
+# 安装依赖
+echo "📦 安装后端依赖..."
+pip install -q -r requirements.txt
 
 # 加载 .env 环境变量并启动 uvicorn
 if [ -f ".env" ]; then
@@ -46,12 +49,14 @@ else
     echo "⚠️ Tushare Token 未配置"
 fi
 
-# 启动 uvicorn（带环境变量）
-env TUSHARE_TOKEN="$TUSHARE_TOKEN" python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &> ../logs/backend.log &
+# 启动 uvicorn
+env TUSHARE_TOKEN="$TUSHARE_TOKEN" python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &> ../logs/backend.log &
 BACKEND_PID=$!
 echo "✅ 后端服务已启动 (PID: $BACKEND_PID)"
 echo "📝 后端日志: logs/backend.log"
 echo "🌐 后端地址: http://localhost:8000"
+
+deactivate 2>/dev/null || true
 
 cd ..
 
