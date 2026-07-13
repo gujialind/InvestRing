@@ -7,6 +7,8 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 import tushare as ts
 
+from app.config import get_settings
+
 _ENV_LOADED = False
 
 
@@ -29,7 +31,8 @@ def _ensure_env_loaded():
 def _get_tushare_pro():
     """获取 Tushare Pro 实例，带 Token 校验"""
     _ensure_env_loaded()
-    token = os.environ.get("TUSHARE_TOKEN", "")
+    settings = get_settings()
+    token = settings.tushare_token or os.environ.get("TUSHARE_TOKEN", "")
     if not token:
         raise TushareNotConfiguredError("Tushare token 未配置，请在 .env 文件中设置 TUSHARE_TOKEN")
     return ts.pro_api(token)
@@ -43,6 +46,46 @@ class TushareNotConfiguredError(Exception):
 class TushareAPIError(Exception):
     """Tushare API 调用错误"""
     pass
+
+
+def _rate_limit_sleep():
+    """每次 pro.xxx() 调用前 sleep，per-API-call 粒度（满足 §7.4 ≥0.3s）"""
+    time.sleep(get_settings().tushare_rate_interval)
+
+
+def _is_rate_limit_error(exc) -> bool:
+    """检测 Tushare 频率限制错误"""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in ("频率", "rate", "每分钟", "limit", "too many"))
+
+
+def _get_backoff_delays():
+    """从 config 获取限频退避延迟列表 [10, 30, 60]"""
+    raw = get_settings().tushare_rate_limit_backoff
+    return [int(x.strip()) for x in raw.split(",") if x.strip()]
+
+
+def _retry_with_rate_limit(fetch_func, error_label: str):
+    """带限流 sleep + 限频退避 + 网络退避的重试包装"""
+    settings = get_settings()
+    max_retries = settings.tushare_max_retries
+    backoff_delays = _get_backoff_delays()
+    retry_delay = 1
+
+    for attempt in range(max_retries):
+        _rate_limit_sleep()
+        try:
+            return fetch_func()
+        except Exception as e:
+            if attempt < max_retries - 1:
+                if _is_rate_limit_error(e):
+                    delay = backoff_delays[min(attempt, len(backoff_delays) - 1)]
+                    time.sleep(delay)
+                else:
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                continue
+            raise TushareAPIError(f"{error_label}: {str(e)}")
 
 
 def get_trade_calendar(year: int, exchange: str = "SSE") -> List[Dict[str, Any]]:
@@ -66,24 +109,15 @@ def get_trade_calendar(year: int, exchange: str = "SSE") -> List[Dict[str, Any]]
     start_date = f"{year}0101"
     end_date = f"{year}1231"
 
-    max_retries = 3
-    retry_delay = 1
-
-    for attempt in range(max_retries):
-        try:
-            df = pro.trade_cal(
-                exchange=exchange,
-                start_date=start_date,
-                end_date=end_date,
-                fields="cal_date,is_open"
-            )
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            raise TushareAPIError(f"获取交易日历失败: {str(e)}")
+    df = _retry_with_rate_limit(
+        lambda: pro.trade_cal(
+            exchange=exchange,
+            start_date=start_date,
+            end_date=end_date,
+            fields="cal_date,is_open",
+        ),
+        "获取交易日历失败",
+    )
 
     if df is None or df.empty:
         return []
@@ -138,24 +172,16 @@ def get_fund_daily(
     """
     pro = _get_tushare_pro()
 
-    max_retries = 3
-    retry_delay = 1
+    kwargs = {"ts_code": ts_code}
+    if start_date:
+        kwargs["start_date"] = start_date
+    if end_date:
+        kwargs["end_date"] = end_date
 
-    for attempt in range(max_retries):
-        try:
-            kwargs = {"ts_code": ts_code}
-            if start_date:
-                kwargs["start_date"] = start_date
-            if end_date:
-                kwargs["end_date"] = end_date
-            df = pro.fund_daily(**kwargs)
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            raise TushareAPIError(f"获取基金日线行情失败: {str(e)}")
+    df = _retry_with_rate_limit(
+        lambda: pro.fund_daily(**kwargs),
+        "获取基金日线行情失败",
+    )
 
     if df is None or df.empty:
         return []
@@ -190,24 +216,16 @@ def get_fund_nav(
     """
     pro = _get_tushare_pro()
 
-    max_retries = 3
-    retry_delay = 1
+    kwargs = {"ts_code": ts_code}
+    if start_date:
+        kwargs["start_date"] = start_date
+    if end_date:
+        kwargs["end_date"] = end_date
 
-    for attempt in range(max_retries):
-        try:
-            kwargs = {"ts_code": ts_code}
-            if start_date:
-                kwargs["start_date"] = start_date
-            if end_date:
-                kwargs["end_date"] = end_date
-            df = pro.fund_nav(**kwargs)
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            raise TushareAPIError(f"获取基金净值失败: {str(e)}")
+    df = _retry_with_rate_limit(
+        lambda: pro.fund_nav(**kwargs),
+        "获取基金净值失败",
+    )
 
     if df is None or df.empty:
         return []

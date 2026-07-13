@@ -16,6 +16,7 @@ from app.models.audit_log import AuditLog
 from app.models.scheduled_task import ScheduledTask
 from app.models.task_execution_log import TaskExecutionLog
 from app.models.nav_sync_detail import NavSyncDetail
+from app.models.sync_job import SyncJob
 from app.models.system_error_log import SystemErrorLog
 from app.models.notification import Notification
 from app.models.idempotency_cache import IdempotencyCache
@@ -40,6 +41,7 @@ __all__ = [
     "ScheduledTask",
     "TaskExecutionLog",
     "NavSyncDetail",
+    "SyncJob",
     "SystemErrorLog",
     "Notification",
     "IdempotencyCache",

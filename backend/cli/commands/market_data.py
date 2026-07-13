@@ -79,3 +79,34 @@ def sync_nav(
 
         result = sync_portfolio_nav(db, portfolio_code)
         success(data=result)
+
+
+@app.command("sync-all")
+def sync_all(
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="YYYY-MM-DD 历史回填起点"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="YYYY-MM-DD，默认昨天"),
+    scope: str = typer.Option("all", "--scope", help="all|by-product"),
+    products: Optional[str] = typer.Option(None, "--products", help="逗号分隔 code|market 对，如 000051.OF|CN_OTC"),
+):
+    """提交批量价格同步后台任务（立即返回 job_id）"""
+    with cli_context() as db:
+        from app.services.market_data_service import submit_price_sync_job, ConflictError
+
+        prod_list = []
+        if products:
+            for pair in products.split(","):
+                code, _, mkt = pair.partition("|")
+                prod_list.append([code.strip(), mkt.strip()])
+
+        params = {
+            "job_type": "price_history_sync" if start_date else "price_incremental_sync",
+            "start_date": start_date,
+            "end_date": end_date,
+            "scope": scope,
+            "products": prod_list,
+        }
+        try:
+            job_id = submit_price_sync_job(params, triggered_by="manual", db=db)
+            success(data={"job_id": job_id, "message": "任务已提交，用 ir sync-job status <id> 查看进度"})
+        except ConflictError:
+            error("CONFLICT", "已有价格同步任务在运行中")

@@ -225,11 +225,17 @@ def init_products(session):
         {'code': '100050.OF', 'market': 'CN_OTC', 'name': '富国全球债券(QDII)人民币A', 'product_type': 'OEF', 'asset_class_code': 'BOND_GLOBAL', 'confirm_days': 2, 'is_qdii': True},
         {'code': '007360.OF', 'market': 'CN_OTC', 'name': '易方达中短期美元债(QDII)A人民币', 'product_type': 'OEF', 'asset_class_code': 'BOND_US', 'confirm_days': 2, 'is_qdii': True},
         {'code': '007204.OF', 'market': 'CN_OTC', 'name': '银华美元债精选债券(QDII)A', 'product_type': 'OEF', 'asset_class_code': 'BOND_US', 'confirm_days': 2, 'is_qdii': True},
-        {'code': '1001767346', 'market': 'CN_OTC', 'name': '摩根国际债券人民币', 'product_type': 'OEF', 'asset_class_code': 'BOND_GLOBAL', 'confirm_days': 1, 'is_qdii': False},
-        {'code': '1001767344', 'market': 'CN_OTC', 'name': '摩根国际债券人民币对冲', 'product_type': 'OEF', 'asset_class_code': 'BOND_GLOBAL', 'confirm_days': 1, 'is_qdii': False},
+        {'code': '1001767346', 'market': 'HK_MUTUAL', 'name': '摩根国际债券人民币', 'product_type': 'OEF', 'asset_class_code': 'BOND_GLOBAL', 'confirm_days': 1, 'is_qdii': False, 'data_source': 'akshare'},
+        {'code': '1001767344', 'market': 'HK_MUTUAL', 'name': '摩根国际债券人民币对冲', 'product_type': 'OEF', 'asset_class_code': 'BOND_GLOBAL', 'confirm_days': 1, 'is_qdii': False, 'data_source': 'akshare'},
         {'code': '162411.SZ', 'market': 'CN_OTC', 'name': '华宝标普油气上游股票人民币A', 'product_type': 'OEF', 'asset_class_code': 'STOCK_GLOBAL', 'confirm_days': 2, 'is_qdii': True},
         {'code': '000369.OF', 'market': 'CN_OTC', 'name': '广发全球医疗保健A人民币', 'product_type': 'OEF', 'asset_class_code': 'STOCK_GLOBAL', 'confirm_days': 1, 'is_qdii': False},
     ]
+    
+    session.query(Product).filter(
+        Product.code.in_(['1001767344', '1001767346']),
+        Product.market == 'CN_OTC',
+    ).delete(synchronize_session=False)
+    session.commit()
     
     for prod_data in products:
         existing = session.query(Product).filter(

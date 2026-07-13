@@ -1,0 +1,121 @@
+"""
+Tushare 客户端限流增强测试（P5.1）
+
+验证：
+- per-API-call sleep（每次 pro.xxx() 调用前 sleep）
+- 限频退避（10s→30s→60s 指数退避）
+- 重试耗尽后抛 TushareAPIError
+"""
+import pytest
+from unittest.mock import patch, MagicMock
+from app.services import tushare_client
+from app.services.tushare_client import TushareAPIError
+
+
+class TestPerApiCallSleep:
+    """验证每次 API 调用前都 sleep"""
+
+    @patch("app.services.tushare_client.time.sleep")
+    @patch("app.services.tushare_client._get_tushare_pro")
+    def test_sleep_before_each_api_call(self, mock_get_pro, mock_sleep):
+        """每次 pro.fund_daily() 调用前应 sleep（per-API-call 粒度）"""
+        mock_pro = MagicMock()
+        mock_df = MagicMock()
+        mock_df.empty = False
+        mock_df.iterrows.return_value = []
+        mock_pro.fund_daily.return_value = mock_df
+        mock_get_pro.return_value = mock_pro
+
+        tushare_client.get_fund_daily("510300.SH", "20250101", "20250110")
+
+        sleep_count = mock_sleep.call_count
+        assert sleep_count >= 1, "至少调用一次 sleep（per-API-call）"
+
+    @patch("app.services.tushare_client.time.sleep")
+    @patch("app.services.tushare_client._get_tushare_pro")
+    def test_sleep_count_equals_retry_count_on_success(self, mock_get_pro, mock_sleep):
+        """成功路径：sleep 次数 == pro 调用次数（1次调用 1次 sleep）"""
+        mock_pro = MagicMock()
+        mock_df = MagicMock()
+        mock_df.empty = False
+        mock_df.iterrows.return_value = []
+        mock_pro.fund_daily.return_value = mock_df
+        mock_get_pro.return_value = mock_pro
+
+        tushare_client.get_fund_daily("510300.SH", None, None)
+
+        assert mock_sleep.call_count == 1, "成功路径 sleep 1次"
+
+
+class TestRateLimitBackoff:
+    """验证限频退避（10→30→60s）"""
+
+    @patch("app.services.tushare_client.time.sleep")
+    @patch("app.services.tushare_client._get_tushare_pro")
+    def test_rate_limit_error_triggers_backoff(self, mock_get_pro, mock_sleep):
+        """限频错误触发 10→30→60s 退避"""
+        mock_pro = MagicMock()
+        mock_pro.fund_daily.side_effect = Exception("操作频率超限，每分钟最多200次")
+        mock_get_pro.return_value = mock_pro
+
+        try:
+            tushare_client.get_fund_daily("510300.SH", None, None)
+            assert False, "应抛 TushareAPIError"
+        except TushareAPIError:
+            pass
+
+        sleep_calls = [c.args[0] for c in mock_sleep.call_args_list]
+        backoff_calls = [s for s in sleep_calls if s in (10, 30, 60)]
+        assert len(backoff_calls) >= 1, f"应有限频退避调用，got: {sleep_calls}"
+
+    @patch("app.services.tushare_client.time.sleep")
+    @patch("app.services.tushare_client._get_tushare_pro")
+    def test_network_error_uses_exponential_backoff(self, mock_get_pro, mock_sleep):
+        """网络错误用 1→2→4s 退避（非限频退避 10→30→60）"""
+        mock_pro = MagicMock()
+        mock_pro.fund_daily.side_effect = ConnectionError("network timeout")
+        mock_get_pro.return_value = mock_pro
+
+        try:
+            tushare_client.get_fund_daily("510300.SH", None, None)
+            assert False, "应抛 TushareAPIError"
+        except TushareAPIError:
+            pass
+
+        sleep_calls = [c.args[0] for c in mock_sleep.call_args_list]
+        # 首次 sleep 是 rate_interval（0.5s），后续是退避
+        backoff_calls = [s for s in sleep_calls if s in (1, 2)]
+        assert len(backoff_calls) >= 1, f"应有网络退避调用（1s 或 2s），got: {sleep_calls}"
+
+
+class TestMaxRetriesExhausted:
+    """验证重试耗尽后抛 TushareAPIError"""
+
+    @patch("app.services.tushare_client.time.sleep")
+    @patch("app.services.tushare_client._get_tushare_pro")
+    def test_all_retries_exhausted_raises_error(self, mock_get_pro, mock_sleep):
+        """连续失败后抛 TushareAPIError"""
+        mock_pro = MagicMock()
+        mock_pro.fund_daily.side_effect = Exception("持续失败")
+        mock_get_pro.return_value = mock_pro
+
+        with pytest.raises(TushareAPIError, match="获取基金日线行情失败"):
+            tushare_client.get_fund_daily("510300.SH", None, None)
+
+    @patch("app.services.tushare_client.time.sleep")
+    @patch("app.services.tushare_client._get_tushare_pro")
+    def test_succeeds_after_retry(self, mock_get_pro, mock_sleep):
+        """首次失败后重试成功"""
+        from app.config import get_settings
+        get_settings.cache_clear()
+
+        mock_pro = MagicMock()
+        mock_df = MagicMock()
+        mock_df.empty = True
+        mock_pro.fund_daily.side_effect = [ConnectionError("timeout"), mock_df]
+        mock_get_pro.return_value = mock_pro
+
+        result = tushare_client.get_fund_daily("510300.SH", None, None)
+        assert result == [], "重试成功后返回空列表"
+
+        get_settings.cache_clear()

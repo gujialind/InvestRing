@@ -85,7 +85,7 @@ def get_latest_price(
     return query.order_by(PriceRecord.date.desc()).first()
 
 
-def sync_price_data(
+def sync_product_prices(
     db: Session,
     product_code: str,
     market: str,
@@ -93,134 +93,171 @@ def sync_price_data(
     end_date: Optional[date] = None,
 ) -> Dict[str, Any]:
     """
-    同步产品价格数据
-
-    Args:
-        db: 数据库会话
-        product_code: 产品代码
-        market: 市场类型
-        start_date: 开始日期，不传则从有数据以来全部同步
-        end_date: 结束日期，默认今天
-
-    Returns:
-        同步结果统计
+    单产品价格同步（改造版）。
+    数据源路由 + 批量 upsert + 禁止硬编码 data_source + sync_error/source 回写。
+    返回 {success, synced_count, message, source}
     """
     product = db.query(Product).filter(
-        and_(
-            Product.code == product_code,
-            Product.market == market,
-        )
+        and_(Product.code == product_code, Product.market == market)
     ).first()
-
     if not product:
         raise ValueError(f"产品 {product_code} ({market}) 不存在")
 
     if not end_date:
         end_date = date.today()
-
     start_str = start_date.strftime("%Y%m%d") if start_date else None
     end_str = end_date.strftime("%Y%m%d")
 
-    raw_data = []
-    error_detail = None
+    data_source = product.data_source or "tushare"
+    raw_data: List[dict] = []
     try:
-        if market == "CN_EXCHANGE":
-            raw_data = get_fund_daily(product_code, start_str, end_str)
-        elif market == "CN_OTC":
-            raw_data = get_fund_nav(product_code, start_str, end_str)
+        if data_source == "tushare":
+            if market == "CN_EXCHANGE":
+                raw_data = get_fund_daily(product_code, start_str, end_str)
+            elif market == "CN_OTC":
+                raw_data = get_fund_nav(product_code, start_str, end_str)
+            elif market == "HK_MUTUAL":
+                _mark_skipped(db, product, "tushare 不支持 HK_MUTUAL")
+                return {"success": True, "synced_count": 0, "message": "跳过：tushare 不支持 HK_MUTUAL", "source": data_source}
+            else:
+                raise ValueError(f"不支持的 market: {market}")
+        elif data_source == "akshare":
+            from app.services.akshare_client import (
+                get_fund_nav_otc, get_fund_daily_exchange, get_fund_hk_mutual,
+                AkshareAPIError,
+            )
+            if market == "CN_OTC":
+                raw_data = get_fund_nav_otc(product_code, start_str, end_str)
+            elif market == "CN_EXCHANGE":
+                raw_data = get_fund_daily_exchange(product_code, start_str, end_str)
+            elif market == "HK_MUTUAL":
+                raw_data = get_fund_hk_mutual(product_code, start_str, end_str)
+            else:
+                _mark_skipped(db, product, f"akshare 不支持 market={market}")
+                return {"success": True, "synced_count": 0, "message": "跳过", "source": data_source}
         else:
-            raise ValueError(f"不支持的市场类型: {market}")
-    except TushareAPIError as e:
-        return {"success": False, "message": str(e), "synced_count": 0}
-    except Exception as e:
-        return {"success": False, "message": f"数据获取异常: {type(e).__name__}: {e}", "synced_count": 0}
+            _mark_skipped(db, product, f"未实现的数据源: {data_source}")
+            return {"success": True, "synced_count": 0, "message": f"跳过：未实现 {data_source}", "source": data_source}
+    except (TushareAPIError, Exception) as e:
+        _mark_failed(db, product, f"{type(e).__name__}: {e}")
+        return {"success": False, "message": str(e), "synced_count": 0, "source": data_source}
 
     if not raw_data:
-        return {
-            "success": True,
-            "message": f"无新数据需要同步（{start_str or 'beginning'}~{end_str}，共 0 条）",
-            "synced_count": 0,
-        }
-
-    # 去重：Tushare 可能返回同一天多条记录，保留最后一条
-    seen_dates: dict[str, dict] = {}
-    for record in raw_data:
-        td = record.get("trade_date")
-        if td:
-            seen_dates[td] = record
-    raw_data = list(seen_dates.values())
-
-    synced_count = 0
-    try:
-        # 一次性加载该产品在该市场的所有已有记录到内存字典
-        filters = [
-            PriceRecord.product_code == product_code,
-            PriceRecord.market == market,
-            PriceRecord.date <= end_date,
-        ]
-        if start_date:
-            filters.append(PriceRecord.date >= start_date)
-        existing_records = db.query(PriceRecord).filter(and_(*filters)).all()
-        existing_map: dict[date, PriceRecord] = {r.date: r for r in existing_records}
-
-        for record in raw_data:
-            trade_date_str = record.get("trade_date")
-            if not trade_date_str:
-                continue
-
-            trade_date = datetime.strptime(trade_date_str, "%Y%m%d").date()
-
-            if market == "CN_EXCHANGE":
-                unit_price = record.get("close")
-            else:
-                unit_price = record.get("unit_nav")
-
-            if not unit_price:
-                continue
-
-            existing = existing_map.get(trade_date)
-            if existing:
-                existing.unit_price = unit_price
-                if market == "CN_EXCHANGE":
-                    existing.pre_close = record.get("pre_close")
-                    existing.pct_change = record.get("pct_chg")
-                elif market == "CN_OTC":
-                    existing.accumulated_nav = record.get("accum_nav")
-                existing.source = "tushare"
-            else:
-                new_record = PriceRecord(
-                    product_code=product_code,
-                    market=market,
-                    date=trade_date,
-                    unit_price=unit_price,
-                    source="tushare",
-                )
-                if market == "CN_EXCHANGE":
-                    new_record.pre_close = record.get("pre_close")
-                    new_record.pct_change = record.get("pct_chg")
-                elif market == "CN_OTC":
-                    new_record.accumulated_nav = record.get("accum_nav")
-                db.add(new_record)
-
-            synced_count += 1
-
+        product.data_source_status = "success"
+        product.last_sync_at = datetime.utcnow()
+        product.sync_error = None
         db.commit()
-    except Exception as e:
-        db.rollback()
-        product.data_source_status = "failed"
-        db.commit()
-        return {"success": False, "message": f"数据写入异常: {type(e).__name__}: {e}", "synced_count": 0}
+        return {"success": True, "message": "无新数据", "synced_count": 0, "source": data_source}
+
+    normalized = _normalize_raw(raw_data, market)
+    synced_count = _bulk_upsert_prices(db, product_code, market, normalized, data_source)
+    db.commit()
 
     product.data_source_status = "success"
-    product.data_source = "tushare"
+    product.last_sync_at = datetime.utcnow()
+    product.sync_error = None
+    db.commit()
+
+    return {"success": True, "message": f"同步 {synced_count} 条", "synced_count": synced_count, "source": data_source}
+
+
+def sync_price_data(
+    db: Session,
+    product_code: str,
+    market: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> Dict[str, Any]:
+    """向后兼容包装（CLI ir market sync / 现有 router 调用）"""
+    return sync_product_prices(db, product_code, market, start_date, end_date)
+
+
+def _mark_failed(db: Session, product: Product, msg: str):
+    product.data_source_status = "failed"
+    product.sync_error = msg[:1000] if msg else msg
     product.last_sync_at = datetime.utcnow()
     db.commit()
 
-    return {
-        "success": True,
-        "message": f"成功同步 {synced_count} 条价格数据",
-        "synced_count": synced_count,
-    }
+
+def _mark_skipped(db: Session, product: Product, reason: str):
+    product.data_source_status = "skipped"
+    product.sync_error = reason
+    product.last_sync_at = datetime.utcnow()
+    db.commit()
+
+
+def _normalize_raw(raw_data: List[dict], market: str) -> List[dict]:
+    """统一适配：tushare/akshare 返回 -> {trade_date(YYYYMMDD), unit_price, accumulated_nav, pre_close, pct_change}"""
+    seen: dict[str, dict] = {}
+    for r in raw_data:
+        td = r.get("trade_date")
+        if not td:
+            continue
+        if market == "CN_EXCHANGE":
+            seen[td] = {
+                "trade_date": td,
+                "unit_price": r.get("close"),
+                "pre_close": r.get("pre_close"),
+                "pct_change": r.get("pct_chg") or r.get("pct_change"),
+            }
+        else:
+            seen[td] = {
+                "trade_date": td,
+                "unit_price": r.get("unit_nav") or r.get("unit_price"),
+                "accumulated_nav": r.get("accum_nav") or r.get("accumulated_nav"),
+            }
+    return list(seen.values())
+
+
+def _bulk_upsert_prices(
+    db: Session,
+    product_code: str,
+    market: str,
+    rows: List[dict],
+    source: str,
+) -> int:
+    """批量 upsert。MySQL 用 ON DUPLICATE KEY UPDATE，SQLite 用 ORM fallback（测试环境）。"""
+    from sqlalchemy import text
+
+    if not rows:
+        return 0
+
+    values = []
+    for r in rows:
+        td = r["trade_date"]
+        d = date(int(td[:4]), int(td[4:6]), int(td[6:8]))
+        values.append({
+            "product_code": product_code,
+            "market": market,
+            "date": d,
+            "unit_price": r.get("unit_price"),
+            "accumulated_nav": r.get("accumulated_nav"),
+            "pre_close": r.get("pre_close"),
+            "pct_change": r.get("pct_change"),
+            "source": source,
+        })
+
+    if db.bind.dialect.name == "mysql":
+        sql = text("""
+            INSERT INTO price_record (product_code, market, date, unit_price, accumulated_nav, pre_close, pct_change, source)
+            VALUES (:product_code, :market, :date, :unit_price, :accumulated_nav, :pre_close, :pct_change, :source)
+            ON DUPLICATE KEY UPDATE
+              unit_price=VALUES(unit_price), accumulated_nav=VALUES(accumulated_nav),
+              pre_close=VALUES(pre_close), pct_change=VALUES(pct_change), source=VALUES(source)
+        """)
+        db.execute(sql, values)
+    else:
+        for v in values:
+            existing = db.query(PriceRecord).filter_by(
+                product_code=v["product_code"], market=v["market"], date=v["date"]
+            ).first()
+            if existing:
+                for k in ("unit_price", "accumulated_nav", "pre_close", "pct_change", "source"):
+                    setattr(existing, k, v[k])
+            else:
+                db.add(PriceRecord(**v))
+
+    return len(values)
 
 
 def sync_portfolio_nav(
@@ -317,4 +354,192 @@ def sync_portfolio_nav(
     }
 
 
+# ==================== 后台任务编排（P3.1） ====================
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from app.config import get_settings
+
+_executor: Optional[ThreadPoolExecutor] = None
+_executor_lock = threading.Lock()
+
+
+class ConflictError(Exception):
+    """已有同步任务在运行中"""
+    pass
+
+
+def _get_executor() -> ThreadPoolExecutor:
+    global _executor
+    if _executor is None:
+        with _executor_lock:
+            if _executor is None:
+                _executor = ThreadPoolExecutor(
+                    max_workers=get_settings().sync_worker_count,
+                    thread_name_prefix="price-sync",
+                )
+    return _executor
+
+
+def submit_price_sync_job(
+    params: dict,
+    triggered_by: str = "manual",
+    db: Optional[Session] = None,
+) -> int:
+    """提交价格同步后台任务，立即返回 job_id。单 running 锁：已有 running job 则抛 ConflictError。"""
+    from app.database import SessionLocal
+    from app.models.sync_job import SyncJob
+
+    own_db = db is None
+    if own_db:
+        db = SessionLocal()
+    try:
+        running = db.query(SyncJob).filter(SyncJob.status == "running").count()
+        if running > 0:
+            raise ConflictError("已有价格同步任务在运行中")
+
+        job = SyncJob(
+            job_type=params.get("job_type", "price_history_sync"),
+            status="pending",
+            params=params,
+            triggered_by=triggered_by,
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        job_id = job.id
+    finally:
+        if own_db:
+            db.close()
+
+    _get_executor().submit(_run_price_sync_job_impl, job_id)
+    return job_id
+
+
+def _run_price_sync_job_impl(job_id: int):
+    """后台线程执行体：每个线程独立 Session。"""
+    from app.database import SessionLocal
+    from app.models.sync_job import SyncJob
+    from app.models.nav_sync_detail import NavSyncDetail
+    from sqlalchemy import func as sa_func
+
+    db = SessionLocal()
+    try:
+        job = db.query(SyncJob).filter(SyncJob.id == job_id).first()
+        if not job:
+            return
+        params = job.params or {}
+        job.status = "running"
+        job.started_at = datetime.utcnow()
+        db.commit()
+
+        scope = params.get("scope", "all")
+        if scope == "by_product":
+            target = params.get("products", [])
+            from sqlalchemy import or_, and_
+            conditions = [and_(Product.code == c, Product.market == m) for c, m in target]
+            if conditions:
+                products = db.query(Product).filter(or_(*conditions)).all()
+            else:
+                products = []
+        else:
+            products = db.query(Product).filter(
+                Product.market.in_(["CN_EXCHANGE", "CN_OTC", "HK_MUTUAL"]),
+                Product.data_source.in_(["tushare", "akshare"]),
+            ).all()
+
+        job.total = len(products)
+        db.commit()
+
+        for product in products:
+            try:
+                start_date = None
+                if params.get("job_type") == "price_incremental_sync":
+                    latest = db.query(sa_func.max(PriceRecord.date)).filter(
+                        PriceRecord.product_code == product.code,
+                        PriceRecord.market == product.market,
+                    ).scalar()
+                    if latest:
+                        start_date = latest + timedelta(days=1)
+                elif params.get("start_date"):
+                    start_date = datetime.strptime(params["start_date"], "%Y-%m-%d").date()
+
+                end_date = None
+                if params.get("end_date"):
+                    end_date = datetime.strptime(params["end_date"], "%Y-%m-%d").date()
+                else:
+                    end_date = date.today() - timedelta(days=1)
+
+                result = sync_product_prices(
+                    db=db,
+                    product_code=product.code,
+                    market=product.market,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+
+                status = "success" if result["success"] else "failed"
+                db.add(NavSyncDetail(
+                    job_id=job_id,
+                    product_code=product.code,
+                    market=product.market,
+                    nav_date=end_date.strftime("%Y-%m-%d"),
+                    status=status,
+                    synced_count=result.get("synced_count", 0),
+                    source=result.get("source"),
+                    error_message=None if status == "success" else result.get("message"),
+                ))
+                if status == "success":
+                    job.success_count += 1
+                else:
+                    job.failed_count += 1
+            except Exception as e:
+                db.add(NavSyncDetail(
+                    job_id=job_id,
+                    product_code=product.code,
+                    market=product.market,
+                    nav_date=date.today().strftime("%Y-%m-%d"),
+                    status="failed",
+                    error_message=str(e)[:500],
+                ))
+                job.failed_count += 1
+            job.done += 1
+            db.commit()
+
+        if job.failed_count == 0:
+            job.status = "success"
+        elif job.success_count > 0:
+            job.status = "partial"
+        else:
+            job.status = "failed"
+        job.finished_at = datetime.utcnow()
+        db.commit()
+
+    except Exception as e:
+        try:
+            job.status = "failed"
+            job.error_message = str(e)[:1000]
+            job.finished_at = datetime.utcnow()
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+def recover_orphan_jobs():
+    """启动时扫描 status='running' 的 sync_job，标记为 interrupted。"""
+    from app.database import SessionLocal
+    from app.models.sync_job import SyncJob
+
+    db = SessionLocal()
+    try:
+        orphans = db.query(SyncJob).filter(SyncJob.status == "running").all()
+        for job in orphans:
+            job.status = "interrupted"
+            job.error_message = (job.error_message or "") + " [启动时标记为 interrupted：可能上次崩溃遗留]"
+            job.finished_at = datetime.utcnow()
+        db.commit()
+        return len(orphans)
+    finally:
+        db.close()
