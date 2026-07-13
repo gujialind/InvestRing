@@ -65,14 +65,19 @@ def cleanup_old_logs(db: Session) -> dict:
     return deleted
 
 
-def run_nav_sync(db: Session, log_id: int) -> dict:
-    """执行净值同步任务"""
-    from app.services.market_data_service import sync_price_data
-    from app.services.snapshot_service import generate_daily_snapshots
+def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
+    """执行净值同步任务（§4.7 三步：基金列表→逐只净值→快照生成）。分红检测本期跳过（D1）。"""
+    from app.services.market_data_service import sync_product_prices
+    from app.services.snapshot_service import generate_daily_snapshots, auto_confirm_after_snapshot
     from app.models.trading_calendar import TradingCalendar
+    from app.models.price_record import PriceRecord
+    from sqlalchemy import func
+
+    target_date = (datetime.now().date() - timedelta(days=1))
 
     products = db.query(Product).filter(
-        Product.market.in_(["CN_EXCHANGE", "CN_OTC"])
+        Product.market.in_(["CN_EXCHANGE", "CN_OTC", "HK_MUTUAL"]),
+        Product.data_source.in_(["tushare", "akshare"]),
     ).all()
 
     if not products:
@@ -81,6 +86,7 @@ def run_nav_sync(db: Session, log_id: int) -> dict:
             "products_count": 0,
             "failed_products": [],
             "snapshots_generated": 0,
+            "target_date": target_date.isoformat(),
         }
 
     total_synced = 0
@@ -88,84 +94,86 @@ def run_nav_sync(db: Session, log_id: int) -> dict:
 
     for product in products:
         try:
-            result = sync_price_data(
+            latest = db.query(func.max(PriceRecord.date)).filter(
+                PriceRecord.product_code == product.code,
+                PriceRecord.market == product.market,
+            ).scalar()
+            start_date = (latest + timedelta(days=1)) if latest else None
+
+            result = sync_product_prices(
                 db=db,
                 product_code=product.code,
                 market=product.market,
-                start_date=(datetime.now() - timedelta(days=7)).date(),
-                end_date=datetime.now().date(),
+                start_date=start_date,
+                end_date=target_date,
             )
 
             if result["success"]:
                 total_synced += result.get("synced_count", 0)
-                sync_detail = NavSyncDetail(
+                db.add(NavSyncDetail(
                     task_log_id=log_id,
                     product_code=product.code,
                     market=product.market,
-                    nav_date=datetime.now().strftime("%Y-%m-%d"),
+                    nav_date=target_date.strftime("%Y-%m-%d"),
                     status="success",
-                    nav_value=0,
-                )
-                db.add(sync_detail)
+                    synced_count=result.get("synced_count", 0),
+                    source=result.get("source"),
+                ))
             else:
                 failed_products.append(product.code)
-                sync_detail = NavSyncDetail(
+                db.add(NavSyncDetail(
                     task_log_id=log_id,
                     product_code=product.code,
                     market=product.market,
-                    nav_date=datetime.now().strftime("%Y-%m-%d"),
+                    nav_date=target_date.strftime("%Y-%m-%d"),
                     status="failed",
                     error_message=result.get("message", "未知错误"),
-                )
-                db.add(sync_detail)
-
+                ))
         except Exception as e:
             failed_products.append(product.code)
-            sync_detail = NavSyncDetail(
+            db.add(NavSyncDetail(
                 task_log_id=log_id,
                 product_code=product.code,
                 market=product.market,
-                nav_date=datetime.now().strftime("%Y-%m-%d"),
+                nav_date=target_date.strftime("%Y-%m-%d"),
                 status="failed",
-                error_message=str(e),
-            )
-            db.add(sync_detail)
+                error_message=str(e)[:500],
+            ))
 
     db.commit()
 
-    # 净值同步完成后，自动触发当日快照生成
-    snapshots_generated = 0
-    if not failed_products:
-        try:
-            today = datetime.now().date()
-            cal = db.query(TradingCalendar).filter(
-                TradingCalendar.date == today
-            ).first()
-
-            if cal and cal.is_open:
-                active_portfolios = db.query(Portfolio).filter(
-                    Portfolio.status == "active"
-                ).all()
-
-                for portfolio in active_portfolios:
-                    try:
-                        generate_daily_snapshots(
-                            db=db,
-                            portfolio_code=portfolio.code,
-                            target_date=today
-                        )
-                        snapshots_generated += 1
-                    except Exception as e:
-                        logger.error(f"组合 {portfolio.code} 快照生成失败: {str(e)}")
-        except Exception as e:
-            logger.error(f"自动快照生成失败: {str(e)}")
+    snapshots_generated = _generate_snapshots_for_date(db, target_date)
 
     return {
         "synced_count": total_synced,
         "products_count": len(products),
         "failed_products": failed_products,
         "snapshots_generated": snapshots_generated,
+        "target_date": target_date.isoformat(),
     }
+
+
+def _generate_snapshots_for_date(db: Session, target_date) -> int:
+    """为 target_date 生成所有活跃组合快照，并复用 auto_confirm_after_snapshot。"""
+    from app.services.snapshot_service import generate_daily_snapshots, auto_confirm_after_snapshot
+    from app.models.trading_calendar import TradingCalendar
+
+    cal = db.query(TradingCalendar).filter(TradingCalendar.date == target_date).first()
+    if not cal or not cal.is_open:
+        return 0
+
+    active_portfolios = db.query(Portfolio).filter(Portfolio.status == "active").all()
+    count = 0
+    for portfolio in active_portfolios:
+        try:
+            generate_daily_snapshots(db=db, portfolio_code=portfolio.code, target_date=target_date)
+            auto_confirm_after_snapshot(db=db, portfolio_code=portfolio.code, snapshot_date=target_date)
+            db.commit()
+            count += 1
+        except Exception as e:
+            db.rollback()
+            logger.error(f"组合 {portfolio.code} 快照生成失败: {str(e)}")
+    return count
 
 
 def run_calendar_sync(db: Session, year: Optional[int] = None) -> dict:

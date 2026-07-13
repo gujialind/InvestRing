@@ -24,6 +24,7 @@ os.environ.setdefault(
 )
 # 确保 DEBUG 不会因 .env 文件干扰测试
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing")
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
@@ -137,6 +138,8 @@ def _seed_base_data(test_engine):
              "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 1, "is_qdii": False},
             {"code": "270042.OF", "market": "CN_OTC", "name": "广发纳指100(QDII)A", "product_type": "OEF",
              "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 2, "is_qdii": True},
+            {"code": "1001767344", "market": "HK_MUTUAL", "name": "摩根国际债券人民币对冲", "product_type": "OEF",
+             "asset_class_code": "BOND_LONG", "confirm_days": 1, "is_qdii": False, "data_source": "akshare"},
         ]
         for p in products:
             if not db.query(Product).filter(

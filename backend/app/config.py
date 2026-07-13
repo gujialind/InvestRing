@@ -17,7 +17,23 @@ class Settings(BaseSettings):
     
     # Tushare API
     tushare_token: str = ""
-    
+    tushare_rate_interval: float = 0.5
+    tushare_max_retries: int = 3
+    tushare_rate_limit_backoff: str = "10,30,60"
+
+    # AkShare API
+    akshare_enabled: bool = False
+    akshare_rate_interval: float = 1.0
+    akshare_max_retries: int = 3
+
+    # 后台线程池
+    sync_worker_count: int = 2
+
+    # APScheduler
+    scheduler_enabled: bool = True
+    scheduler_cron_daily: str = "0 7 * * *"
+    scheduler_jobstore_table: str = "apscheduler_jobs"
+
     # Application
     app_name: str = "InvestRing"
     debug: bool = True
