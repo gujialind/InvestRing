@@ -5,7 +5,7 @@
 # 所有函数接收 db session 作为第一个参数，并在创建后自动 commit。
 # ============================================================================
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -16,6 +16,7 @@ from app.models import (
     AssetClassification, TradingCalendar, PriceRecord,
     PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
     Subscription, Trade, ShareChangeEvent,
+    SyncJob, ManualMarketValue, Notification, IdempotencyCache,
 )
 from app.utils.security import get_password_hash
 
@@ -237,21 +238,33 @@ def create_trade(
     fee: float = 0.0,
     platform_code: str = "MYCF",
     trade_date: date = date(2025, 1, 6),
+    confirm_date: Optional[date] = None,
+    actual_amount: Optional[float] = None,
+    transfer_group: Optional[str] = None,
     status: str = "pending",
+    notes: Optional[str] = None,
 ) -> Trade:
-    """创建调仓交易记录"""
+    """创建调仓交易记录。
+
+    confirm_date：Trade 创建时按 product.confirm_days 计算，测试中可显式传入。
+    transfer_group：配对 CASH trade 的关联标识，普通调仓不传。
+    """
     trade = Trade(
         portfolio_code=portfolio_code,
         platform_code=platform_code,
         product_code=product_code,
         market=market,
         trade_type=trade_type,
+        transfer_group=transfer_group,
         amount=Decimal(str(amount)),
-        shares=Decimal(str(shares)) if shares else None,
-        price=Decimal(str(price)) if price else None,
+        shares=Decimal(str(shares)) if shares is not None else None,
+        price=Decimal(str(price)) if price is not None else None,
         fee=Decimal(str(fee)),
+        actual_amount=Decimal(str(actual_amount)) if actual_amount is not None else None,
         trade_date=trade_date,
+        confirm_date=confirm_date,
         status=status,
+        notes=notes,
     )
     db.add(trade)
     db.commit()
@@ -275,8 +288,16 @@ def create_position_snapshot(
     cost_price: Optional[float] = 1.5,
     market_value: float = 0.0,
     platform_code: Optional[str] = None,
+    frozen_shares: Optional[float] = None,
+    frozen_amount: Optional[float] = None,
+    asset_type: Optional[str] = None,
 ) -> PortfolioPosition:
-    """创建持仓快照（注意：shares 和 amount 二选一）"""
+    """创建持仓快照。
+
+    CHECK 约束：shares 和 amount 二选一，不能同时为 None 或同时非 None。
+    - 净值型资产（ETF/OEF/LOF）：传 shares，不传 amount
+    - 非净值型资产（CASH）：传 amount，不传 shares
+    """
     pos = PortfolioPosition(
         portfolio_code=portfolio_code,
         platform_code=platform_code,
@@ -284,9 +305,12 @@ def create_position_snapshot(
         market=market,
         shares=Decimal(str(shares)) if shares is not None else None,
         amount=Decimal(str(amount)) if amount is not None else None,
-        unit_price=Decimal(str(unit_price)) if unit_price else None,
-        cost_price=Decimal(str(cost_price)) if cost_price else None,
+        unit_price=Decimal(str(unit_price)) if unit_price is not None else None,
+        cost_price=Decimal(str(cost_price)) if cost_price is not None else None,
         market_value=Decimal(str(market_value)),
+        frozen_shares=Decimal(str(frozen_shares)) if frozen_shares is not None else Decimal("0"),
+        frozen_amount=Decimal(str(frozen_amount)) if frozen_amount is not None else Decimal("0"),
+        asset_type=asset_type,
         snapshot_date=snapshot_date,
     )
     db.add(pos)
@@ -345,6 +369,130 @@ def create_investor_holding(
     db.commit()
     db.refresh(holding)
     return holding
+
+
+# ---------------------------------------------------------------------------
+# 同步任务（SyncJob）
+# ---------------------------------------------------------------------------
+
+def create_sync_job(
+    db: Session,
+    job_type: str = "price_history_sync",
+    status: str = "pending",
+    triggered_by: str = "manual",
+    params: Optional[dict] = None,
+    total: int = 0,
+    done: int = 0,
+    success_count: int = 0,
+    failed_count: int = 0,
+    skipped_count: int = 0,
+    error_message: Optional[str] = None,
+) -> SyncJob:
+    """创建同步任务记录"""
+    job = SyncJob(
+        job_type=job_type,
+        status=status,
+        triggered_by=triggered_by,
+        params=params,
+        total=total,
+        done=done,
+        success_count=success_count,
+        failed_count=failed_count,
+        skipped_count=skipped_count,
+        error_message=error_message,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+# ---------------------------------------------------------------------------
+# 手动市值覆盖（ManualMarketValue）
+# ---------------------------------------------------------------------------
+
+def create_manual_market_value(
+    db: Session,
+    portfolio_code: str,
+    platform_code: str,
+    product_code: str,
+    record_date: date,
+    market_value: float,
+    computed_value: Optional[float] = None,
+    created_by: Optional[str] = None,
+) -> ManualMarketValue:
+    """创建手动市值覆盖记录（绝对替换，用于非净值型资产重估）"""
+    mmv = ManualMarketValue(
+        portfolio_code=portfolio_code,
+        platform_code=platform_code,
+        product_code=product_code,
+        date=record_date,
+        market_value=Decimal(str(market_value)),
+        computed_value=Decimal(str(computed_value)) if computed_value is not None else None,
+        created_by=created_by,
+    )
+    db.add(mmv)
+    db.commit()
+    db.refresh(mmv)
+    return mmv
+
+
+# ---------------------------------------------------------------------------
+# 通知（Notification）
+# ---------------------------------------------------------------------------
+
+def create_notification(
+    db: Session,
+    type: str = "info",
+    title: str = "测试通知",
+    content: Optional[str] = None,
+    level: str = "info",
+    recipient: Optional[str] = None,
+    channel: str = "in_app",
+    status: str = "pending",
+) -> Notification:
+    """创建通知记录"""
+    n = Notification(
+        type=type,
+        title=title,
+        content=content,
+        level=level,
+        recipient=recipient,
+        channel=channel,
+        status=status,
+    )
+    db.add(n)
+    db.commit()
+    db.refresh(n)
+    return n
+
+
+# ---------------------------------------------------------------------------
+# 幂等性缓存（IdempotencyCache）
+# ---------------------------------------------------------------------------
+
+def create_idempotency_cache(
+    db: Session,
+    key: str,
+    portfolio_code: str = "PORT001",
+    request_hash: str = "abc123",
+    response: str = "{}",
+    expires_at: Optional[datetime] = None,
+) -> IdempotencyCache:
+    """创建幂等性缓存记录（24 小时过期）"""
+    if expires_at is None:
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+    cache = IdempotencyCache(
+        key=key,
+        portfolio_code=portfolio_code,
+        request_hash=request_hash,
+        response=response,
+        expires_at=expires_at,
+    )
+    db.add(cache)
+    db.commit()
+    db.refresh(cache)
+    return cache
 
 
 # ---------------------------------------------------------------------------

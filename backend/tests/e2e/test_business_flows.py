@@ -10,7 +10,7 @@ from datetime import date
 from tests.factories import (
     create_portfolio, create_investor, create_product, create_platform,
     create_value_snapshot, create_investor_holding, create_position_snapshot,
-    ensure_trading_day, create_price_record,
+    ensure_trading_day, create_price_record, create_trade,
 )
 from app.models.portfolio import Portfolio
 from app.models.subscription import Subscription
@@ -36,6 +36,7 @@ class TestFullSubscriptionFlow:
                 "sub_type": "subscribe",
                 "amount": 10000.0,
                 "apply_date": "2025-11-03",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )
@@ -65,12 +66,12 @@ class TestFullTradeFlow:
         create_platform(test_db, code="FLOW_PLAT")
         ensure_trading_day(test_db, date(2025, 11, 3), is_open=True)
 
-        # 创建初始现金持仓（CASH 产品）
-        create_position_snapshot(
+        # 提供可用现金：通过 confirmed CASH buy trade 表示现金流入
+        create_trade(
             test_db, "FLOW_T1", "CASH", "",
-            snapshot_date=date(2025, 10, 31),
-            amount=100000.0, unit_price=None, cost_price=None,
-            market_value=100000.0, platform_code="FLOW_PLAT",
+            trade_type="buy", amount=100000.0, price=None,
+            platform_code="FLOW_PLAT", trade_date=date(2025, 10, 31),
+            confirm_date=date(2025, 10, 31), status="confirmed",
         )
 
         # 提交买入
@@ -157,6 +158,7 @@ class TestClosedPortfolioRestrictions:
                 "sub_type": "subscribe",
                 "amount": 5000,
                 "apply_date": "2025-11-03",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )

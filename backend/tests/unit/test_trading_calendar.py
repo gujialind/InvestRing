@@ -62,6 +62,7 @@ class TestTradingDayValidationInRouter:
                 "sub_type": "subscribe",
                 "amount": 10000.0,
                 "apply_date": "2025-08-02",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )
@@ -84,6 +85,7 @@ class TestTradingDayValidationInRouter:
                 "sub_type": "subscribe",
                 "amount": 10000.0,
                 "apply_date": "2025-08-04",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )

@@ -26,6 +26,9 @@ os.environ.setdefault(
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing")
 os.environ.setdefault("SCHEDULER_ENABLED", "false")
 
+from contextlib import asynccontextmanager
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -38,6 +41,7 @@ from app.models import (
     AssetClassification, TradingCalendar, PriceRecord,
     PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
     Subscription, Trade, ShareChangeEvent,
+    SyncJob, ManualMarketValue, Notification, IdempotencyCache,
 )
 from app.utils.security import get_password_hash, create_access_token
 
@@ -238,14 +242,27 @@ def client(test_db: Session) -> Generator[TestClient, None, None]:
     """
     提供配置好的 TestClient，已覆写 get_db 依赖注入，
     使所有 API 请求使用测试数据库。
+
+    同时跳过 lifespan 中的 alembic upgrade（避免 MySQL 专有 SQL 在 SQLite 上报错）。
     """
     def _override_get_db():
         yield test_db
 
     app.dependency_overrides[get_db] = _override_get_db
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+
+    # 用空 lifespan 替代原始 lifespan，避免执行 alembic migration
+    @asynccontextmanager
+    async def _noop_lifespan(app):
+        yield
+
+    original_lifespan = app.router.lifespan_context
+    app.router.lifespan_context = _noop_lifespan
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.router.lifespan_context = original_lifespan
+        app.dependency_overrides.clear()
 
 
 # ============================================================================
