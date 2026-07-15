@@ -27,6 +27,9 @@ def _calculate_confirm_days(market: str, is_qdii: bool) -> int:
 @router.get("")
 def get_products(
     product_type: Optional[str] = None,
+    market: Optional[str] = None,
+    data_source: Optional[str] = None,
+    data_source_status: Optional[str] = None,
     page: Optional[int] = 1,
     page_size: Optional[int] = 20,
     db: Session = Depends(get_db),
@@ -35,6 +38,12 @@ def get_products(
     query = db.query(Product)
     if product_type:
         query = query.filter(Product.product_type == product_type)
+    if market:
+        query = query.filter(Product.market == market)
+    if data_source:
+        query = query.filter(Product.data_source == data_source)
+    if data_source_status:
+        query = query.filter(Product.data_source_status == data_source_status)
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
     return {
