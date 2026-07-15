@@ -198,17 +198,21 @@ def create_subscription(
     shares: Optional[float] = None,
     unit_price: Optional[float] = None,
     apply_date: date = date(2025, 1, 6),
+    confirm_date: Optional[date] = None,
     status: str = "pending",
+    platform_code: str = "MYCF",
 ) -> Subscription:
     """创建申购/赎回记录"""
     sub = Subscription(
         portfolio_code=portfolio_code,
         investor_code=investor_code,
+        platform_code=platform_code,
         sub_type=sub_type,
         amount=Decimal(str(amount)),
         shares=Decimal(str(shares)) if shares else None,
         unit_price=Decimal(str(unit_price)) if unit_price else None,
         apply_date=apply_date,
+        confirm_date=confirm_date,
         status=status,
     )
     db.add(sub)

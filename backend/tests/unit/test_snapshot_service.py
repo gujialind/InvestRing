@@ -24,15 +24,16 @@ from app.services.snapshot_service import (
     _check_pending_transactions,
     _check_share_change_events,
     _prev_trading_day,
+    _generate_portfolio_value_snapshot,
 )
 from app.models import (
     Portfolio, TradingCalendar, Trade, Subscription,
-    PortfolioPosition, Product, Investor,
+    PortfolioPosition, PortfolioValueSnapshot, Product, Investor,
 )
 from tests.factories import (
     create_portfolio, create_product, create_trade,
     create_subscription, create_investor, ensure_trading_day,
-    create_position_snapshot, create_platform,
+    create_position_snapshot, create_platform, create_value_snapshot,
 )
 
 
@@ -252,3 +253,124 @@ class TestValidateSnapshotDependencies:
         for r in results:
             if r["check_type"] in ("trading_day", "pending_transactions"):
                 assert r["status"] == "passed"
+
+
+class TestGeneratePortfolioValueSnapshot:
+    """组合市值快照 total_shares 增量计算测试（issue #12 修复）
+
+    验证 total_shares 采用增量法：前序快照 + 窗口内申购 - 窗口内赎回，
+    而非读取滞后一日的 investor_holding。
+    """
+
+    def _make_cash_position(self, portfolio_code, snapshot_date, market_value):
+        """构造一个 CASH 持仓对象供 _generate_portfolio_value_snapshot 使用"""
+        return PortfolioPosition(
+            portfolio_code=portfolio_code,
+            product_code="CASH",
+            market="",
+            platform_code="MYCF",
+            shares=None,
+            amount=Decimal(str(market_value)),
+            market_value=Decimal(str(market_value)),
+            snapshot_date=snapshot_date,
+            asset_type="cash",
+        )
+
+    def test_first_snapshot_fallback(self, test_db):
+        """首次快照无前序快照，total_shares = total_value（NAV=1.0）"""
+        create_portfolio(test_db, code="PVS1", status="active")
+        positions = [self._make_cash_position("PVS1", date(2025, 1, 6), 1000)]
+        snap = _generate_portfolio_value_snapshot(
+            test_db, "PVS1", date(2025, 1, 6), positions
+        )
+        assert snap.total_shares == 1000.0
+        assert snap.unit_price == 1.0
+
+    def test_subscribe_confirmed_same_day(self, test_db):
+        """申购确认日份额应计入 total_shares（核心 bug 修复）"""
+        create_portfolio(test_db, code="PVS2", status="active")
+        create_investor(test_db, code="INV_PVS2")
+        create_value_snapshot(
+            test_db, "PVS2", date(2025, 1, 6),
+            total_value=100, total_shares=100, unit_price=1.0,
+        )
+        create_subscription(
+            test_db, portfolio_code="PVS2", investor_code="INV_PVS2",
+            sub_type="subscribe", shares=100, amount=100,
+            unit_price=1.0, apply_date=date(2025, 1, 6),
+            confirm_date=date(2025, 1, 7),
+            status="confirmed",
+        )
+        positions = [self._make_cash_position("PVS2", date(2025, 1, 7), 200)]
+        snap = _generate_portfolio_value_snapshot(
+            test_db, "PVS2", date(2025, 1, 7), positions
+        )
+        assert snap.total_shares == 200.0  # 100 prev + 100 new
+        assert snap.unit_price == 1.0
+
+    def test_redeem_confirmed_same_day(self, test_db):
+        """赎回确认日份额应扣减 total_shares"""
+        create_portfolio(test_db, code="PVS3", status="active")
+        create_investor(test_db, code="INV_PVS3")
+        create_value_snapshot(
+            test_db, "PVS3", date(2025, 1, 6),
+            total_value=200, total_shares=200, unit_price=1.0,
+        )
+        create_subscription(
+            test_db, portfolio_code="PVS3", investor_code="INV_PVS3",
+            sub_type="redeem", shares=50, amount=50,
+            unit_price=1.0, apply_date=date(2025, 1, 6),
+            confirm_date=date(2025, 1, 7),
+            status="confirmed",
+        )
+        positions = [self._make_cash_position("PVS3", date(2025, 1, 7), 150)]
+        snap = _generate_portfolio_value_snapshot(
+            test_db, "PVS3", date(2025, 1, 7), positions
+        )
+        assert snap.total_shares == 150.0  # 200 - 50
+        assert snap.unit_price == 1.0
+
+    def test_gap_window_covers_multiple_days(self, test_db):
+        """间隔窗口：前序快照几天前，窗口内多日申赎都计入"""
+        create_portfolio(test_db, code="PVS4", status="active")
+        create_investor(test_db, code="INV_PVS4")
+        create_value_snapshot(
+            test_db, "PVS4", date(2025, 1, 6),
+            total_value=100, total_shares=100, unit_price=1.0,
+        )
+        # 01-07 和 01-08 各确认申购 100 份，但不生成中间快照
+        create_subscription(
+            test_db, portfolio_code="PVS4", investor_code="INV_PVS4",
+            sub_type="subscribe", shares=100, amount=100,
+            unit_price=1.0, apply_date=date(2025, 1, 6),
+            confirm_date=date(2025, 1, 7),
+            status="confirmed",
+        )
+        create_subscription(
+            test_db, portfolio_code="PVS4", investor_code="INV_PVS4",
+            sub_type="subscribe", shares=100, amount=100,
+            unit_price=1.0, apply_date=date(2025, 1, 7),
+            confirm_date=date(2025, 1, 8),
+            status="confirmed",
+        )
+        # 01-09 生成快照（跳过了 01-07 和 01-08）
+        positions = [self._make_cash_position("PVS4", date(2025, 1, 9), 300)]
+        snap = _generate_portfolio_value_snapshot(
+            test_db, "PVS4", date(2025, 1, 9), positions
+        )
+        assert snap.total_shares == 300.0  # 100 + 100 + 100
+        assert snap.unit_price == 1.0
+
+    def test_no_new_subscriptions_keeps_prev(self, test_db):
+        """无新申赎时 total_shares = 前序快照"""
+        create_portfolio(test_db, code="PVS5", status="active")
+        create_value_snapshot(
+            test_db, "PVS5", date(2025, 1, 6),
+            total_value=500, total_shares=500, unit_price=1.0,
+        )
+        positions = [self._make_cash_position("PVS5", date(2025, 1, 7), 500)]
+        snap = _generate_portfolio_value_snapshot(
+            test_db, "PVS5", date(2025, 1, 7), positions
+        )
+        assert snap.total_shares == 500.0
+        assert snap.unit_price == 1.0
