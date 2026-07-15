@@ -720,24 +720,39 @@ def _generate_portfolio_value_snapshot(
         elif pos.amount is not None:
             total_value += Decimal(str(pos.amount))
     
-    # 获取总份额（从前一日投资人快照汇总，或使用前一日的值）
-    prev_holding_date = db.query(func.max(InvestorHolding.snapshot_date)).filter(
-        InvestorHolding.portfolio_code == portfolio_code,
-        InvestorHolding.snapshot_date < target_date
+    # 获取总份额：前序快照 + 窗口内申赎变动（与 _generate_portfolio_position 增量法一致）
+    prev_pvs_date = db.query(func.max(PortfolioValueSnapshot.snapshot_date)).filter(
+        PortfolioValueSnapshot.portfolio_code == portfolio_code,
+        PortfolioValueSnapshot.snapshot_date < target_date
     ).scalar()
-    
-    if prev_holding_date:
-        prev_holding = db.query(func.sum(InvestorHolding.shares)).filter(
-            InvestorHolding.portfolio_code == portfolio_code,
-            InvestorHolding.snapshot_date == prev_holding_date
+
+    if prev_pvs_date:
+        prev_pvs = db.query(PortfolioValueSnapshot).filter(
+            PortfolioValueSnapshot.portfolio_code == portfolio_code,
+            PortfolioValueSnapshot.snapshot_date == prev_pvs_date
+        ).first()
+        total_shares = Decimal(str(prev_pvs.total_shares or 0))
+
+        # 窗口内申购确认份额（前序快照次日 ~ 目标日）
+        confirm_start = prev_pvs_date + timedelta(days=1)
+        subscribe_shares = db.query(func.sum(Subscription.shares)).filter(
+            Subscription.portfolio_code == portfolio_code,
+            Subscription.sub_type == "subscribe",
+            Subscription.status == "confirmed",
+            Subscription.confirm_date >= confirm_start,
+            Subscription.confirm_date <= target_date
         ).scalar()
+        redeem_shares = db.query(func.sum(Subscription.shares)).filter(
+            Subscription.portfolio_code == portfolio_code,
+            Subscription.sub_type == "redeem",
+            Subscription.status == "confirmed",
+            Subscription.confirm_date >= confirm_start,
+            Subscription.confirm_date <= target_date
+        ).scalar()
+
+        total_shares += Decimal(str(subscribe_shares or 0)) - Decimal(str(redeem_shares or 0))
     else:
-        prev_holding = None
-    
-    total_shares = Decimal(str(prev_holding or 0))
-    
-    # 如果无历史份额，使用市值作为初始份额（首次申购场景）
-    if total_shares == 0:
+        # 首次快照：无前序快照，使用市值作为初始份额（NAV=1.0，份额=金额）
         total_shares = total_value if total_value > 0 else Decimal("1")
     
     # 计算净值
