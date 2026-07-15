@@ -19,30 +19,9 @@ from app.models import (
 )
 from app.services.trading_utils import is_trading_day as _trading_utils_is_trading_day
 from app.services.subscription_service import unconfirm_single_subscription
-from app.services.position_service import compute_cash_balance
+from app.services.position_service import get_cash_value
 
 logger = logging.getLogger(__name__)
-
-
-def get_cash_value(
-    db: Session, portfolio_code: str, platform_code: Optional[str], target_date: date
-) -> Decimal:
-    """
-    获取快照生成用的现金值。
-    基础 = compute_cash_balance(target_date)
-    若存在 manual_market_value 覆盖，则绝对替换。
-    """
-    v = compute_cash_balance(db, portfolio_code, platform_code, target_date)
-    from app.models.manual_market_value import ManualMarketValue
-    manual = db.query(ManualMarketValue).filter(
-        ManualMarketValue.portfolio_code == portfolio_code,
-        ManualMarketValue.platform_code == platform_code,
-        ManualMarketValue.product_code == "CASH",
-        ManualMarketValue.date == target_date,
-    ).first()
-    if manual:
-        v = Decimal(str(manual.market_value))  # 绝对替换
-    return v
 
 
 def generate_daily_snapshots(
