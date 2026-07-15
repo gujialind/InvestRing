@@ -24,12 +24,12 @@ class TestBuyTrade:
         create_platform(test_db, code="TRD_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
-        # 创建现金持仓（有钱才能买）
-        create_position_snapshot(
+        # 提供可用现金：通过 confirmed CASH buy trade 表示现金流入（如申购确认）
+        create_trade(
             test_db, "TRD_P1", "CASH", "",
-            snapshot_date=date(2025, 10, 3),
-            amount=50000.0, unit_price=None, cost_price=None,
-            market_value=50000.0, platform_code="TRD_PLAT",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="TRD_PLAT", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
         )
 
         resp = client.post(
@@ -46,7 +46,7 @@ class TestBuyTrade:
             },
             headers=admin_headers,
         )
-        assert resp.status_code in (200, 201)
+        assert resp.status_code in (200, 201), f"Response: {resp.status_code} {resp.json()}"
         data = resp.json()
         assert data["status"] == "pending"
         assert data["trade_type"] == "buy"

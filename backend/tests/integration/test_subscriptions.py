@@ -30,6 +30,7 @@ class TestSubscriptionCreate:
                 "sub_type": "subscribe",
                 "amount": 10000.0,
                 "apply_date": "2025-09-01",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )
@@ -52,6 +53,7 @@ class TestSubscriptionCreate:
                 "sub_type": "subscribe",
                 "amount": 0,
                 "apply_date": "2025-09-01",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )
@@ -71,6 +73,7 @@ class TestSubscriptionCreate:
                 "sub_type": "subscribe",
                 "amount": 5000.0,
                 "apply_date": "2025-09-06",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )
@@ -99,6 +102,7 @@ class TestRedeemCreate:
                 "sub_type": "redeem",
                 "shares": 5000.0,
                 "apply_date": "2025-09-01",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )
@@ -125,6 +129,7 @@ class TestRedeemCreate:
                 "sub_type": "redeem",
                 "shares": 99999.0,
                 "apply_date": "2025-09-01",
+                "platform_code": "MYCF",
             },
             headers=admin_headers,
         )
@@ -164,6 +169,7 @@ class TestSubscriptionPermissions:
                 "sub_type": "subscribe",
                 "amount": 1000,
                 "apply_date": "2025-09-01",
+                "platform_code": "MYCF",
             },
             headers=viewer_headers,
         )

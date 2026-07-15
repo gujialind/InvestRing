@@ -18,7 +18,7 @@ numpy==2.4.4
 python-dateutil==2.9.0.post0
 
 # HTTP & Network
-httpx>=0.26.0
+httpx>=0.26.0,<0.28.0
 requests==2.33.1
 urllib3==2.6.3
 certifi==2026.4.22

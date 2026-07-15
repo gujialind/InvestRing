@@ -34,6 +34,7 @@ class TestShareChangeEventCreate:
                 "entitlement_date": "2025-12-08",
                 "event_source": "manual",
                 "div_cash": 0.5,
+                "platform_code": "MYCF",  # 平台级事件必填
             },
             headers=admin_headers,
         )
@@ -61,6 +62,7 @@ class TestShareChangeEventCreate:
                 "event_source": "manual",
                 "div_cash": 0.5,
                 "reinvest_nav": 1.2,
+                "platform_code": "MYCF",  # 平台级事件必填
             },
             headers=admin_headers,
         )
@@ -108,6 +110,7 @@ class TestShareChangeEventCreate:
                 "entitlement_date": "2025-12-06",
                 "event_source": "manual",
                 "div_cash": 0.5,
+                "platform_code": "MYCF",  # 平台级事件必填
             },
             headers=admin_headers,
         )
