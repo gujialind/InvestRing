@@ -239,3 +239,37 @@ def get_fund_nav(
         })
 
     return result
+
+
+def get_fund_div(
+    ts_code: str,
+) -> List[Dict[str, Any]]:
+    """
+    获取基金分红信息
+
+    Args:
+        ts_code: 基金代码（如 000001.OF）
+
+    Returns:
+        分红记录列表，包含 ex_date(YYYYMMDD), record_date(YYYYMMDD), div_cash, div_proc
+    """
+    pro = _get_tushare_pro()
+
+    df = _retry_with_rate_limit(
+        lambda: pro.fund_div(ts_code=ts_code),
+        "获取基金分红信息失败",
+    )
+
+    if df is None or df.empty:
+        return []
+
+    result = []
+    for _, row in df.iterrows():
+        result.append({
+            "ex_date": str(row.get("ex_date", "")),
+            "record_date": str(row.get("record_date", "")),
+            "div_cash": float(row["div_cash"]) if row.get("div_cash") is not None else None,
+            "div_proc": str(row.get("div_proc", "")),
+        })
+
+    return result

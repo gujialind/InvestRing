@@ -386,7 +386,7 @@ def submit_price_sync_job(
     triggered_by: str = "manual",
     db: Optional[Session] = None,
 ) -> int:
-    """提交价格同步后台任务，立即返回 job_id。单 running 锁：已有 running job 则抛 ConflictError。"""
+    """提交价格同步后台任务，立即返回 job_id。单 active 锁：已有 pending/running job 则抛 ConflictError。"""
     from app.database import SessionLocal
     from app.models.sync_job import SyncJob
 
@@ -394,8 +394,8 @@ def submit_price_sync_job(
     if own_db:
         db = SessionLocal()
     try:
-        running = db.query(SyncJob).filter(SyncJob.status == "running").count()
-        if running > 0:
+        active = db.query(SyncJob).filter(SyncJob.status.in_(["pending", "running"])).count()
+        if active > 0:
             raise ConflictError("已有价格同步任务在运行中")
 
         job = SyncJob(
@@ -443,9 +443,12 @@ def _run_price_sync_job_impl(job_id: int):
             else:
                 products = []
         else:
+            ds_filter = [Product.data_source.in_(["tushare", "akshare"])]
+            if params.get("data_source"):
+                ds_filter = [Product.data_source == params["data_source"]]
             products = db.query(Product).filter(
                 Product.market.in_(["CN_EXCHANGE", "CN_OTC", "HK_MUTUAL"]),
-                Product.data_source.in_(["tushare", "akshare"]),
+                *ds_filter,
             ).all()
 
         job.total = len(products)

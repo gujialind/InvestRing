@@ -66,7 +66,7 @@ def cleanup_old_logs(db: Session) -> dict:
 
 
 def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
-    """执行净值同步任务（§4.7 三步：基金列表→逐只净值→快照生成）。分红检测本期跳过（D1）。"""
+    """执行净值同步任务（§4.7 四步：基金列表→逐只净值→分红检测→快照生成）。"""
     from app.services.market_data_service import sync_product_prices
     from app.services.snapshot_service import generate_daily_snapshots, auto_confirm_after_snapshot
     from app.models.trading_calendar import TradingCalendar
@@ -142,12 +142,15 @@ def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
 
     db.commit()
 
+    dividends_detected = _detect_dividends(db, products)
+
     snapshots_generated = _generate_snapshots_for_date(db, target_date)
 
     return {
         "synced_count": total_synced,
         "products_count": len(products),
         "failed_products": failed_products,
+        "dividends_detected": dividends_detected,
         "snapshots_generated": snapshots_generated,
         "target_date": target_date.isoformat(),
     }
@@ -174,6 +177,100 @@ def _generate_snapshots_for_date(db: Session, target_date) -> int:
             db.rollback()
             logger.error(f"组合 {portfolio.code} 快照生成失败: {str(e)}")
     return count
+
+
+def _detect_dividends(db: Session, products: list) -> int:
+    """分红检测：从 tushare fund_div 获取分红数据，自动创建 pending reinvest_dividend 事件。"""
+    from app.services.tushare_client import get_fund_div, TushareNotConfiguredError, TushareAPIError
+    from app.models.share_change_event import ShareChangeEvent
+    from app.models.portfolio_position import PortfolioPosition
+    from sqlalchemy import func as sa_func, and_
+
+    detected = 0
+    otc_products = [p for p in products if p.market == "CN_OTC" and (p.data_source or "tushare") == "tushare"]
+
+    for product in otc_products:
+        try:
+            ts_code = f"{product.code}.OF"
+            dividends = get_fund_div(ts_code)
+
+            for div in dividends:
+                if div.get("div_proc") and div["div_proc"] != "实施":
+                    continue
+
+                ex_date_str = div.get("ex_date", "")
+                record_date_str = div.get("record_date", "")
+                if not ex_date_str or not record_date_str:
+                    continue
+
+                try:
+                    ex_date = datetime.strptime(ex_date_str, "%Y%m%d").date()
+                    entitlement_date = datetime.strptime(record_date_str, "%Y%m%d").date()
+                except ValueError:
+                    continue
+
+                if ex_date <= entitlement_date:
+                    continue
+
+                latest_dates = db.query(
+                    PortfolioPosition.portfolio_code,
+                    sa_func.max(PortfolioPosition.snapshot_date).label("max_date"),
+                ).group_by(PortfolioPosition.portfolio_code).subquery()
+
+                positions = db.query(PortfolioPosition).join(
+                    latest_dates,
+                    and_(
+                        PortfolioPosition.portfolio_code == latest_dates.c.portfolio_code,
+                        PortfolioPosition.snapshot_date == latest_dates.c.max_date,
+                    ),
+                ).filter(
+                    PortfolioPosition.product_code == product.code,
+                    PortfolioPosition.market == product.market,
+                    PortfolioPosition.shares > 0,
+                ).all()
+
+                for pos in positions:
+                    if not pos.platform_code:
+                        continue
+                    if ex_date <= pos.snapshot_date:
+                        continue
+
+                    existing = db.query(ShareChangeEvent).filter(
+                        ShareChangeEvent.portfolio_code == pos.portfolio_code,
+                        ShareChangeEvent.product_code == product.code,
+                        ShareChangeEvent.ex_date == ex_date,
+                        ShareChangeEvent.platform_code == pos.platform_code,
+                    ).first()
+
+                    if existing:
+                        continue
+
+                    event = ShareChangeEvent(
+                        portfolio_code=pos.portfolio_code,
+                        product_code=product.code,
+                        market=product.market,
+                        event_type="reinvest_dividend",
+                        ex_date=ex_date,
+                        entitlement_date=entitlement_date,
+                        platform_code=pos.platform_code,
+                        event_source="tushare",
+                        div_cash=div.get("div_cash"),
+                        status="pending",
+                        notes=f"自动检测：tushare fund_div {ts_code}",
+                    )
+                    db.add(event)
+                    detected += 1
+
+            db.commit()
+
+        except (TushareNotConfiguredError, TushareAPIError) as e:
+            logger.warning(f"分红检测跳过 {product.code}: {e}")
+            db.rollback()
+        except Exception as e:
+            logger.error(f"分红检测失败 {product.code}: {e}")
+            db.rollback()
+
+    return detected
 
 
 def run_calendar_sync(db: Session, year: Optional[int] = None) -> dict:
