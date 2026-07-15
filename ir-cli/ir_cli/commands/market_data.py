@@ -63,3 +63,32 @@ def sync_nav(
     client = APIClient.from_config()
     result = client.post(f"/api/market-data/portfolios/{portfolio_code}/sync-nav")
     success(data=result["data"])
+
+
+@app.command("sync-all")
+def sync_all(
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="开始日期(YYYY-MM-DD)，不传则增量同步"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="结束日期(YYYY-MM-DD)"),
+    scope: str = typer.Option("all", "--scope", help="范围(all/by-product)"),
+    products: Optional[str] = typer.Option(None, "--products", help="产品列表，格式: code|market,code|market"),
+    data_source: Optional[str] = typer.Option(None, "--data-source", help="数据源过滤(tushare/akshare)"),
+):
+    """批量同步价格数据（异步任务）"""
+    client = APIClient.from_config()
+    body = {"scope": scope}
+    if start_date is not None:
+        body["start_date"] = start_date
+    if end_date is not None:
+        body["end_date"] = end_date
+    if products is not None:
+        parsed = []
+        for p in products.split(","):
+            if "|" not in p:
+                print(f"warning: 跳过格式错误的产品条目 '{p.strip()}'（需 code|market 格式）", flush=True)
+                continue
+            parsed.append(p.split("|"))
+        body["products"] = parsed
+    if data_source is not None:
+        body["data_source"] = data_source
+    result = client.post("/api/sync-jobs/price", json_data=body)
+    success(data=result["data"])

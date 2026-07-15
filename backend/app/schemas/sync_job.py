@@ -8,6 +8,7 @@ class PriceSyncRequest(BaseModel):
     end_date: Optional[str] = None
     scope: str = "all"
     products: Optional[List[List[str]]] = None
+    data_source: Optional[str] = None
 
 
 class SyncJobResponse(BaseModel):

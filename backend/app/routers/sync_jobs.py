@@ -24,6 +24,7 @@ def submit_price_sync(
             "end_date": payload.end_date,
             "scope": payload.scope or "all",
             "products": payload.products or [],
+            "data_source": payload.data_source,
         }
         job_id = submit_price_sync_job(params, triggered_by="manual", db=db)
         return {"job_id": job_id, "status": "pending", "message": "任务已提交"}
