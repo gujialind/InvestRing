@@ -81,9 +81,13 @@ def sync_all(
     if end_date is not None:
         body["end_date"] = end_date
     if products is not None:
-        body["products"] = [
-            p.split("|") for p in products.split(",") if "|" in p
-        ]
+        parsed = []
+        for p in products.split(","):
+            if "|" not in p:
+                print(f"warning: 跳过格式错误的产品条目 '{p.strip()}'（需 code|market 格式）", flush=True)
+                continue
+            parsed.append(p.split("|"))
+        body["products"] = parsed
     if data_source is not None:
         body["data_source"] = data_source
     result = client.post("/api/sync-jobs/price", json_data=body)

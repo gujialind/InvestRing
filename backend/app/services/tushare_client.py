@@ -268,7 +268,7 @@ def get_fund_div(
         result.append({
             "ex_date": str(row.get("ex_date", "")),
             "record_date": str(row.get("record_date", "")),
-            "div_cash": float(row["div_cash"]) if row.get("div_cash") else None,
+            "div_cash": float(row["div_cash"]) if row.get("div_cash") is not None else None,
             "div_proc": str(row.get("div_proc", "")),
         })
 
