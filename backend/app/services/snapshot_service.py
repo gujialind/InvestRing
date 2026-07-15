@@ -734,19 +734,19 @@ def _generate_portfolio_value_snapshot(
         total_shares = Decimal(str(prev_pvs.total_shares or 0))
 
         # 窗口内申购确认份额（前序快照次日 ~ 目标日）
-        start_apply_date = prev_pvs_date + timedelta(days=1)
+        confirm_start = prev_pvs_date + timedelta(days=1)
         subscribe_shares = db.query(func.sum(Subscription.shares)).filter(
             Subscription.portfolio_code == portfolio_code,
             Subscription.sub_type == "subscribe",
             Subscription.status == "confirmed",
-            Subscription.confirm_date >= start_apply_date,
+            Subscription.confirm_date >= confirm_start,
             Subscription.confirm_date <= target_date
         ).scalar()
         redeem_shares = db.query(func.sum(Subscription.shares)).filter(
             Subscription.portfolio_code == portfolio_code,
             Subscription.sub_type == "redeem",
             Subscription.status == "confirmed",
-            Subscription.confirm_date >= start_apply_date,
+            Subscription.confirm_date >= confirm_start,
             Subscription.confirm_date <= target_date
         ).scalar()
 
