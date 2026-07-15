@@ -16,6 +16,17 @@ finally:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import os
+    from alembic.config import Config as AlembicCfg
+    from alembic import command as alembic_command
+
+    alembic_ini = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
+    alembic_cfg = AlembicCfg(alembic_ini)
+    alembic_command.upgrade(alembic_cfg, "head")
+
+    from app.services.market_data_service import recover_orphan_jobs
+    recover_orphan_jobs()
+
     from app.services.scheduler_service import init_scheduler, shutdown_scheduler
     init_scheduler()
     yield
