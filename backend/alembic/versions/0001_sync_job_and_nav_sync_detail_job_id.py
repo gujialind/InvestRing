@@ -16,34 +16,57 @@ depends_on = None
 
 
 def upgrade():
-    op.create_table(
-        'sync_job',
-        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column('job_type', sa.String(40), nullable=False),
-        sa.Column('status', sa.String(20), nullable=False, server_default='pending'),
-        sa.Column('params', sa.JSON(), nullable=True),
-        sa.Column('total', sa.Integer(), server_default='0'),
-        sa.Column('done', sa.Integer(), server_default='0'),
-        sa.Column('success_count', sa.Integer(), server_default='0'),
-        sa.Column('failed_count', sa.Integer(), server_default='0'),
-        sa.Column('skipped_count', sa.Integer(), server_default='0'),
-        sa.Column('error_message', sa.Text(), nullable=True),
-        sa.Column('triggered_by', sa.String(20), server_default='manual'),
-        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now()),
-        sa.Column('started_at', sa.DateTime(), nullable=True),
-        sa.Column('finished_at', sa.DateTime(), nullable=True),
-    )
-    op.create_index('ix_sync_job_status', 'sync_job', ['status'])
+    # sync_job — 使用 IF NOT EXISTS，兼容 create_all 已建表（全新部署）和 old-to-new 迁移
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS sync_job (
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            job_type VARCHAR(40) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            params JSON,
+            total INTEGER DEFAULT 0,
+            done INTEGER DEFAULT 0,
+            success_count INTEGER DEFAULT 0,
+            failed_count INTEGER DEFAULT 0,
+            skipped_count INTEGER DEFAULT 0,
+            error_message TEXT,
+            triggered_by VARCHAR(20) DEFAULT 'manual',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            started_at DATETIME,
+            finished_at DATETIME
+        )
+    """)
 
-    op.add_column('nav_sync_detail', sa.Column('job_id', sa.Integer(), nullable=True))
-    op.add_column('nav_sync_detail', sa.Column('synced_count', sa.Integer(), server_default='0'))
-    op.create_index('ix_nav_sync_detail_job_id', 'nav_sync_detail', ['job_id'])
-    op.create_foreign_key(
-        'fk_nav_sync_detail_job_id', 'nav_sync_detail', 'sync_job',
-        ['job_id'], ['id'],
-    )
+    # index on sync_job — only if not already present
+    try:
+        op.create_index('ix_sync_job_status', 'sync_job', ['status'])
+    except Exception:
+        pass
 
+    # nav_sync_detail columns — only if not already there (create_all on fresh DB already has them)
+    for col_name, col in [
+        ('job_id', sa.Column('job_id', sa.Integer(), nullable=True)),
+        ('synced_count', sa.Column('synced_count', sa.Integer(), server_default='0')),
+    ]:
+        try:
+            op.add_column('nav_sync_detail', col)
+        except Exception:
+            pass
+
+    try:
+        op.create_index('ix_nav_sync_detail_job_id', 'nav_sync_detail', ['job_id'])
+    except Exception:
+        pass
+
+    try:
+        op.create_foreign_key(
+            'fk_nav_sync_detail_job_id', 'nav_sync_detail', 'sync_job',
+            ['job_id'], ['id'],
+        )
+    except Exception:
+        pass
+
+    # HK_MUTUAL market/data_source fix (idempotent — no-op if no matching rows)
     op.execute(
         "UPDATE product SET market='HK_MUTUAL', data_source='akshare' "
         "WHERE code IN ('1001767344','1001767346') AND market='CN_OTC'"
