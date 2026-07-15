@@ -10,7 +10,7 @@ from tests.factories import (
     create_portfolio, create_product, create_platform,
     create_position_snapshot, create_value_snapshot,
     create_investor_holding, create_investor, create_trade,
-    create_subscription, ensure_trading_day,
+    create_subscription, ensure_trading_day, create_manual_market_value,
 )
 
 
@@ -77,6 +77,32 @@ class TestAvailableCash:
             headers=admin_headers,
         )
         assert resp.status_code == 200
+
+    def test_available_cash_reflects_manual_override(self, client, admin_headers, test_db):
+        """available-cash 端点应反映 manual 覆盖值（回归 issue #14）"""
+        create_portfolio(test_db, code="AC_OVR", status="active")
+        create_platform(test_db, code="AC_OVR_PLAT")
+        # 快照日 + confirmed CASH buy（计算现金 = 6000）
+        create_value_snapshot(test_db, "AC_OVR", date(2025, 10, 31),
+                              total_value=6000, total_shares=6000, unit_price=1.0)
+        create_trade(
+            test_db, "AC_OVR", "CASH", "",
+            trade_type="buy", amount=6000.0, price=None,
+            platform_code="AC_OVR_PLAT", trade_date=date(2025, 10, 31),
+            confirm_date=date(2025, 10, 31), status="confirmed",
+        )
+        # manual 覆盖 → 现金 = 6001.39
+        create_manual_market_value(
+            test_db, "AC_OVR", "AC_OVR_PLAT", "CASH",
+            record_date=date(2025, 10, 31), market_value=6001.39,
+        )
+
+        resp = client.get(
+            "/api/positions/portfolio/AC_OVR/available-cash?platform_code=AC_OVR_PLAT",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert abs(resp.json()["available_cash"] - 6001.39) < 0.01
 
 
 class TestAvailableShares:

@@ -9,6 +9,7 @@ from tests.factories import (
     create_portfolio, create_product, create_platform, create_trade,
     create_position_snapshot, create_value_snapshot, create_investor_holding,
     create_investor, ensure_trading_day, create_price_record,
+    create_manual_market_value,
 )
 from app.models.trade import Trade
 
@@ -102,6 +103,46 @@ class TestBuyTrade:
             headers=admin_headers,
         )
         assert resp.status_code in (400, 422)
+
+    def test_buy_succeeds_with_manual_override(self, client, admin_headers, test_db):
+        """manual 覆盖后，买入金额在覆盖值内应成功（回归 issue #14）"""
+        create_portfolio(test_db, code="TRD_OVR", status="active")
+        create_product(test_db, code="ETF_OVR", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+        create_platform(test_db, code="TRD_OVR_PLAT")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+
+        # 快照日 + confirmed CASH buy（计算现金 = 6000）
+        create_value_snapshot(test_db, "TRD_OVR", date(2025, 10, 3),
+                              total_value=6000, total_shares=6000, unit_price=1.0)
+        create_trade(
+            test_db, "TRD_OVR", "CASH", "",
+            trade_type="buy", amount=6000.0, price=None,
+            platform_code="TRD_OVR_PLAT", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+        # manual 覆盖 → 现金 = 6001.39
+        create_manual_market_value(
+            test_db, "TRD_OVR", "TRD_OVR_PLAT", "CASH",
+            record_date=date(2025, 10, 3), market_value=6001.39,
+        )
+
+        # 买入 6001（> 计算值 6000，< 覆盖值 6001.39）→ 修复前 422，修复后成功
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "TRD_OVR",
+                "product_code": "ETF_OVR",
+                "market": "CN_EXCHANGE",
+                "trade_type": "buy",
+                "amount": 6001.0,
+                "price": 1.5,
+                "platform_code": "TRD_OVR_PLAT",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), f"Response: {resp.status_code} {resp.json()}"
 
 
 class TestSellTrade:
