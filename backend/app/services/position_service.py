@@ -9,6 +9,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.manual_market_value import ManualMarketValue
 from app.models.portfolio_position import PortfolioPosition
 from app.models.share_change_event import ShareChangeEvent
 from app.models.subscription import Subscription
@@ -68,21 +69,53 @@ def compute_cash_balance(
     return balance
 
 
+def get_cash_value(
+    db: Session,
+    portfolio_code: str,
+    platform_code: Optional[str],
+    target_date: Optional[date],
+) -> Decimal:
+    """
+    获取指定日期的现金值（含 manual_market_value 绝对替换）。
+
+    基础 = compute_cash_balance(target_date)
+    若存在 manual_market_value 覆盖（date == target_date），则绝对替换。
+
+    target_date 为 None 时：compute_cash_balance 降级为 today，
+    且跳过 manual 覆盖查询（无快照日可匹配）。
+    """
+    v = compute_cash_balance(db, portfolio_code, platform_code, target_date)
+    if target_date is not None:
+        manual = db.query(ManualMarketValue).filter(
+            ManualMarketValue.portfolio_code == portfolio_code,
+            ManualMarketValue.platform_code == platform_code,
+            ManualMarketValue.product_code == "CASH",
+            ManualMarketValue.date == target_date,
+        ).first()
+        if manual:
+            v = Decimal(str(manual.market_value))
+    return v
+
+
 def calculate_available_cash(
     db: Session, portfolio_code: str, platform_code: Optional[str] = None
 ) -> Decimal:
     """
     组合可用现金实时计算（显式流水版）。
 
-    基线 = 最新快照日已确认的现金（compute_cash_balance(snapshot_date)）
+    基线 = 最新快照日现金（get_cash_value(snapshot_date)，含 manual_market_value 绝对替换，
+    与快照落库口径一致；无快照时用 compute_cash_balance）
     + 快照后 confirmed CASH trades（buy +, sell −）
     − 所有 pending CASH sells（已承诺未执行）
     + 快照后 confirmed event cash_change
     """
     latest_date = get_latest_snapshot_date(db, portfolio_code)
 
-    # 基线：快照日的显式现金
-    cash = compute_cash_balance(db, portfolio_code, platform_code, latest_date)
+    # 基线：快照日现金（含 manual_market_value 绝对替换，与快照落库口径一致）
+    if latest_date is not None:
+        cash = get_cash_value(db, portfolio_code, platform_code, latest_date)
+    else:
+        cash = compute_cash_balance(db, portfolio_code, platform_code, None)
 
     if latest_date is None:
         latest_date = date(1970, 1, 1)  # 确保 > 条件对所有 trade 生效
