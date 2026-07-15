@@ -12,6 +12,9 @@ FROM python:3.11-slim AS deps
 
 WORKDIR /app
 
+# 使用阿里云 Debian 镜像（国内加速）
+RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
+
 # 安装系统依赖（pymysql 编译需要）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -20,8 +23,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 先复制依赖文件，利用 Docker 层缓存
 COPY backend/requirements.txt .
 
-# 安装 Python 依赖（仅用预编译 wheel，避免源码编译超时）
-RUN pip install --no-cache-dir --prefix=/install --only-binary :all: -r requirements.txt
+# 安装 Python 依赖（使用阿里云 PyPI 镜像，国内加速）
+RUN pip install --no-cache-dir --prefix=/install --only-binary :all: \
+    -i https://mirrors.aliyun.com/pypi/simple/ \
+    -r requirements.txt
 
 # ------------------------------------------------------------------
 # 阶段 2：生产运行层（最小化镜像体积）
@@ -29,6 +34,9 @@ RUN pip install --no-cache-dir --prefix=/install --only-binary :all: -r requirem
 FROM python:3.11-slim AS runtime
 
 WORKDIR /app
+
+# 使用阿里云 Debian 镜像（国内加速）
+RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
 
 # 安装运行时必要的系统库（不含 gcc 等编译工具）
 RUN apt-get update && apt-get install -y --no-install-recommends \
