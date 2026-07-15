@@ -267,6 +267,16 @@ def create_trade(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    # 场内交易必须提供有效价格（实时撮合价，不能用收盘价替代）
+    if product.market == "CN_EXCHANGE" and (trade.price is None or trade.price <= 0):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "MISSING_OR_INVALID_PRICE",
+                "message": "场内交易必须提供有效的正数交易价格（--price）",
+            },
+        )
+
     # 计算预期确认日期（创建时即设定，满足规范1：日期字段齐备）
     confirm_days = product.confirm_days or 0
     expected_confirm_date = _get_next_trading_day(db, trade.trade_date, days=confirm_days)

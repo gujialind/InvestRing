@@ -10,6 +10,9 @@ app = typer.Typer(no_args_is_help=True)
 @app.command("list")
 def list_products(
     product_type: Optional[str] = typer.Option(None, "--product-type", help="产品类型(ETF/OEF/LOF/CASH)"),
+    market: Optional[str] = typer.Option(None, "--market", help="市场类型(CN_EXCHANGE/CN_OTC/...)"),
+    data_source: Optional[str] = typer.Option(None, "--data-source", help="数据源(tushare/akshare)"),
+    data_source_status: Optional[str] = typer.Option(None, "--data-source-status", help="同步状态(pending/success/failed/error/skipped)"),
     page: int = typer.Option(1, "--page", help="页码"),
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
 ):
@@ -18,6 +21,12 @@ def list_products(
     params = {"page": page, "page_size": page_size}
     if product_type is not None:
         params["product_type"] = product_type
+    if market is not None:
+        params["market"] = market
+    if data_source is not None:
+        params["data_source"] = data_source
+    if data_source_status is not None:
+        params["data_source_status"] = data_source_status
     result = client.get("/api/products", params=params)
     success(data=result["data"], meta=result.get("meta"))
 

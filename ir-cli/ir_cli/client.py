@@ -44,6 +44,9 @@ class APIClient:
         elif resp.status_code == 404:
             detail = self._extract_detail(resp)
             error("NOT_FOUND", detail)
+        elif resp.status_code == 409:
+            detail = self._extract_detail(resp)
+            error("CONFLICT", detail)
         elif resp.status_code == 422:
             detail = self._extract_detail(resp)
             code = self._extract_error_code(resp, "VALIDATION_ERROR")

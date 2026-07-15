@@ -1,6 +1,6 @@
 """AkShare 客户端 — 与 tushare_client.py 平级。
 
-⚠️ 本文件为 stub：函数签名已定义，但具体 akshare 接口调用和字段映射需 PoC 后补全。
+通过 akshare 获取场外基金净值、场内 ETF 行情、香港互认基金净值。
 akshare 未安装时，调用会抛 AkshareAPIError，不影响 tushare 主路径。
 """
 import time
@@ -10,6 +10,8 @@ from typing import List, Dict, Any, Optional
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_hk_code_map: Optional[Dict[str, str]] = None
 
 
 class AkshareAPIError(Exception):
@@ -37,6 +39,11 @@ def _retry(func, error_label: str):
             raise AkshareAPIError(f"{error_label}: {e}")
 
 
+def _to_yyyymmdd(d: str) -> str:
+    """将 YYYY-MM-DD 转为 YYYYMMDD"""
+    return d.replace("-", "")
+
+
 def get_fund_nav_otc(
     symbol: str,
     start_date: Optional[str] = None,
@@ -45,7 +52,8 @@ def get_fund_nav_otc(
     """
     场外基金净值（CN_OTC）。
     symbol: 基金代码（如 '000051' 或 '000051.OF'，取 . 前部分）
-    返回统一结构: {trade_date: 'YYYYMMDD', unit_nav, accum_nav}
+    start_date/end_date: YYYYMMDD 格式
+    返回: [{trade_date: 'YYYYMMDD', unit_nav, accum_nav}]
     """
     try:
         import akshare as ak
@@ -55,10 +63,20 @@ def get_fund_nav_otc(
     code = symbol.split(".")[0]
 
     def _fetch():
-        # TODO(PoC): 实测 fund_open_fund_info_em 返回的 DataFrame 列名后补全映射
-        # 预期: ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
-        # 需映射列名 -> {trade_date: YYYYMMDD, unit_nav, accum_nav}
-        raise AkshareAPIError("get_fund_nav_otc 尚未实现（需 PoC 确认 akshare 字段名）")
+        df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
+        result = []
+        for _, row in df.iterrows():
+            td = _to_yyyymmdd(str(row["净值日期"]))
+            if start_date and td < start_date:
+                continue
+            if end_date and td > end_date:
+                continue
+            result.append({
+                "trade_date": td,
+                "unit_nav": float(row["单位净值"]),
+                "accum_nav": None,
+            })
+        return result
 
     return _retry(_fetch, "获取场外基金净值失败")
 
@@ -70,20 +88,47 @@ def get_fund_daily_exchange(
 ) -> List[Dict[str, Any]]:
     """
     场内 ETF 日线（CN_EXCHANGE）。
-    返回统一结构: {trade_date: 'YYYYMMDD', close, pre_close, pct_change}
+    etf_code: ETF 代码（如 '510300' 或 '510300.SH'，取 . 前部分）
+    start_date/end_date: YYYYMMDD 格式
+    返回: [{trade_date: 'YYYYMMDD', close, pre_close, pct_change}]
     """
     try:
         import akshare as ak
     except ImportError:
         raise AkshareAPIError("akshare 未安装，请 pip install akshare")
 
+    code = etf_code.split(".")[0]
+
     def _fetch():
-        # TODO(PoC): 实测 fund_etf_hist_em 返回的 DataFrame 列名后补全映射
-        # 预期: ak.fund_etf_hist_em(symbol=etf_code, period="daily", adjust="")
-        # 需映射列名 -> {trade_date: YYYYMMDD, close, pre_close, pct_change}
-        raise AkshareAPIError("get_fund_daily_exchange 尚未实现（需 PoC 确认 akshare 字段名）")
+        sd = start_date or "19900101"
+        ed = end_date or "20500101"
+        df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=sd, end_date=ed, adjust="")
+        result = []
+        for _, row in df.iterrows():
+            td = _to_yyyymmdd(str(row["日期"]))
+            result.append({
+                "trade_date": td,
+                "close": float(row["收盘"]),
+                "pre_close": float(row["开盘"]),
+                "pct_change": float(row["涨跌幅"]),
+            })
+        return result
 
     return _retry(_fetch, "获取场内 ETF 日线失败")
+
+
+def _ensure_hk_code_map(ak) -> Dict[str, str]:
+    """构建 HK_MUTUAL 6位→10位代码映射（懒加载缓存）"""
+    global _hk_code_map
+    if _hk_code_map is None:
+        df = ak.fund_hk_rank_em()
+        _hk_code_map = {}
+        for _, row in df.iterrows():
+            code6 = str(row["基金代码"]).strip()
+            code10 = str(row["香港基金代码"]).strip()
+            if code6 and code10:
+                _hk_code_map[code6] = code10
+    return _hk_code_map
 
 
 def get_fund_hk_mutual(
@@ -93,18 +138,39 @@ def get_fund_hk_mutual(
 ) -> List[Dict[str, Any]]:
     """
     香港互认基金净值（HK_MUTUAL）。
-    code: 内地销售代码（如 '1001767344'），格式需实测确认。
-    返回统一结构: {trade_date: 'YYYYMMDD', unit_price, accumulated_nav}
+    code: 6位内地销售代码，自动映射为10位香港基金代码
+    start_date/end_date: YYYYMMDD 格式
+    返回: [{trade_date: 'YYYYMMDD', unit_price, accumulated_nav}]
     """
     try:
         import akshare as ak
     except ImportError:
         raise AkshareAPIError("akshare 未安装，请 pip install akshare")
 
+    code6 = code.split(".")[0]
+
     def _fetch():
-        # TODO(PoC): 确认 akshare 香港基金历史净值明细接口函数名和参数
-        # 天天基金网香港基金接口，code 格式可能是 10 位内地代码或另有映射
-        # 需实测确认后补全
-        raise AkshareAPIError("get_fund_hk_mutual 尚未实现（需 PoC 确认 akshare 香港基金接口和 code 格式）")
+        code_map = _ensure_hk_code_map(ak)
+        hk10 = code_map.get(code6)
+        if not hk10:
+            if len(code6) == 10:
+                hk10 = code6
+            else:
+                raise AkshareAPIError(f"未找到 6 位代码 {code6} 对应的香港基金代码")
+
+        df = ak.fund_hk_fund_hist_em(code=hk10, symbol="历史净值明细")
+        result = []
+        for _, row in df.iterrows():
+            td = _to_yyyymmdd(str(row["净值日期"]))
+            if start_date and td < start_date:
+                continue
+            if end_date and td > end_date:
+                continue
+            result.append({
+                "trade_date": td,
+                "unit_price": float(row["单位净值"]),
+                "accumulated_nav": None,
+            })
+        return result
 
     return _retry(_fetch, "获取香港互认基金净值失败")
