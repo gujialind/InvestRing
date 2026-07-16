@@ -953,6 +953,35 @@ def auto_confirm_after_snapshot(
 
     for trade in pending_trades:
         try:
+            # 净值型产品（OEF/LOF on CN_OTC）：用 NAV 计算份额
+            product = db.query(Product).filter(
+                Product.code == trade.product_code,
+                Product.market == trade.market,
+            ).first()
+            is_nav_product = (
+                product
+                and product.product_type in ("OEF", "LOF")
+                and trade.market == "CN_OTC"
+            )
+            if is_nav_product:
+                # 取 T 日（trade_date）净值
+                nav_record = db.query(PriceRecord).filter(
+                    PriceRecord.product_code == trade.product_code,
+                    PriceRecord.market == trade.market,
+                    PriceRecord.date <= trade.trade_date,
+                ).order_by(PriceRecord.date.desc()).first()
+                if nav_record and nav_record.unit_price:
+                    nav = Decimal(str(nav_record.unit_price))
+                    trade.price = nav
+                    if trade.trade_type == "buy":
+                        amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
+                        trade.shares = amount / nav
+                        trade.amount = amount
+                    # sell: 已有 shares，计算 amount
+                    elif trade.trade_type == "sell" and trade.shares:
+                        trade.amount = Decimal(str(trade.shares)) * nav
+                        trade.actual_amount = trade.amount + Decimal(str(trade.fee))
+
             trade.status = "confirmed"
             # 同步 transfer_group 关联的配对 CASH 腿
             if trade.transfer_group:
