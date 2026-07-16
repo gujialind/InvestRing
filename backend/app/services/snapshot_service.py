@@ -227,17 +227,6 @@ def recalculate_snapshots(
                     result["auto_confirmed"].extend(auto_results)
                     # 申赎统一 T+1 确认，刚确认的申赎 confirm_date = D+1 > D
                     # 不会被 D 日的 investor_holding 包含，无需局部刷新
-                    # 但 Trade/Event 自动确认影响 D 日持仓，需要刷新快照
-                    has_trade_or_event = any(
-                        r.get("type") in ("trade", "event")
-                        for r in auto_results
-                    )
-                    if has_trade_or_event:
-                        snapshot_result = generate_daily_snapshots(
-                            db, portfolio.code, current_date,
-                            skip_validation=True,
-                        )
-                        db.commit()
 
                 result["processed_dates"].append(current_date.isoformat())
                 result["total_processed"] += 1
@@ -633,7 +622,7 @@ def _generate_portfolio_position(
         # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
         is_cash = pos_data.get("asset_type") == "cash"
         if not is_cash:
-            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and (pos_data.get("amount") or Decimal("0")) <= 0:
+            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and pos_data.get("amount", Decimal("0")) <= 0:
                 continue  # 跳过零持仓
         
         # 获取产品价格
@@ -964,35 +953,6 @@ def auto_confirm_after_snapshot(
 
     for trade in pending_trades:
         try:
-            # 净值型产品（OEF/LOF on CN_OTC）：用 NAV 计算份额
-            product = db.query(Product).filter(
-                Product.code == trade.product_code,
-                Product.market == trade.market,
-            ).first()
-            is_nav_product = (
-                product
-                and product.product_type in ("OEF", "LOF")
-                and trade.market == "CN_OTC"
-            )
-            if is_nav_product:
-                # 取 T 日（trade_date）净值
-                nav_record = db.query(PriceRecord).filter(
-                    PriceRecord.product_code == trade.product_code,
-                    PriceRecord.market == trade.market,
-                    PriceRecord.date <= trade.trade_date,
-                ).order_by(PriceRecord.date.desc()).first()
-                if nav_record and nav_record.unit_price:
-                    nav = Decimal(str(nav_record.unit_price))
-                    trade.price = nav
-                    if trade.trade_type == "buy":
-                        amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
-                        trade.shares = amount / nav
-                        trade.amount = amount
-                    # sell: 已有 shares，计算 amount
-                    elif trade.trade_type == "sell" and trade.shares:
-                        trade.amount = Decimal(str(trade.shares)) * nav
-                        trade.actual_amount = trade.amount + Decimal(str(trade.fee))
-
             trade.status = "confirmed"
             # 同步 transfer_group 关联的配对 CASH 腿
             if trade.transfer_group:
