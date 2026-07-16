@@ -3,6 +3,7 @@ HTTP 客户端封装
 
 所有命令通过此模块与后端通信，统一处理认证、错误和响应格式。
 """
+import os
 from typing import Any, Optional
 
 import httpx
@@ -19,10 +20,11 @@ class APIClient:
         headers = {"Accept": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
+        timeout = float(os.environ.get("IR_HTTP_TIMEOUT", "300"))
         self._client = httpx.Client(
             base_url=self.base_url,
             headers=headers,
-            timeout=60.0,
+            timeout=timeout,
         )
 
     @classmethod
