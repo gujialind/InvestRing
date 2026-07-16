@@ -227,17 +227,6 @@ def recalculate_snapshots(
                     result["auto_confirmed"].extend(auto_results)
                     # 申赎统一 T+1 确认，刚确认的申赎 confirm_date = D+1 > D
                     # 不会被 D 日的 investor_holding 包含，无需局部刷新
-                    # 但 Trade/Event 自动确认影响 D 日持仓，需要刷新快照
-                    has_trade_or_event = any(
-                        r.get("type") in ("trade", "event")
-                        for r in auto_results
-                    )
-                    if has_trade_or_event:
-                        snapshot_result = generate_daily_snapshots(
-                            db, portfolio.code, current_date,
-                            skip_validation=True,
-                        )
-                        db.commit()
 
                 result["processed_dates"].append(current_date.isoformat())
                 result["total_processed"] += 1
