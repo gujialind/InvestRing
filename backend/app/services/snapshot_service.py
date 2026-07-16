@@ -622,7 +622,7 @@ def _generate_portfolio_position(
         # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
         is_cash = pos_data.get("asset_type") == "cash"
         if not is_cash:
-            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and pos_data.get("amount", Decimal("0")) <= 0:
+            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and (pos_data.get("amount") or Decimal("0")) <= 0:
                 continue  # 跳过零持仓
         
         # 获取产品价格
