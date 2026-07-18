@@ -357,6 +357,80 @@ def cancel_share_change_event(
     return {"message": "Share change event cancelled successfully"}
 
 
+@router.post("/{id}/unconfirm")
+def unconfirm_share_change_event(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_admin),
+):
+    """取消确认份额变动事件。
+
+    - 仅 confirmed 状态可 unconfirm，否则 422 INVALID_STATUS
+    - 快照保护：ex_date 及之后已有快照则拒绝 422 SNAPSHOT_DEPENDENCY
+    - 基金级父记录（platform_code 为空）：级联删除所有子记录后置 pending
+    - 平台级记录（platform_code 非空）：直接置 pending
+    - 子记录（parent_event_id 非空）单独 unconfirm 拒绝：422 CANNOT_UNCONFIRM_CHILD
+    """
+    event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Share change event not found")
+    if event.status != "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_STATUS", "message": "仅 confirmed 状态可取消确认"},
+        )
+
+    # 子记录不允许单独 unconfirm，必须 unconfirm 父记录
+    if event.parent_event_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "CANNOT_UNCONFIRM_CHILD",
+                "message": "基金级事件的子记录不允许单独取消确认，请对父记录执行 unconfirm",
+            },
+        )
+
+    # 快照保护：ex_date 及之后已有快照则拒绝
+    snapshots_after = (
+        db.query(PortfolioValueSnapshot)
+        .filter(
+            PortfolioValueSnapshot.portfolio_code == event.portfolio_code,
+            PortfolioValueSnapshot.snapshot_date >= event.ex_date,
+        )
+        .count()
+    )
+    if snapshots_after > 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "SNAPSHOT_DEPENDENCY",
+                "message": (
+                    f"该事件已被快照纳入（{event.ex_date} 及之后有 {snapshots_after} 张快照），"
+                    f"请先删除 {event.ex_date} 及之后的快照"
+                ),
+            },
+        )
+
+    if event.platform_code is None:
+        # 基金级父记录：级联删除所有子记录
+        db.query(ShareChangeEvent).filter(
+            ShareChangeEvent.parent_event_id == event.id
+        ).delete(synchronize_session=False)
+
+    # 置 pending 并清空确认时回写的计算字段，便于重确认重新计算
+    event.status = "pending"
+    event.confirmed_at = None
+    event.shares_change = None
+    event.shares_after = None
+    event.cash_change = None
+    event.entitlement_shares = None
+    event.shares_before = None
+
+    db.commit()
+    db.refresh(event)
+    return {"message": "Share change event unconfirmed successfully", "event": ShareChangeEventResponse.from_orm(event)}
+
+
 @router.put("/{id}", response_model=ShareChangeEventResponse)
 def update_share_change_event(
     id: int,

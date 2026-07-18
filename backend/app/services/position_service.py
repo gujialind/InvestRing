@@ -14,7 +14,10 @@ from app.models.portfolio_position import PortfolioPosition
 from app.models.share_change_event import ShareChangeEvent
 from app.models.subscription import Subscription
 from app.models.trade import Trade
-from app.services.trading_utils import get_latest_snapshot_date
+from app.services.trading_utils import (
+    get_latest_snapshot_date,
+    get_latest_snapshot_date_le,
+)
 
 
 def compute_cash_balance(
@@ -98,7 +101,10 @@ def get_cash_value(
 
 
 def calculate_available_cash(
-    db: Session, portfolio_code: str, platform_code: Optional[str] = None
+    db: Session,
+    portfolio_code: str,
+    platform_code: Optional[str] = None,
+    as_of_date: Optional[date] = None,
 ) -> Decimal:
     """
     组合可用现金实时计算（显式流水版）。
@@ -108,14 +114,21 @@ def calculate_available_cash(
     + 快照后 confirmed CASH trades（buy +, sell −）
     − 所有 pending CASH sells（已承诺未执行）
     + 快照后 confirmed event cash_change
+
+    as_of_date 为 None 时取当前最新快照日为基线、after 范围为 > latest_date；
+    传入时基线取 <= as_of_date 的最新快照日，after 范围为 (latest_date, as_of_date]，
+    pending 不变（pending 未生效，截止日不影响 pending 计提）。
     """
-    latest_date = get_latest_snapshot_date(db, portfolio_code)
+    if as_of_date is not None:
+        latest_date = get_latest_snapshot_date_le(db, portfolio_code, as_of_date)
+    else:
+        latest_date = get_latest_snapshot_date(db, portfolio_code)
 
     # 基线：快照日现金（含 manual_market_value 绝对替换，与快照落库口径一致）
     if latest_date is not None:
         cash = get_cash_value(db, portfolio_code, platform_code, latest_date)
     else:
-        cash = compute_cash_balance(db, portfolio_code, platform_code, None)
+        cash = compute_cash_balance(db, portfolio_code, platform_code, as_of_date)
 
     if latest_date is None:
         latest_date = date(1970, 1, 1)  # 确保 > 条件对所有 trade 生效
@@ -127,6 +140,8 @@ def calculate_available_cash(
         Trade.status == "confirmed",
         Trade.confirm_date > latest_date,
     )
+    if as_of_date is not None:
+        after_trades = after_trades.filter(Trade.confirm_date <= as_of_date)
     if platform_code:
         after_trades = after_trades.filter(Trade.platform_code == platform_code)
 
@@ -157,6 +172,8 @@ def calculate_available_cash(
         ShareChangeEvent.cash_change.isnot(None),
         ShareChangeEvent.cash_change != 0,
     )
+    if as_of_date is not None:
+        after_events = after_events.filter(ShareChangeEvent.ex_date <= as_of_date)
     if platform_code:
         after_events = after_events.filter(ShareChangeEvent.platform_code == platform_code)
 
@@ -167,15 +184,25 @@ def calculate_available_cash(
 
 
 def calculate_available_shares(
-    db: Session, portfolio_code: str, product_code: str, market: Optional[str] = None
+    db: Session,
+    portfolio_code: str,
+    product_code: str,
+    market: Optional[str] = None,
+    as_of_date: Optional[date] = None,
 ) -> Decimal:
     """
     基金可用份额实时计算：
     基金可用份额 = 最新快照份额
                 - SUM(pending卖出份额)
                 - SUM(confirmed卖出份额 WHERE 快照未生成)
+
+    as_of_date 为 None 时基线取当前最新快照日；传入时取 <= as_of_date 的最新快照日，
+    confirmed 卖出仅计 confirm_date 在 (latest_date, as_of_date] 的。
     """
-    latest_date = get_latest_snapshot_date(db, portfolio_code)
+    if as_of_date is not None:
+        latest_date = get_latest_snapshot_date_le(db, portfolio_code, as_of_date)
+    else:
+        latest_date = get_latest_snapshot_date(db, portfolio_code)
 
     query = db.query(PortfolioPosition).filter(
         PortfolioPosition.portfolio_code == portfolio_code,
@@ -183,6 +210,8 @@ def calculate_available_shares(
     )
     if market:
         query = query.filter(PortfolioPosition.market == market)
+    if as_of_date is not None:
+        query = query.filter(PortfolioPosition.snapshot_date <= as_of_date)
     latest_position = query.order_by(PortfolioPosition.snapshot_date.desc()).first()
 
     shares = Decimal(latest_position.shares) if latest_position and latest_position.shares else Decimal("0")
@@ -211,34 +240,44 @@ def calculate_available_shares(
         .all()
     )
     for t in confirmed_sells:
-        if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
+        if latest_date is None or (
+            t.confirm_date and t.confirm_date > latest_date
+            and (as_of_date is None or t.confirm_date <= as_of_date)
+        ):
             shares -= Decimal(t.shares) if t.shares else Decimal("0")
 
     return shares
 
 
 def calculate_investor_available_shares(
-    db: Session, portfolio_code: str, investor_code: str
+    db: Session,
+    portfolio_code: str,
+    investor_code: str,
+    as_of_date: Optional[date] = None,
 ) -> Decimal:
     """
     投资人可用份额实时计算：
     投资人可用份额 = 最新快照份额
                   - SUM(pending赎回份额)
                   - SUM(confirmed赎回份额 WHERE 快照未生成)
+
+    as_of_date 为 None 时基线取当前最新快照日；传入时取 <= as_of_date 的最新快照日，
+    confirmed 赎回仅计 confirm_date 在 (latest_date, as_of_date] 的。
     """
     from app.models.investor_holding import InvestorHolding
 
-    latest_date = get_latest_snapshot_date(db, portfolio_code)
+    if as_of_date is not None:
+        latest_date = get_latest_snapshot_date_le(db, portfolio_code, as_of_date)
+    else:
+        latest_date = get_latest_snapshot_date(db, portfolio_code)
 
-    latest_holding = (
-        db.query(InvestorHolding)
-        .filter(
-            InvestorHolding.portfolio_code == portfolio_code,
-            InvestorHolding.investor_code == investor_code,
-        )
-        .order_by(InvestorHolding.snapshot_date.desc())
-        .first()
+    holding_query = db.query(InvestorHolding).filter(
+        InvestorHolding.portfolio_code == portfolio_code,
+        InvestorHolding.investor_code == investor_code,
     )
+    if as_of_date is not None:
+        holding_query = holding_query.filter(InvestorHolding.snapshot_date <= as_of_date)
+    latest_holding = holding_query.order_by(InvestorHolding.snapshot_date.desc()).first()
     shares = Decimal(latest_holding.shares) if latest_holding else Decimal("0")
 
     pending_redeems = (
@@ -265,7 +304,10 @@ def calculate_investor_available_shares(
         .all()
     )
     for s in confirmed_redeems:
-        if latest_date is None or (s.confirm_date and s.confirm_date > latest_date):
+        if latest_date is None or (
+            s.confirm_date and s.confirm_date > latest_date
+            and (as_of_date is None or s.confirm_date <= as_of_date)
+        ):
             shares -= Decimal(s.shares) if s.shares else Decimal("0")
 
     return shares
