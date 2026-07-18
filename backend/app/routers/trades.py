@@ -11,10 +11,10 @@ from app.models.product import Product
 from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.trading_calendar import TradingCalendar
-from app.models.price_record import PriceRecord
 from app.schemas.trade import TradeCreate, TradeUpdate, TradeResponse
 from app.dependencies import get_current_user, get_current_admin
 from app.services.position_service import calculate_available_cash
+from app.services.trade_service import confirm_single_trade, sync_transfer_group
 
 
 def _get_next_trading_day(db: Session, from_date: date, days: int = 1) -> date:
@@ -52,89 +52,7 @@ def _prev_trading_day(db: Session, from_date: date, days: int = 1) -> date:
     return prev_date or from_date
 
 
-def _get_nav_for_trade_confirmation(
-    db: Session, product_code: str, market: str, trade_date: date, is_qdii: bool
-) -> Optional[Decimal]:
-    """
-    获取调仓交易确认时的净值
-    
-    规则：
-    - QDII产品：必须使用T日净值，禁止向前查找
-    - 非QDII净值型产品：使用T日或最近交易日净值
-    
-    Args:
-        db: 数据库会话
-        product_code: 产品代码
-        market: 市场类型
-        trade_date: 交易日期（T日）
-        is_qdii: 是否为QDII产品
-        
-    Returns:
-        净值（Decimal），如果不存在则返回 None
-        
-    Raises:
-        HTTPException: QDII产品T日净值不存在时抛出异常
-    """
-    if is_qdii:
-        # QDII：必须取T日净值，禁止向前查找
-        price_record = db.query(PriceRecord).filter(
-            PriceRecord.product_code == product_code,
-            PriceRecord.market == market,
-            PriceRecord.date == trade_date
-        ).first()
-        
-        if not price_record or not price_record.unit_price:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": "MISSING_QDII_NAV",
-                    "message": f"QDII产品{product_code}在T={trade_date}的净值尚未同步，请等待T+2日后重试或手动指定净值"
-                }
-            )
-        
-        return Decimal(str(price_record.unit_price))
-    else:
-        # 非QDII：取T日或最近的净值
-        price_record = db.query(PriceRecord).filter(
-            PriceRecord.product_code == product_code,
-            PriceRecord.market == market,
-            PriceRecord.date <= trade_date
-        ).order_by(PriceRecord.date.desc()).first()
-        
-        if price_record and price_record.unit_price:
-            return Decimal(str(price_record.unit_price))
-        
-        return None
-
-
 router = APIRouter()
-
-
-def _sync_transfer_group(
-    db: Session, trade: Trade, target_status: str, confirm_date: Optional[date] = None
-):
-    """同步 transfer_group 关联的另一腿状态"""
-    if not trade.transfer_group:
-        return
-    paired = db.query(Trade).filter(
-        Trade.transfer_group == trade.transfer_group,
-        Trade.id != trade.id,
-    ).all()
-    for paired_trade in paired:
-        paired_trade.status = target_status
-        if confirm_date is not None:
-            paired_trade.confirm_date = confirm_date
-        elif target_status == "pending":
-            # unconfirm 时需要重新计算期望确认日
-            paired_product = db.query(Product).filter(
-                Product.code == paired_trade.product_code,
-                Product.market == paired_trade.market,
-            ).first()
-            if paired_product:
-                paired_confirm_days = paired_product.confirm_days or 0
-                paired_trade.confirm_date = _get_next_trading_day(
-                    db, paired_trade.trade_date, days=paired_confirm_days
-                )
 
 
 def _is_trading_day(db: Session, target_date: date) -> bool:
@@ -434,59 +352,10 @@ def confirm_trade(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
-    if confirm_date is not None:
-        trade.confirm_date = confirm_date
-    # 否则保留创建时已设定的 confirm_date
-
-    # 净值型产品必须获取净值进行计算
-    # 判断是否为净值型产品（场外基金）
-    is_nav_product = product.product_type in ["OEF", "LOF"] and trade.market == "CN_OTC"
-    
-    if is_nav_product:
-        # 净值型产品：获取T日净值（QDII会抛出异常如果净值不存在）
-        nav_price = _get_nav_for_trade_confirmation(
-            db, trade.product_code, trade.market, trade.trade_date, product.is_qdii
-        )
-        
-        # 非QDII产品可能返回None
-        if nav_price is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": "MISSING_NAV",
-                    "message": f"产品{trade.product_code}在T={trade.trade_date}的净值尚未同步，无法确认交易"
-                }
-            )
-        
-        # 如果前端传入了价格，使用传入的价格；否则使用系统获取的净值
-        final_price = Decimal(str(price)) if price is not None else nav_price
-        
-        # 重新计算交易数据
-        trade.price = final_price
-        if trade.trade_type == "buy":
-            amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
-            trade.shares = amount / final_price
-            trade.amount = amount
-        else:
-            amount = Decimal(str(trade.shares)) * final_price
-            trade.actual_amount = amount - Decimal(str(trade.fee))
-            trade.amount = amount
-    elif price is not None:
-        # 非净值型产品但传入了价格（如手动指定）
-        trade.price = Decimal(str(price))
-        if trade.trade_type == "buy":
-            amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
-            trade.shares = amount / Decimal(str(price))
-            trade.amount = amount
-        else:
-            amount = Decimal(str(trade.shares)) * Decimal(str(price))
-            trade.actual_amount = amount - Decimal(str(trade.fee))
-            trade.amount = amount
-
-    trade.status = "confirmed"
-    # confirm_date 已在上方处理（创建时设定或参数覆盖）
-    _sync_transfer_group(db, trade, "confirmed", trade.confirm_date)
+    price_decimal = Decimal(str(price)) if price is not None else None
+    confirm_single_trade(
+        db, trade, product, confirm_date=confirm_date, price=price_decimal
+    )
     db.commit()
     db.refresh(trade)
     resp = TradeResponse.from_orm(trade)
@@ -525,7 +394,7 @@ def cancel_trade(
         )
 
     trade.status = "cancelled"
-    _sync_transfer_group(db, trade, "cancelled")
+    sync_transfer_group(db, trade, "cancelled")
     db.commit()
     return {"message": "Trade cancelled successfully"}
 
@@ -556,7 +425,7 @@ def unconfirm_trade(
             trade.confirm_date = _get_next_trading_day(
                 db, trade.trade_date, days=confirm_days_unconfirm
             )
-    _sync_transfer_group(db, trade, "pending")
+    sync_transfer_group(db, trade, "pending")
     db.commit()
     return {"message": "Trade unconfirmed successfully"}
 

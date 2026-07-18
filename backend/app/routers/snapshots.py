@@ -72,7 +72,6 @@ def recalculate(
             portfolio_code=request.portfolio_code,
             start_date=request.start_date,
             end_date=request.end_date,
-            force=request.force,
         )
         return RecalculationResult(**result)
     except ValueError as e:
