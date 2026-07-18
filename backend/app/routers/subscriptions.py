@@ -10,7 +10,7 @@ from app.models.investor import Investor
 from app.models.investor_holding import InvestorHolding
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.platform import Platform
-from app.services.trading_utils import is_trading_day
+from app.services.trading_utils import is_trading_day, get_next_trading_day
 from app.services.subscription_service import (
     confirm_single_subscription,
     unconfirm_single_subscription,
@@ -184,6 +184,7 @@ def create_subscription(
             sub_type="subscribe",
             amount=subscription.amount,
             apply_date=subscription.apply_date,
+            confirm_date=get_next_trading_day(db, subscription.apply_date, days=1),
             status="pending",
             notes=subscription.notes,
         )
@@ -212,6 +213,7 @@ def create_subscription(
             sub_type="redeem",
             shares=subscription.shares,
             apply_date=subscription.apply_date,
+            confirm_date=get_next_trading_day(db, subscription.apply_date, days=1),
             status="pending",
             notes=subscription.notes,
         )
