@@ -13,10 +13,14 @@ from app.services.position_service import (
     compute_cash_balance,
     get_cash_value,
     calculate_available_cash,
+    calculate_available_shares,
+    calculate_investor_available_shares,
 )
 from tests.factories import (
     create_portfolio, create_platform, create_trade,
     create_value_snapshot, create_manual_market_value,
+    create_position_snapshot, create_investor_holding, create_subscription,
+    create_investor, create_product,
 )
 
 
@@ -146,3 +150,154 @@ class TestCalculateAvailableCashWithOverride:
         )
         cash = calculate_available_cash(test_db, "GV_P", "GV_PLAT")
         assert cash == Decimal("6000")
+
+
+class TestCalculateAvailableCashAsOfDate:
+    """calculate_available_cash 的 as_of_date 截止计算（#23）"""
+
+    def test_as_of_date_baseline_le(self, test_db):
+        """as_of_date 传入历史日时，基线取 <= as_of_date 的最新快照日"""
+        _seed_cash_baseline(test_db)  # SNAP_DATE(2025-01-06) 现金 6000
+        # 造一个更晚的快照（as_of_date 之后），不应被采用为基线
+        create_value_snapshot(
+            test_db, "GV_P", date(2025, 1, 13),
+            total_value=20000, total_shares=20000, unit_price=1.0,
+        )
+        cash = calculate_available_cash(
+            test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)
+        )
+        # 基线落在 2025-01-06，无后续快照内 trade，应为 6000
+        assert cash == Decimal("6000")
+
+    def test_as_of_date_after_range_inclusive(self, test_db):
+        """as_of_date 截止：快照后 confirmed trade 在 (latest, as_of] 内计入"""
+        _seed_cash_baseline(test_db)
+        # SNAP_DATE 之后、as_of 之前的 confirmed buy 应计入
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="buy", amount=300, status="confirmed",
+            trade_date=date(2025, 1, 7), confirm_date=date(2025, 1, 8),
+            platform_code="GV_PLAT",
+        )
+        # as_of 之后的 confirmed buy 不应计入
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="buy", amount=999, status="confirmed",
+            trade_date=date(2025, 1, 13), confirm_date=date(2025, 1, 14),
+            platform_code="GV_PLAT",
+        )
+        cash = calculate_available_cash(
+            test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)
+        )
+        assert cash == Decimal("6300")
+
+    def test_as_of_date_pending_unaffected(self, test_db):
+        """as_of_date 截止不影响 pending sells 计提"""
+        _seed_cash_baseline(test_db)
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="sell", amount=500, status="pending",
+            trade_date=date(2025, 1, 20),  # pending 在 as_of 之后，仍计提预留
+            platform_code="GV_PLAT",
+        )
+        cash = calculate_available_cash(
+            test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)
+        )
+        assert cash == Decimal("5500")
+
+
+class TestCalculateAvailableSharesAsOfDate:
+    """calculate_available_shares 的 as_of_date 截止计算（#23）"""
+
+    def test_as_of_date_latest_position_le(self, test_db):
+        """as_of_date 截止：最新持仓取 <= as_of_date 的快照"""
+        create_portfolio(test_db, code="SHR_P", status="active")
+        create_platform(test_db, code="SHR_PLAT")
+        create_product(test_db, code="FUND1", market="CN_OTC")
+        # 1-6 快照 1000 份
+        create_position_snapshot(
+            test_db, "SHR_P", "FUND1", "CN_OTC", date(2025, 1, 6),
+            shares=1000, platform_code="SHR_PLAT",
+        )
+        # 1-13 快照 800 份（as_of 之后，不应采用）
+        create_position_snapshot(
+            test_db, "SHR_P", "FUND1", "CN_OTC", date(2025, 1, 13),
+            shares=800, platform_code="SHR_PLAT",
+        )
+        # as_of=1-10：基线取 1-6 的 1000
+        shares = calculate_available_shares(
+            test_db, "SHR_P", "FUND1", "CN_OTC", as_of_date=date(2025, 1, 10)
+        )
+        assert shares == Decimal("1000")
+
+    def test_as_of_date_confirmed_sell_in_range(self, test_db):
+        """as_of_date 截止：confirmed sell 在 (latest, as_of] 内扣减"""
+        create_portfolio(test_db, code="SHR_P2", status="active")
+        create_platform(test_db, code="SHR_PLAT2")
+        create_product(test_db, code="FUND1", market="CN_OTC")
+        create_value_snapshot(
+            test_db, "SHR_P2", date(2025, 1, 6),
+            total_value=1000, total_shares=1000, unit_price=1.0,
+        )
+        create_position_snapshot(
+            test_db, "SHR_P2", "FUND1", "CN_OTC", date(2025, 1, 6),
+            shares=1000, platform_code="SHR_PLAT2",
+        )
+        # 快照后、as_of 内 confirmed sell 100
+        create_trade(
+            test_db, "SHR_P2", "FUND1", "CN_OTC",
+            trade_type="sell", shares=100, status="confirmed",
+            trade_date=date(2025, 1, 7), confirm_date=date(2025, 1, 8),
+            platform_code="SHR_PLAT2",
+        )
+        # as_of 之后的 confirmed sell 50 不扣减
+        create_trade(
+            test_db, "SHR_P2", "FUND1", "CN_OTC",
+            trade_type="sell", shares=50, status="confirmed",
+            trade_date=date(2025, 1, 13), confirm_date=date(2025, 1, 14),
+            platform_code="SHR_PLAT2",
+        )
+        shares = calculate_available_shares(
+            test_db, "SHR_P2", "FUND1", "CN_OTC", as_of_date=date(2025, 1, 10)
+        )
+        assert shares == Decimal("900")
+
+
+class TestCalculateInvestorAvailableSharesAsOfDate:
+    """calculate_investor_available_shares 的 as_of_date 截止计算（#23）"""
+
+    def test_as_of_date_latest_holding_le(self, test_db):
+        """as_of_date 截止：最新投资人份额取 <= as_of_date 的快照"""
+        create_portfolio(test_db, code="INV_P", status="active")
+        create_investor(test_db, code="INV_I")
+        create_investor_holding(test_db, "INV_P", "INV_I", date(2025, 1, 6), shares=500)
+        create_investor_holding(test_db, "INV_P", "INV_I", date(2025, 1, 13), shares=300)
+        shares = calculate_investor_available_shares(
+            test_db, "INV_P", "INV_I", as_of_date=date(2025, 1, 10)
+        )
+        assert shares == Decimal("500")
+
+    def test_as_of_date_confirmed_redeem_in_range(self, test_db):
+        """as_of_date 截止：confirmed redeem 在 (latest, as_of] 内扣减"""
+        create_portfolio(test_db, code="INV_P2", status="active")
+        create_investor(test_db, code="INV_I2")
+        create_platform(test_db, code="MYCF")
+        create_value_snapshot(
+            test_db, "INV_P2", date(2025, 1, 6),
+            total_value=500, total_shares=500, unit_price=1.0,
+        )
+        create_investor_holding(test_db, "INV_P2", "INV_I2", date(2025, 1, 6), shares=500)
+        create_subscription(
+            test_db, "INV_P2", "INV_I2", sub_type="redeem",
+            shares=100, apply_date=date(2025, 1, 7),
+            confirm_date=date(2025, 1, 8), status="confirmed",
+        )
+        create_subscription(
+            test_db, "INV_P2", "INV_I2", sub_type="redeem",
+            shares=50, apply_date=date(2025, 1, 13),
+            confirm_date=date(2025, 1, 14), status="confirmed",
+        )
+        shares = calculate_investor_available_shares(
+            test_db, "INV_P2", "INV_I2", as_of_date=date(2025, 1, 10)
+        )
+        assert shares == Decimal("400")

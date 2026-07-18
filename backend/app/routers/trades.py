@@ -8,12 +8,14 @@ from app.database import get_db
 from app.models.trade import Trade
 from app.models.portfolio import Portfolio
 from app.models.product import Product
-from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.trading_calendar import TradingCalendar
 from app.schemas.trade import TradeCreate, TradeUpdate, TradeResponse
 from app.dependencies import get_current_user, get_current_admin
-from app.services.position_service import calculate_available_cash
+from app.services.position_service import (
+    calculate_available_cash,
+    calculate_available_shares,
+)
 from app.services.trade_service import confirm_single_trade, sync_transfer_group
 
 
@@ -71,56 +73,6 @@ def _get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date
     )
     return result
 
-
-def _calculate_available_shares(
-    db: Session, portfolio_code: str, product_code: str, market: Optional[str] = None
-) -> Decimal:
-    """
-    基金可用份额实时计算：
-    基金可用份额 = 最新快照份额
-                - SUM(pending卖出份额)
-                - SUM(confirmed卖出份额 WHERE 快照未生成)
-    """
-    latest_date = _get_latest_snapshot_date(db, portfolio_code)
-
-    query = db.query(PortfolioPosition).filter(
-        PortfolioPosition.portfolio_code == portfolio_code,
-        PortfolioPosition.product_code == product_code,
-    )
-    if market:
-        query = query.filter(PortfolioPosition.market == market)
-    latest_position = query.order_by(PortfolioPosition.snapshot_date.desc()).first()
-
-    shares = Decimal(latest_position.shares) if latest_position and latest_position.shares else Decimal("0")
-
-    pending_sells = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.product_code == product_code,
-            Trade.status == "pending",
-            Trade.trade_type == "sell",
-        )
-        .all()
-    )
-    for t in pending_sells:
-        shares -= Decimal(t.shares) if t.shares else Decimal("0")
-
-    confirmed_sells = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.product_code == product_code,
-            Trade.status == "confirmed",
-            Trade.trade_type == "sell",
-        )
-        .all()
-    )
-    for t in confirmed_sells:
-        if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
-            shares -= Decimal(t.shares) if t.shares else Decimal("0")
-
-    return shares
 
 
 @router.get("")
@@ -246,7 +198,7 @@ def create_trade(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"error": "INVALID_SHARES", "message": "卖出份额必须大于0"},
             )
-        available_shares = _calculate_available_shares(
+        available_shares = calculate_available_shares(
             db, trade.portfolio_code, trade.product_code, trade.market
         )
         if Decimal(str(trade.shares)) > available_shares:
@@ -413,7 +365,29 @@ def unconfirm_trade(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": "INVALID_STATUS", "message": "仅 confirmed 状态可取消确认"},
         )
-    
+
+    # 快照保护：确认日及之后已有快照则拒绝
+    if trade.confirm_date:
+        snapshots_after = (
+            db.query(PortfolioValueSnapshot)
+            .filter(
+                PortfolioValueSnapshot.portfolio_code == trade.portfolio_code,
+                PortfolioValueSnapshot.snapshot_date >= trade.confirm_date,
+            )
+            .count()
+        )
+        if snapshots_after > 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "SNAPSHOT_DEPENDENCY",
+                    "message": (
+                        f"该交易已被快照纳入（{trade.confirm_date} 及之后有 {snapshots_after} 张快照），"
+                        f"请先删除 {trade.confirm_date} 及之后的快照"
+                    ),
+                },
+            )
+
     trade.status = "pending"
     # 重新计算期望确认日（创建时设定 confirm_date，unconfirm 后需恢复）
     if trade.product_code and trade.market:
@@ -450,8 +424,17 @@ def update_trade(
             }
         )
 
-    for field, value in trade.dict(exclude_unset=True).items():
+    update_data = trade.dict(exclude_unset=True)
+    # 记录是否改动与配对同步相关的字段
+    sync_fields = {"status", "confirm_date", "trade_date"}
+    needs_sync = bool(update_data.keys() & sync_fields)
+
+    for field, value in update_data.items():
         setattr(db_trade, field, value)
+
+    # 若改动涉及配对同步相关字段，同步 transfer_group 配对 CASH 腿
+    if needs_sync and db_trade.transfer_group:
+        sync_transfer_group(db, db_trade, db_trade.status, db_trade.confirm_date)
 
     db.commit()
     db.refresh(db_trade)
@@ -476,6 +459,13 @@ def delete_trade(
                 "message": "已确认的交易不可直接删除，请先取消确认后再删除"
             }
         )
+
+    # 级联删除配对 CASH 腿（同一 transfer_group 的另一腿）
+    if trade.transfer_group:
+        db.query(Trade).filter(
+            Trade.transfer_group == trade.transfer_group,
+            Trade.id != trade.id,
+        ).delete(synchronize_session=False)
 
     db.delete(trade)
     db.commit()

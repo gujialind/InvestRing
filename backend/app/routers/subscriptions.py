@@ -7,10 +7,14 @@ from app.database import get_db
 from app.models.subscription import Subscription
 from app.models.portfolio import Portfolio
 from app.models.investor import Investor
-from app.models.investor_holding import InvestorHolding
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.platform import Platform
-from app.services.trading_utils import is_trading_day, get_next_trading_day
+from app.services.trading_utils import (
+    is_trading_day,
+    get_next_trading_day,
+    get_latest_snapshot_date,
+)
+from app.services.position_service import calculate_investor_available_shares
 from app.services.subscription_service import (
     confirm_single_subscription,
     unconfirm_single_subscription,
@@ -21,68 +25,6 @@ from app.schemas.subscription import SubscriptionCreate, SubscriptionUpdate, Sub
 from app.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
-
-
-def _get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date]:
-    from sqlalchemy import func
-    result = (
-        db.query(func.max(PortfolioValueSnapshot.snapshot_date))
-        .filter(PortfolioValueSnapshot.portfolio_code == portfolio_code)
-        .scalar()
-    )
-    return result
-
-
-def _calculate_investor_available_shares(
-    db: Session, portfolio_code: str, investor_code: str
-) -> Decimal:
-    """
-    投资人可用份额实时计算：
-    投资人可用份额 = 最新快照份额
-                  - SUM(pending赎回份额)
-                  - SUM(confirmed赎回份额 WHERE 快照未生成)
-    """
-    latest_date = _get_latest_snapshot_date(db, portfolio_code)
-
-    latest_holding = (
-        db.query(InvestorHolding)
-        .filter(
-            InvestorHolding.portfolio_code == portfolio_code,
-            InvestorHolding.investor_code == investor_code,
-        )
-        .order_by(InvestorHolding.snapshot_date.desc())
-        .first()
-    )
-    shares = Decimal(latest_holding.shares) if latest_holding else Decimal("0")
-
-    pending_redeems = (
-        db.query(Subscription)
-        .filter(
-            Subscription.portfolio_code == portfolio_code,
-            Subscription.investor_code == investor_code,
-            Subscription.sub_type == "redeem",
-            Subscription.status == "pending",
-        )
-        .all()
-    )
-    for s in pending_redeems:
-        shares -= Decimal(s.shares) if s.shares else Decimal("0")
-
-    confirmed_redeems = (
-        db.query(Subscription)
-        .filter(
-            Subscription.portfolio_code == portfolio_code,
-            Subscription.investor_code == investor_code,
-            Subscription.sub_type == "redeem",
-            Subscription.status == "confirmed",
-        )
-        .all()
-    )
-    for s in confirmed_redeems:
-        if latest_date is None or (s.confirm_date and s.confirm_date > latest_date):
-            shares -= Decimal(s.shares) if s.shares else Decimal("0")
-
-    return shares
 
 
 @router.get("")
@@ -140,7 +82,7 @@ def create_subscription(
         )
 
     # (a) 申请日必须晚于最新快照日
-    latest_snapshot_date = _get_latest_snapshot_date(db, subscription.portfolio_code)
+    latest_snapshot_date = get_latest_snapshot_date(db, subscription.portfolio_code)
     if latest_snapshot_date and subscription.apply_date <= latest_snapshot_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -195,7 +137,7 @@ def create_subscription(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"error": "INVALID_SHARES", "message": "赎回份额必须大于0"},
             )
-        available = _calculate_investor_available_shares(
+        available = calculate_investor_available_shares(
             db, subscription.portfolio_code, subscription.investor_code
         )
         if Decimal(str(subscription.shares)) > available:

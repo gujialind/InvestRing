@@ -7,75 +7,14 @@ from decimal import Decimal
 from app.database import get_db
 from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
-from app.models.trade import Trade
-from app.models.product import Product
 from app.schemas.position import PositionCreate, PositionUpdate, PositionResponse, CashPositionUpdate
-from app.services.position_service import calculate_available_cash
+from app.services.position_service import (
+    calculate_available_cash,
+    calculate_available_shares,
+)
 from app.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
-
-
-def _get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date]:
-    result = (
-        db.query(func.max(PortfolioValueSnapshot.snapshot_date))
-        .filter(PortfolioValueSnapshot.portfolio_code == portfolio_code)
-        .scalar()
-    )
-    return result
-
-
-def _calculate_available_shares(
-    db: Session, portfolio_code: str, product_code: str, market: Optional[str] = None
-) -> Decimal:
-    """
-    基金可用份额实时计算：
-    基金可用份额 = 最新快照份额
-                - SUM(pending卖出份额)
-                - SUM(confirmed卖出份额 WHERE 快照未生成)
-    """
-    latest_date = _get_latest_snapshot_date(db, portfolio_code)
-
-    query = db.query(PortfolioPosition).filter(
-        PortfolioPosition.portfolio_code == portfolio_code,
-        PortfolioPosition.product_code == product_code,
-    )
-    if market:
-        query = query.filter(PortfolioPosition.market == market)
-    latest_position = query.order_by(PortfolioPosition.snapshot_date.desc()).first()
-
-    shares = Decimal(latest_position.shares) if latest_position and latest_position.shares else Decimal("0")
-
-    # pending 卖出份额
-    pending_sells = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.product_code == product_code,
-            Trade.status == "pending",
-            Trade.trade_type == "sell",
-        )
-        .all()
-    )
-    for t in pending_sells:
-        shares -= Decimal(t.shares) if t.shares else Decimal("0")
-
-    # confirmed 卖出未快照
-    confirmed_sells = (
-        db.query(Trade)
-        .filter(
-            Trade.portfolio_code == portfolio_code,
-            Trade.product_code == product_code,
-            Trade.status == "confirmed",
-            Trade.trade_type == "sell",
-        )
-        .all()
-    )
-    for t in confirmed_sells:
-        if latest_date is None or (t.confirm_date and t.confirm_date > latest_date):
-            shares -= Decimal(t.shares) if t.shares else Decimal("0")
-
-    return shares
 
 
 @router.get("")
@@ -214,7 +153,7 @@ def get_available_shares(
     if not portfolio:
         raise HTTPException(status_code=404, detail="Portfolio not found")
 
-    shares = _calculate_available_shares(db, portfolio_code, product_code, market)
+    shares = calculate_available_shares(db, portfolio_code, product_code, market)
     return {
         "portfolio_code": portfolio_code,
         "product_code": product_code,

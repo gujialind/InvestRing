@@ -28,7 +28,7 @@ def get_nav_for_trade_confirmation(
 
     规则：
     - QDII产品：必须使用T日净值，禁止向前查找
-    - 非QDII净值型产品：使用T日或最近交易日净值
+    - 非QDII净值型产品：必须使用T日净值，禁止向前查找
 
     Args:
         db: 数据库会话
@@ -38,7 +38,7 @@ def get_nav_for_trade_confirmation(
         is_qdii: 是否为QDII产品
 
     Returns:
-        净值（Decimal），如果不存在则返回 None
+        净值（Decimal），如果不存在则返回 None（由调用方决定是否拒绝）
 
     Raises:
         HTTPException: QDII产品T日净值不存在时抛出异常
@@ -62,12 +62,12 @@ def get_nav_for_trade_confirmation(
 
         return Decimal(str(price_record.unit_price))
     else:
-        # 非QDII：取T日或最近的净值
+        # 非QDII：必须取T日净值，禁止向前查找（对齐文档"禁止向前查找"）
         price_record = db.query(PriceRecord).filter(
             PriceRecord.product_code == product_code,
             PriceRecord.market == market,
-            PriceRecord.date <= trade_date
-        ).order_by(PriceRecord.date.desc()).first()
+            PriceRecord.date == trade_date
+        ).first()
 
         if price_record and price_record.unit_price:
             return Decimal(str(price_record.unit_price))
