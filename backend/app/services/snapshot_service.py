@@ -358,20 +358,18 @@ def _cascade_unconfirm_share_change_events(
     db: Session, portfolio_code: str, snapshot_date: date
 ) -> List[Dict[str, Any]]:
     """
-    级联回退依赖指定日期快照的 confirmed 事件（双日期 OR）。
-    ex_date == snapshot_date 或 entitlement_date == snapshot_date 的事件需回退。
+    级联回退依赖指定日期持仓快照的 confirmed 事件。
+    仅回退 entitlement_date == snapshot_date 的事件——其确认数据
+    （entitlement_shares）来自被删除的 entitlement_date 持仓快照，故需回退。
+    ex_date == snapshot_date 但 entitlement_date < snapshot_date 的事件，
+    其依赖的持仓快照未删除，数据仍有效，保持 confirmed（重新生成快照时被重新应用）。
     只处理父/独立记录（parent_event_id IS NULL），子记录被物理删除。
     """
-    from sqlalchemy import or_
-
     events = db.query(ShareChangeEvent).filter(
         ShareChangeEvent.portfolio_code == portfolio_code,
         ShareChangeEvent.status == "confirmed",
         ShareChangeEvent.parent_event_id.is_(None),  # 只处理父/独立记录
-        or_(
-            ShareChangeEvent.ex_date == snapshot_date,
-            ShareChangeEvent.entitlement_date == snapshot_date,
-        ),
+        ShareChangeEvent.entitlement_date == snapshot_date,  # 只回退持仓快照被删的
     ).all()
 
     result = []
@@ -622,7 +620,7 @@ def _generate_portfolio_position(
         # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
         is_cash = pos_data.get("asset_type") == "cash"
         if not is_cash:
-            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and pos_data.get("amount", Decimal("0")) <= 0:
+            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and (pos_data.get("amount") or Decimal("0")) <= 0:
                 continue  # 跳过零持仓
         
         # 获取产品价格
