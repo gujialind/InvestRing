@@ -39,6 +39,31 @@ class TestSubscriptionCreate:
         assert data["status"] == "pending"
         assert data["sub_type"] == "subscribe"
 
+    def test_create_sets_confirm_date_next_trading_day(self, client, admin_headers, test_db):
+        """#33改动1：创建时即设 confirm_date = 申请日下一交易日（恒 T+1）"""
+        create_portfolio(test_db, code="SUB_CD", status="active")
+        create_investor(test_db, code="SUB_ICD")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "SUB_CD",
+                "investor_code": "SUB_ICD",
+                "sub_type": "subscribe",
+                "amount": 10000.0,
+                "apply_date": "2025-09-01",
+                "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201)
+        sub = test_db.query(Subscription).filter(
+            Subscription.portfolio_code == "SUB_CD"
+        ).first()
+        assert sub.confirm_date == date(2025, 9, 2)
+
     def test_subscribe_zero_amount_rejected(self, client, admin_headers, test_db):
         """申购金额为 0 应被拒绝"""
         create_portfolio(test_db, code="SUB_Z", status="active")

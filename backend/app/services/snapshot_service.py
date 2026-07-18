@@ -17,7 +17,7 @@ from app.models import (
     Trade, Subscription, ShareChangeEvent, PriceRecord, Product,
     TradingCalendar, Investor, AssetClassification
 )
-from app.services.trading_utils import is_trading_day as _trading_utils_is_trading_day
+from app.services.trading_utils import is_trading_day as _trading_utils_is_trading_day, get_next_trading_day
 from app.services.subscription_service import unconfirm_single_subscription
 from app.models.manual_market_value import ManualMarketValue
 
@@ -28,7 +28,6 @@ def generate_daily_snapshots(
     db: Session,
     portfolio_code: str,
     target_date: date,
-    skip_validation: bool = False,
 ) -> Dict[str, Any]:
     """
     生成指定组合在指定日期的三张快照表
@@ -37,7 +36,6 @@ def generate_daily_snapshots(
         db: 数据库会话
         portfolio_code: 组合代码
         target_date: 目标日期
-        skip_validation: 跳过依赖校验（用于 recalculate force 模式）
         
     Returns:
         生成结果
@@ -49,12 +47,12 @@ def generate_daily_snapshots(
     _validate_portfolio(db, portfolio_code)
     _validate_trading_day(db, target_date)
     
-    if not skip_validation:
-        validations = validate_snapshot_dependencies(db, portfolio_code, target_date)
-        failed_checks = [v for v in validations if v["status"] == "failed"]
-        if failed_checks:
-            error_messages = "; ".join([v["message"] for v in failed_checks])
-            raise ValueError(f"依赖数据校验失败: {error_messages}")
+    if failed_checks := [
+        v for v in validate_snapshot_dependencies(db, portfolio_code, target_date)
+        if v["status"] == "failed"
+    ]:
+        error_messages = "; ".join([v["message"] for v in failed_checks])
+        raise ValueError(f"依赖数据校验失败: {error_messages}")
     
     try:
         # 2. 删除已有快照（如果存在）
@@ -122,13 +120,12 @@ def recalculate_snapshots(
     portfolio_code: Optional[str],
     start_date: date,
     end_date: date,
-    force: bool = False
 ) -> Dict[str, Any]:
     """
     重算指定时间区间的快照
 
     流程（每个交易日 D）：
-    1. 校验依赖数据（非 force 模式）
+    1. 校验依赖数据
     2. 删除旧快照（自动级联回退依赖该快照的申购/赎回）
     3. 重新生成快照
     4. 自动确认 apply_date<=D 的 pending 申购/赎回
@@ -141,7 +138,6 @@ def recalculate_snapshots(
         portfolio_code: 组合代码（None表示所有活跃组合）
         start_date: 起始日期
         end_date: 结束日期（若之后有快照会自动扩展）
-        force: 是否强制重算（跳过校验）
 
     Returns:
         重算结果
@@ -190,20 +186,19 @@ def recalculate_snapshots(
                     current_date += timedelta(days=1)
                     continue
 
-                # 校验依赖数据（除非force模式）
-                if not force:
-                    validations = validate_snapshot_dependencies(
-                        db, portfolio.code, current_date
-                    )
-                    failed = [v for v in validations if v["status"] == "failed"]
-                    if failed:
-                        error_msg = "; ".join([v["message"] for v in failed])
-                        result["errors"].append({
-                            "date": current_date.isoformat(),
-                            "error": f"校验失败: {error_msg}"
-                        })
-                        current_date += timedelta(days=1)
-                        continue
+                # 校验依赖数据
+                validations = validate_snapshot_dependencies(
+                    db, portfolio.code, current_date
+                )
+                failed = [v for v in validations if v["status"] == "failed"]
+                if failed:
+                    error_msg = "; ".join([v["message"] for v in failed])
+                    result["errors"].append({
+                        "date": current_date.isoformat(),
+                        "error": f"校验失败: {error_msg}"
+                    })
+                    # #35: 单日校验失败即停止，避免后续日基于缺失数据生成错误快照
+                    break
 
                 # 删除旧快照并级联回退依赖该快照的申购/赎回
                 delete_info = _delete_existing_snapshots(db, portfolio.code, current_date)
@@ -215,7 +210,6 @@ def recalculate_snapshots(
                 # 先生成快照（作为自动确认的 NAV 依赖）
                 snapshot_result = generate_daily_snapshots(
                     db, portfolio.code, current_date,
-                    skip_validation=force,
                 )
 
                 # 自动确认 apply_date<=current_date 的 pending 申购/赎回
@@ -240,6 +234,8 @@ def recalculate_snapshots(
                 logger.error(
                     f"重算失败: portfolio={portfolio.code}, date={current_date}, error={str(e)}"
                 )
+                # #35: 单日异常即停止，避免后续日基于缺失数据继续
+                break
 
             current_date += timedelta(days=1)
 
@@ -938,28 +934,31 @@ def auto_confirm_after_snapshot(
                 f"自动确认异常: subscription_id={sub_id}, error={str(e)}"
             )
 
-    # Trade 自动确认（confirm_date == snapshot_date 的 pending trades）
+    # #33: auto_confirm(D) 确认 confirm_date == next_trading_day(D) 的交易/事件，
+    # 配合逐日循环生成快照，使 confirm_date==C 的交易在快照 C 中体现。
+    from app.services.trade_service import confirm_single_trade
+    next_confirm_date = get_next_trading_day(db, snapshot_date, days=1)
+
+    # Trade 自动确认（confirm_date == next_trading_day(D) 的 pending trades）
     # 排除 transfer_group 非空的 CASH trade：
     #   - 跨天转移两腿：由下方 cross_day_transfers 分支处理
     #   - 基金调仓配对 CASH 腿：由原子翻转跟随基金腿
     pending_trades = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
         Trade.status == "pending",
-        Trade.confirm_date == snapshot_date,
+        Trade.confirm_date == next_confirm_date,
         Trade.transfer_group.is_(None) | (Trade.product_code != "CASH"),
     ).all()
 
     for trade in pending_trades:
         try:
-            trade.status = "confirmed"
-            # 同步 transfer_group 关联的配对 CASH 腿
-            if trade.transfer_group:
-                paired_trades = db.query(Trade).filter(
-                    Trade.transfer_group == trade.transfer_group,
-                    Trade.id != trade.id,
-                ).all()
-                for pt in paired_trades:
-                    pt.status = "confirmed"
+            product = db.query(Product).filter(
+                Product.code == trade.product_code,
+                Product.market == trade.market,
+            ).first()
+            # 走公共确认逻辑：净值型产品按 T 日净值重算 shares/amount，
+            # 并原子同步 transfer_group 配对腿（#29）
+            confirm_single_trade(db, trade, product)
             results.append({
                 "id": trade.id,
                 "type": "trade",
@@ -977,13 +976,13 @@ def auto_confirm_after_snapshot(
             logger.warning(f"Trade auto-confirm failed: trade_id={trade.id}, {e}")
 
     # 跨天转移 auto_confirm（两腿均 pending，需同时确认）
-    # 仅当 confirm_date <= snapshot_date（即已到确认日）时处理
+    # 仅当 confirm_date == next_trading_day(D)（与其它交易同一时序）时处理
     cross_day_pending = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
         Trade.status == "pending",
         Trade.product_code == "CASH",
         Trade.transfer_group.isnot(None),
-        Trade.confirm_date <= snapshot_date,
+        Trade.confirm_date == next_confirm_date,
     ).all()
     processed_groups = set()
     for trade in cross_day_pending:
@@ -1018,12 +1017,12 @@ def auto_confirm_after_snapshot(
             })
             logger.warning(f"Cross-day transfer auto-confirm failed: {trade.transfer_group}, {e}")
 
-    # Event 自动确认（ex_date == snapshot_date 的 pending events）
+    # Event 自动确认（ex_date == next_trading_day(D) 的 pending events）
     # 只处理父/独立记录（跳过子记录，子记录由父记录确认时自动生成）
     pending_events = db.query(ShareChangeEvent).filter(
         ShareChangeEvent.portfolio_code == portfolio_code,
         ShareChangeEvent.status == "pending",
-        ShareChangeEvent.ex_date == snapshot_date,
+        ShareChangeEvent.ex_date == next_confirm_date,
         ShareChangeEvent.parent_event_id.is_(None),  # 只处理父/独立记录
     ).all()
 
@@ -1100,7 +1099,7 @@ def _check_pending_transactions(
     
     pending_subs = db.query(Subscription).filter(
         Subscription.portfolio_code == portfolio_code,
-        Subscription.apply_date < target_date,
+        Subscription.confirm_date <= target_date,
         Subscription.status == "pending"
     ).count()
     
@@ -1109,7 +1108,7 @@ def _check_pending_transactions(
         if pending_trades > 0:
             details.append(f"{pending_trades}笔confirm_date<={target_date}的待确认交易")
         if pending_subs > 0:
-            details.append(f"{pending_subs}笔apply_date<{target_date}的待确认申赎")
+            details.append(f"{pending_subs}笔confirm_date<={target_date}的待确认申赎")
         return {
             "check_type": "pending_transactions",
             "status": "failed",

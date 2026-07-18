@@ -121,3 +121,58 @@ class TestAutoConfirmCalled:
 
         mock_gen.assert_called()
         mock_auto.assert_called()
+
+
+class TestBackfillLoop:
+    """#33改动4：逐日循环补齐区间快照"""
+
+    @patch("app.services.snapshot_service.auto_confirm_after_snapshot")
+    @patch("app.services.snapshot_service.generate_daily_snapshots")
+    def test_backfill_iterates_missing_trading_days(self, mock_gen, mock_auto, test_db):
+        """从最新快照日之后首个交易日逐日生成至 target_date"""
+        from tests.factories import (
+            create_portfolio, create_value_snapshot, ensure_trading_day,
+        )
+
+        create_portfolio(test_db, code="BACKFILL_PORT", status="active")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 3), is_open=True)
+        create_value_snapshot(
+            test_db, portfolio_code="BACKFILL_PORT",
+            snapshot_date=date(2025, 9, 1),
+            total_value=10000.0, total_shares=10000.0, unit_price=1.0,
+        )
+
+        count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
+
+        # 从 09-01 之后首个交易日 09-02 逐日到 09-03，共 2 天
+        assert count == 2
+        generated_dates = [c.kwargs["target_date"] for c in mock_gen.call_args_list]
+        assert generated_dates == [date(2025, 9, 2), date(2025, 9, 3)]
+
+    @patch("app.services.snapshot_service.auto_confirm_after_snapshot")
+    @patch("app.services.snapshot_service.generate_daily_snapshots")
+    def test_backfill_stops_on_failure(self, mock_gen, mock_auto, test_db):
+        """#35：单日失败即停止该组合回补"""
+        from tests.factories import (
+            create_portfolio, create_value_snapshot, ensure_trading_day,
+        )
+
+        create_portfolio(test_db, code="BACKFILL_FAIL", status="active")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 3), is_open=True)
+        create_value_snapshot(
+            test_db, portfolio_code="BACKFILL_FAIL",
+            snapshot_date=date(2025, 9, 1),
+            total_value=10000.0, total_shares=10000.0, unit_price=1.0,
+        )
+
+        mock_gen.side_effect = ValueError("依赖数据校验失败")
+
+        count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
+
+        # 首日 09-02 失败即 break，不继续 09-03
+        assert count == 0
+        assert mock_gen.call_count == 1

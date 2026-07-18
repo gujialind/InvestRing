@@ -28,11 +28,10 @@ def recalculate(
     start_date: str = typer.Option(..., "--start-date", help="开始日期(YYYY-MM-DD)"),
     end_date: str = typer.Option(..., "--end-date", help="结束日期(YYYY-MM-DD)"),
     portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码(不传则所有)"),
-    force: bool = typer.Option(False, "--force", help="强制重算"),
 ):
     """区间重算快照"""
     client = APIClient.from_config()
-    body = {"start_date": start_date, "end_date": end_date, "force": force}
+    body = {"start_date": start_date, "end_date": end_date}
     if portfolio_code is not None:
         body["portfolio_code"] = portfolio_code
     result = client.post(f"{PREFIX}/recalculate", json_data=body)

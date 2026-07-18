@@ -15,7 +15,6 @@ class SnapshotRecalculateRequest(BaseModel):
     portfolio_code: Optional[str] = None  # None表示所有活跃组合
     start_date: date
     end_date: date
-    force: bool = False  # 是否强制重算（跳过校验）
 
 
 class ValidationCheckResult(BaseModel):

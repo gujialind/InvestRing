@@ -30,13 +30,12 @@ def recalculate_snapshots(
     portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="为空则重算所有活跃组合"),
     start_date: str = typer.Option(..., "--start-date", help="YYYY-MM-DD"),
     end_date: str = typer.Option(..., "--end-date", help="YYYY-MM-DD"),
-    force: bool = typer.Option(False, "--force", help="跳过校验强制重算"),
 ):
     """区间重算快照"""
     with cli_context() as db:
         from app.services.snapshot_service import recalculate_snapshots as recalc
 
-        result = recalc(db, portfolio_code, parse_date(start_date), parse_date(end_date), force)
+        result = recalc(db, portfolio_code, parse_date(start_date), parse_date(end_date))
         success(data=result)
 
 
