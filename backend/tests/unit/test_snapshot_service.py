@@ -25,10 +25,13 @@ from app.services.snapshot_service import (
     _check_share_change_events,
     _prev_trading_day,
     _generate_portfolio_value_snapshot,
+    _generate_portfolio_position,
+    _cascade_unconfirm_share_change_events,
 )
 from app.models import (
     Portfolio, TradingCalendar, Trade, Subscription,
     PortfolioPosition, PortfolioValueSnapshot, Product, Investor,
+    ShareChangeEvent,
 )
 from tests.factories import (
     create_portfolio, create_product, create_trade,
@@ -375,3 +378,73 @@ class TestGeneratePortfolioValueSnapshot:
         )
         assert snap.total_shares == 500.0
         assert snap.unit_price == 1.0
+
+
+class TestGeneratePortfolioPositionCashNone:
+    """#20 回归：非现金零持仓且 amount 为 None 时不应抛 TypeError"""
+
+    def test_zero_share_position_with_none_amount_skipped(self, test_db):
+        """前一日快照非现金持仓 shares=0, amount=None，生成时应跳过而非崩溃"""
+        create_portfolio(test_db, code="ZS20", status="active")
+        create_platform(test_db, code="PLAT20")
+        create_product(test_db, code="STK20", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        create_position_snapshot(
+            test_db, portfolio_code="ZS20", product_code="STK20",
+            market="CN_OTC", snapshot_date=date(2025, 3, 3),
+            shares=0.0, amount=None, platform_code="PLAT20",
+            asset_type="stock", market_value=0.0,
+        )
+        # 修复前：(None <= 0) 抛 TypeError；修复后：零持仓被跳过
+        result = _generate_portfolio_position(test_db, "ZS20", date(2025, 3, 4))
+        assert all(p.product_code != "STK20" for p in result)
+
+
+class TestCascadeUnconfirmEvents:
+    """#34 回归：级联回退只回退 entitlement_date == snapshot_date 的事件"""
+
+    def _make_event(self, db, portfolio_code, ex_date, entitlement_date):
+        evt = ShareChangeEvent(
+            portfolio_code=portfolio_code,
+            product_code="F34", market="CN_OTC",
+            event_type="share_split",
+            ex_date=ex_date, entitlement_date=entitlement_date,
+            event_source="manual", status="confirmed",
+            entitlement_shares=Decimal("1000"),
+            shares_before=Decimal("1000"),
+            shares_change=Decimal("100"),
+            shares_after=Decimal("1100"),
+        )
+        db.add(evt)
+        db.commit()
+        db.refresh(evt)
+        return evt
+
+    def test_entitlement_date_match_rolled_back(self, test_db):
+        """entitlement_date == snapshot_date 的事件应被回退"""
+        create_portfolio(test_db, code="CAS34A", status="active")
+        create_product(test_db, code="F34", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        evt = self._make_event(
+            test_db, "CAS34A",
+            ex_date=date(2025, 3, 10), entitlement_date=date(2025, 3, 5),
+        )
+        result = _cascade_unconfirm_share_change_events(test_db, "CAS34A", date(2025, 3, 5))
+        # cascade 未 commit，同会话对象已被置为 pending（不能 refresh）
+        assert any(r["id"] == evt.id for r in result)
+        assert evt.status == "pending"
+        assert evt.entitlement_shares is None
+
+    def test_ex_date_match_not_rolled_back(self, test_db):
+        """ex_date == snapshot_date 但 entitlement_date < snapshot_date 不应回退"""
+        create_portfolio(test_db, code="CAS34B", status="active")
+        create_product(test_db, code="F34", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        evt = self._make_event(
+            test_db, "CAS34B",
+            ex_date=date(2025, 3, 10), entitlement_date=date(2025, 3, 5),
+        )
+        result = _cascade_unconfirm_share_change_events(test_db, "CAS34B", date(2025, 3, 10))
+        assert all(r["id"] != evt.id for r in result)
+        assert evt.status == "confirmed"
+        assert evt.entitlement_shares == Decimal("1000")
