@@ -144,12 +144,13 @@ class TestCheckPendingTransactions:
         assert "待确认交易" in result["message"]
 
     def test_pending_subscription_fails(self, test_db):
-        """存在 pending 申购应失败（apply_date < target_date 才触发）"""
+        """存在 pending 申购应失败（confirm_date <= target_date 才触发）"""
         create_portfolio(test_db, code="PEND_S", status="active")
         create_investor(test_db, code="INV_PEND")
         create_subscription(
             test_db, portfolio_code="PEND_S", investor_code="INV_PEND",
-            status="pending", apply_date=date(2025, 3, 2),  # apply_date < target_date
+            status="pending", apply_date=date(2025, 3, 2),
+            confirm_date=date(2025, 3, 3),  # confirm_date <= target_date 才触发
         )
         result = _check_pending_transactions(test_db, "PEND_S", date(2025, 3, 3))
         assert result["status"] == "failed"

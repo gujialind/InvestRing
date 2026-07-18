@@ -157,25 +157,39 @@ def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
 
 
 def _generate_snapshots_for_date(db: Session, target_date) -> int:
-    """为 target_date 生成所有活跃组合快照，并复用 auto_confirm_after_snapshot。"""
+    """为所有活跃组合逐日补齐快照：从每组合最新快照日之后首个交易日起，
+    逐交易日 generate + auto_confirm，直到 target_date（含）。
+    单组合单日失败即停止该组合回补（#35 fail-fast）。"""
     from app.services.snapshot_service import generate_daily_snapshots, auto_confirm_after_snapshot
-    from app.models.trading_calendar import TradingCalendar
+    from app.services.trading_utils import is_trading_day, get_next_trading_day, get_prev_trading_day
+    from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+    from sqlalchemy import func
 
-    cal = db.query(TradingCalendar).filter(TradingCalendar.date == target_date).first()
-    if not cal or not cal.is_open:
+    end_date = target_date if is_trading_day(db, target_date) else get_prev_trading_day(db, target_date, days=1)
+    if not end_date:
         return 0
 
     active_portfolios = db.query(Portfolio).filter(Portfolio.status == "active").all()
     count = 0
     for portfolio in active_portfolios:
-        try:
-            generate_daily_snapshots(db=db, portfolio_code=portfolio.code, target_date=target_date)
-            auto_confirm_after_snapshot(db=db, portfolio_code=portfolio.code, snapshot_date=target_date)
-            db.commit()
-            count += 1
-        except Exception as e:
-            db.rollback()
-            logger.error(f"组合 {portfolio.code} 快照生成失败: {str(e)}")
+        latest_snapshot = db.query(func.max(PortfolioValueSnapshot.snapshot_date)).filter(
+            PortfolioValueSnapshot.portfolio_code == portfolio.code
+        ).scalar()
+        current = get_next_trading_day(db, latest_snapshot, days=1) if latest_snapshot else end_date
+        while current and current <= end_date:
+            try:
+                generate_daily_snapshots(db=db, portfolio_code=portfolio.code, target_date=current)
+                auto_confirm_after_snapshot(db=db, portfolio_code=portfolio.code, snapshot_date=current)
+                db.commit()
+                count += 1
+            except Exception as e:
+                db.rollback()
+                logger.error(f"组合 {portfolio.code} 于 {current} 快照生成失败: {str(e)}")
+                break
+            nxt = get_next_trading_day(db, current, days=1)
+            if not nxt or nxt == current:
+                break
+            current = nxt
     return count
 
 
