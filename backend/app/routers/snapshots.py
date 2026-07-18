@@ -259,14 +259,15 @@ def delete_snapshots_bulk(
                 "cascaded_subs": len(cascaded_subs),
                 "cascaded_events": len(cascaded_events),
             })
+            # 逐日 commit：单日删除立即落库，避免末尾统一提交放大回滚范围
+            db.commit()
         except Exception as e:
             db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={"error": "BULK_DELETE_FAILED", "message": f"删除 {snap_date} 快照失败: {str(e)}"},
             )
-    
-    db.commit()
+
     return {
         "success": True,
         "message": f"已删除组合 {portfolio_code} 从 {from_date} 起的 {len(snapshot_dates)} 个快照"

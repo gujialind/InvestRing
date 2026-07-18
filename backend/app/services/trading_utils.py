@@ -66,3 +66,18 @@ def get_latest_snapshot_date(db: Session, portfolio_code: str) -> Optional[date]
         .scalar()
     )
     return result
+
+
+def get_latest_snapshot_date_le(
+    db: Session, portfolio_code: str, as_of_date: date
+) -> Optional[date]:
+    """获取组合不超过 as_of_date 的最新快照日期（用于 as_of_date 截止计算）。"""
+    result = (
+        db.query(func.max(PortfolioValueSnapshot.snapshot_date))
+        .filter(
+            PortfolioValueSnapshot.portfolio_code == portfolio_code,
+            PortfolioValueSnapshot.snapshot_date <= as_of_date,
+        )
+        .scalar()
+    )
+    return result
