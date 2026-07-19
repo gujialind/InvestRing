@@ -189,7 +189,7 @@ def confirm_subscription(
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
-    subscription = db.query(Subscription).filter(Subscription.id == id).first()
+    subscription = db.query(Subscription).filter(Subscription.id == id).with_for_update().first()
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
@@ -229,7 +229,7 @@ def cancel_subscription(
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
-    subscription = db.query(Subscription).filter(Subscription.id == id).first()
+    subscription = db.query(Subscription).filter(Subscription.id == id).with_for_update().first()
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
     if subscription.status != "pending":
@@ -249,7 +249,7 @@ def unconfirm_subscription(
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
-    subscription = db.query(Subscription).filter(Subscription.id == id).first()
+    subscription = db.query(Subscription).filter(Subscription.id == id).with_for_update().first()
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
 

@@ -26,6 +26,7 @@ from app.services.snapshot_service import (
     _prev_trading_day,
     _generate_portfolio_value_snapshot,
     _generate_portfolio_position,
+    _generate_investor_holding,
     _cascade_unconfirm_share_change_events,
 )
 from app.models import (
@@ -37,6 +38,7 @@ from tests.factories import (
     create_portfolio, create_product, create_trade,
     create_subscription, create_investor, ensure_trading_day,
     create_position_snapshot, create_platform, create_value_snapshot,
+    create_investor_holding,
 )
 
 
@@ -449,3 +451,113 @@ class TestCascadeUnconfirmEvents:
         assert all(r["id"] != evt.id for r in result)
         assert evt.status == "confirmed"
         assert evt.entitlement_shares == Decimal("1000")
+
+
+class TestInvestorHoldingDerivedFields:
+    """#40 改进1：investor_holding 派生字段 market_value/total_cost/profit 回填"""
+
+    def test_derived_fields_populated(self, test_db):
+        create_portfolio(test_db, code="IHDF1", status="active")
+        create_investor(test_db, code="INV_IHDF1")
+        # 前序 holding：100 份，成本 1.0
+        create_investor_holding(
+            test_db, portfolio_code="IHDF1", investor_code="INV_IHDF1",
+            snapshot_date=date(2025, 1, 6), shares=100, cost_per_share=1.0,
+        )
+        # value_snapshot：unit_price=1.2
+        snap = PortfolioValueSnapshot(
+            portfolio_code="IHDF1", snapshot_date=date(2025, 1, 7),
+            total_value=Decimal("120"), total_shares=Decimal("100"),
+            unit_price=Decimal("1.2"),
+        )
+        test_db.add(snap)
+        test_db.commit()
+        holdings = _generate_investor_holding(test_db, "IHDF1", date(2025, 1, 7), snap)
+        target = [h for h in holdings if h.investor_code == "INV_IHDF1"]
+        assert target, "应生成 INV_IHDF1 的 holding"
+        h = target[0]
+        assert h.shares == Decimal("100")
+        assert h.market_value == Decimal("120.0")  # 100 * 1.2
+        assert h.total_cost == Decimal("100.0")    # 100 * 1.0
+        assert h.profit == Decimal("20.0")         # 120 - 100
+
+
+class TestUnitPriceChangePct:
+    """#40 改进1：PortfolioValueSnapshot.unit_price_change_pct 回填"""
+
+    def _make_cash_position(self, portfolio_code, snapshot_date, market_value):
+        return PortfolioPosition(
+            portfolio_code=portfolio_code, product_code="CASH", market="",
+            platform_code="MYCF", shares=None,
+            amount=Decimal(str(market_value)), market_value=Decimal(str(market_value)),
+            snapshot_date=snapshot_date, asset_type="cash",
+        )
+
+    def test_first_snapshot_pct_zero(self, test_db):
+        create_portfolio(test_db, code="PCT1", status="active")
+        positions = [self._make_cash_position("PCT1", date(2025, 1, 6), 1000)]
+        snap = _generate_portfolio_value_snapshot(test_db, "PCT1", date(2025, 1, 6), positions)
+        assert snap.unit_price_change_pct == 0
+
+    def test_second_snapshot_pct_nonzero(self, test_db):
+        create_portfolio(test_db, code="PCT2", status="active")
+        # 前序快照 unit_price=1.0
+        create_value_snapshot(
+            test_db, "PCT2", date(2025, 1, 6),
+            total_value=100, total_shares=100, unit_price=1.0,
+        )
+        # 次日：total_value=110, total_shares=100 → unit_price=1.1
+        positions = [self._make_cash_position("PCT2", date(2025, 1, 7), 110)]
+        snap = _generate_portfolio_value_snapshot(test_db, "PCT2", date(2025, 1, 7), positions)
+        # pct = (1.1 - 1.0) / 1.0 = 0.1
+        assert abs(float(snap.unit_price_change_pct) - 0.1) < 0.0001
+
+
+class TestFrozenAmount:
+    """#40 改进1：CASH 持仓 frozen_amount = pending CASH sells 金额"""
+
+    def test_pending_cash_sell_freezes_amount(self, test_db):
+        create_portfolio(test_db, code="FA1", status="active")
+        create_platform(test_db, code="PLAT_FA")
+        # 前序 CASH 持仓 1000（CASH 产品由 conftest 预置）
+        create_position_snapshot(
+            test_db, portfolio_code="FA1", product_code="CASH", market="",
+            snapshot_date=date(2025, 1, 6), amount=1000.0, market_value=1000.0,
+            platform_code="PLAT_FA", asset_type="cash",
+        )
+        # pending CASH sell 300
+        create_trade(
+            test_db, portfolio_code="FA1", product_code="CASH", market="",
+            trade_type="sell", amount=300.0, platform_code="PLAT_FA",
+            trade_date=date(2025, 1, 6), status="pending",
+        )
+        result = _generate_portfolio_position(test_db, "FA1", date(2025, 1, 7))
+        cash_pos = [p for p in result if p.product_code == "CASH"]
+        assert cash_pos, "应生成 CASH 持仓"
+        assert cash_pos[0].frozen_amount == Decimal("300.0")
+
+
+class TestPositionListener:
+    """#40 改进2：ORM 层禁止 instance-level update/delete"""
+
+    def test_update_blocked(self, test_db):
+        create_portfolio(test_db, code="LST1", status="active")
+        pos = create_position_snapshot(
+            test_db, portfolio_code="LST1", product_code="CASH", market="",
+            snapshot_date=date(2025, 1, 6), amount=100.0, market_value=100.0,
+            platform_code="MYCF", asset_type="cash",
+        )
+        pos.market_value = Decimal("200")
+        with pytest.raises(RuntimeError):
+            test_db.commit()
+
+    def test_delete_blocked(self, test_db):
+        create_portfolio(test_db, code="LST2", status="active")
+        pos = create_position_snapshot(
+            test_db, portfolio_code="LST2", product_code="CASH", market="",
+            snapshot_date=date(2025, 1, 6), amount=100.0, market_value=100.0,
+            platform_code="MYCF", asset_type="cash",
+        )
+        test_db.delete(pos)
+        with pytest.raises(RuntimeError):
+            test_db.commit()
