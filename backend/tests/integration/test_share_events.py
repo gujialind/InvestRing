@@ -117,6 +117,79 @@ class TestShareChangeEventCreate:
         )
         assert resp.status_code in (400, 422)
 
+    def test_platform_coverage_default_blocked(self, client, admin_headers, test_db):
+        """#40 改进3：多平台持仓只录 1 平台 → 默认阻断 PLATFORM_NOT_COVERED"""
+        create_portfolio(test_db, code="SCE_FC1", status="active")
+        create_product(test_db, code="FUND_FC1", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        ensure_trading_day(test_db, date(2025, 12, 8), is_open=True)
+        # 2 平台均有持仓
+        create_position_snapshot(
+            test_db, portfolio_code="SCE_FC1", product_code="FUND_FC1",
+            market="CN_OTC", snapshot_date=date(2025, 12, 8),
+            shares=100.0, platform_code="MYCF", market_value=100.0,
+            asset_type="stock",
+        )
+        create_position_snapshot(
+            test_db, portfolio_code="SCE_FC1", product_code="FUND_FC1",
+            market="CN_OTC", snapshot_date=date(2025, 12, 8),
+            shares=200.0, platform_code="HBZQ", market_value=200.0,
+            asset_type="stock",
+        )
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "SCE_FC1",
+                "product_code": "FUND_FC1",
+                "market": "CN_OTC",
+                "event_type": "cash_dividend",
+                "ex_date": "2025-12-10",
+                "entitlement_date": "2025-12-08",
+                "event_source": "manual",
+                "div_cash": 0.5,
+                "platform_code": "MYCF",  # 只覆盖 MYCF，HBZQ 未覆盖
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "PLATFORM_NOT_COVERED"
+
+    def test_force_cover_allows_creation(self, client, admin_headers, test_db):
+        """#40 改进3：force_cover=true 降为 warning，创建成功"""
+        create_portfolio(test_db, code="SCE_FC2", status="active")
+        create_product(test_db, code="FUND_FC2", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        ensure_trading_day(test_db, date(2025, 12, 8), is_open=True)
+        create_position_snapshot(
+            test_db, portfolio_code="SCE_FC2", product_code="FUND_FC2",
+            market="CN_OTC", snapshot_date=date(2025, 12, 8),
+            shares=100.0, platform_code="MYCF", market_value=100.0,
+            asset_type="stock",
+        )
+        create_position_snapshot(
+            test_db, portfolio_code="SCE_FC2", product_code="FUND_FC2",
+            market="CN_OTC", snapshot_date=date(2025, 12, 8),
+            shares=200.0, platform_code="HBZQ", market_value=200.0,
+            asset_type="stock",
+        )
+        resp = client.post(
+            "/api/share-change-events?force_cover=true",
+            json={
+                "portfolio_code": "SCE_FC2",
+                "product_code": "FUND_FC2",
+                "market": "CN_OTC",
+                "event_type": "cash_dividend",
+                "ex_date": "2025-12-10",
+                "entitlement_date": "2025-12-08",
+                "event_source": "manual",
+                "div_cash": 0.5,
+                "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201)
+        assert resp.json()["status"] == "pending"
+
 
 class TestShareChangeEventList:
     """份额变动事件列表测试"""

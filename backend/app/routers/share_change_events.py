@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date, datetime
@@ -104,29 +104,39 @@ def _confirm_fund_level_event(db: Session, event: ShareChangeEvent):
 
     total_shares = Decimal("0")
     now = datetime.now()
-    for pos in all_positions:
-        platform_shares = Decimal(str(pos.shares or 0))
-        total_shares += platform_shares
-        child = ShareChangeEvent(
-            portfolio_code=event.portfolio_code,
-            product_code=event.product_code,
-            market=event.market,
-            event_type=event.event_type,
-            ex_date=event.ex_date,
-            entitlement_date=event.entitlement_date,
-            platform_code=pos.platform_code,
-            event_source=event.event_source,
-            parent_event_id=event.id,
-            entitlement_shares=platform_shares,
-            shares_before=platform_shares,
-            ratio=event.ratio,
-            div_cash=event.div_cash,
-            reinvest_nav=event.reinvest_nav,
-            status="confirmed",
-            confirmed_at=now,
-        )
-        _compute_event_fields(child)
-        db.add(child)
+    # #37 savepoint：子记录拆分失败回滚 savepoint，不影响外层事务
+    # 用连接级 SAVEPOINT（db.connection().begin_nested()）而非 session 级
+    # db.begin_nested()，避免触发 after_transaction_end 事件与测试隔离监听器冲突
+    sp = db.connection().begin_nested()
+    try:
+        for pos in all_positions:
+            platform_shares = Decimal(str(pos.shares or 0))
+            total_shares += platform_shares
+            child = ShareChangeEvent(
+                portfolio_code=event.portfolio_code,
+                product_code=event.product_code,
+                market=event.market,
+                event_type=event.event_type,
+                ex_date=event.ex_date,
+                entitlement_date=event.entitlement_date,
+                platform_code=pos.platform_code,
+                event_source=event.event_source,
+                parent_event_id=event.id,
+                entitlement_shares=platform_shares,
+                shares_before=platform_shares,
+                ratio=event.ratio,
+                div_cash=event.div_cash,
+                reinvest_nav=event.reinvest_nav,
+                status="confirmed",
+                confirmed_at=now,
+            )
+            _compute_event_fields(child)
+            db.add(child)
+        db.flush()  # 确保 ORM 变更在 savepoint 内写入 DB
+        sp.commit()
+    except Exception:
+        sp.rollback()
+        raise
 
     # 父记录设汇总值
     event.entitlement_shares = total_shares
@@ -160,6 +170,7 @@ def get_share_change_events(
 @router.post("", response_model=ShareChangeEventResponse)
 def create_share_change_event(
     event: ShareChangeEventCreate,
+    force_cover: bool = Query(False, description="平台覆盖不全时降为 warning（默认阻断）"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
@@ -236,10 +247,21 @@ def create_share_change_event(
                     "message": f"平台 {event.platform_code} 不存在",
                 },
             )
-        # 全覆盖校验（warning，不阻断）
+        # 全覆盖校验（#40 改进3：默认阻断，force_cover 降为 warning）
         uncovered = _check_platform_coverage(db, event)
         if uncovered:
-            logger.warning(f"平台覆盖不完整，未覆盖平台: {uncovered}")
+            if not force_cover:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "error": "PLATFORM_NOT_COVERED",
+                        "message": (
+                            f"平台覆盖不全，未覆盖平台: {uncovered}，"
+                            f"可传 force_cover=true 降级为 warning"
+                        ),
+                    },
+                )
+            logger.warning(f"平台覆盖不全（force_cover），未覆盖平台: {uncovered}")
     elif event.event_type in FUND_LEVEL_TYPES:
         if event.platform_code:
             raise HTTPException(
@@ -275,7 +297,7 @@ def confirm_share_change_event(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
+    event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).with_for_update().first()
     if not event:
         raise HTTPException(status_code=404, detail="Share change event not found")
     if event.status != "pending":
@@ -343,7 +365,7 @@ def cancel_share_change_event(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
+    event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).with_for_update().first()
     if not event:
         raise HTTPException(status_code=404, detail="Share change event not found")
     if event.status != "pending":
@@ -371,7 +393,7 @@ def unconfirm_share_change_event(
     - 平台级记录（platform_code 非空）：直接置 pending
     - 子记录（parent_event_id 非空）单独 unconfirm 拒绝：422 CANNOT_UNCONFIRM_CHILD
     """
-    event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
+    event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).with_for_update().first()
     if not event:
         raise HTTPException(status_code=404, detail="Share change event not found")
     if event.status != "confirmed":

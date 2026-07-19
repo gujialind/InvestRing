@@ -287,7 +287,7 @@ def confirm_trade(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    trade = db.query(Trade).filter(Trade.id == id).first()
+    trade = db.query(Trade).filter(Trade.id == id).with_for_update().first()
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
     if trade.status != "pending":
@@ -328,7 +328,7 @@ def cancel_trade(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    trade = db.query(Trade).filter(Trade.id == id).first()
+    trade = db.query(Trade).filter(Trade.id == id).with_for_update().first()
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
     if trade.status != "pending":
@@ -357,7 +357,7 @@ def unconfirm_trade(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    trade = db.query(Trade).filter(Trade.id == id).first()
+    trade = db.query(Trade).filter(Trade.id == id).with_for_update().first()
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
     if trade.status != "confirmed":
@@ -411,7 +411,7 @@ def update_trade(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    db_trade = db.query(Trade).filter(Trade.id == id).first()
+    db_trade = db.query(Trade).filter(Trade.id == id).with_for_update().first()
     if not db_trade:
         raise HTTPException(status_code=404, detail="Trade not found")
 
@@ -447,7 +447,7 @@ def delete_trade(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    trade = db.query(Trade).filter(Trade.id == id).first()
+    trade = db.query(Trade).filter(Trade.id == id).with_for_update().first()
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
 
