@@ -561,3 +561,101 @@ class TestPositionListener:
         test_db.delete(pos)
         with pytest.raises(RuntimeError):
             test_db.commit()
+
+
+class TestCashIncrementalWithManual:
+    """快照 CASH 增量累加 + manual_market_value 绝对覆盖"""
+
+    def test_manual_market_value_override_applied(self, test_db):
+        """快照生成时 manual_market_value 绝对替换生效"""
+        from tests.factories import create_manual_market_value
+        create_portfolio(test_db, code="MMV_P", status="active")
+        create_platform(test_db, code="MMV_PLAT")
+        ensure_trading_day(test_db, date(2025, 3, 10), is_open=True)
+        # 前日快照：CASH = 9900
+        create_position_snapshot(
+            test_db, portfolio_code="MMV_P", product_code="CASH", market="",
+            snapshot_date=date(2025, 3, 7), amount=9900.0, market_value=9900.0,
+            platform_code="MMV_PLAT", asset_type="cash",
+        )
+        # 设置 manual_market_value 覆盖为 8888
+        create_manual_market_value(
+            test_db, portfolio_code="MMV_P", platform_code="MMV_PLAT",
+            product_code="CASH", record_date=date(2025, 3, 10),
+            market_value=8888.0,
+        )
+        # 生成快照
+        positions = _generate_portfolio_position(test_db, "MMV_P", date(2025, 3, 10))
+        cash_positions = [p for p in positions if p.product_code == "CASH"]
+        assert len(cash_positions) == 1
+        # 应被 manual 覆盖为 8888，而非前日 9900
+        assert Decimal(str(cash_positions[0].amount)) == Decimal("8888")
+
+    def test_cash_incremental_from_prev_snapshot_plus_window(self, test_db):
+        """前日快照 + 窗口内 CASH trades 增量累加"""
+        create_portfolio(test_db, code="CV_P", status="active")
+        create_platform(test_db, code="CV_PLAT")
+        ensure_trading_day(test_db, date(2025, 3, 10), is_open=True)
+        # 前日快照：CASH = 5000
+        create_position_snapshot(
+            test_db, portfolio_code="CV_P", product_code="CASH", market="",
+            snapshot_date=date(2025, 3, 7), amount=5000.0, market_value=5000.0,
+            platform_code="CV_PLAT", asset_type="cash",
+        )
+        # 窗口内 CASH buy +3000, CASH sell -1000
+        create_trade(
+            test_db, "CV_P", "CASH", "",
+            trade_type="buy", amount=3000.0, price=None,
+            platform_code="CV_PLAT", trade_date=date(2025, 3, 8),
+            confirm_date=date(2025, 3, 8), status="confirmed",
+        )
+        create_trade(
+            test_db, "CV_P", "CASH", "",
+            trade_type="sell", amount=1000.0, price=None,
+            platform_code="CV_PLAT", trade_date=date(2025, 3, 9),
+            confirm_date=date(2025, 3, 9), status="confirmed",
+        )
+        positions = _generate_portfolio_position(test_db, "CV_P", date(2025, 3, 10))
+        cash_positions = [p for p in positions if p.product_code == "CASH"]
+        assert len(cash_positions) == 1
+        # 5000 + 3000 - 1000 = 7000
+        assert Decimal(str(cash_positions[0].amount)) == Decimal("7000")
+
+    def test_cash_manual_inherits_to_next_day(self, test_db):
+        """前日 manual 覆盖值作为后续日基线（增量继承）"""
+        from tests.factories import create_manual_market_value
+        create_portfolio(test_db, code="INH_P", status="active")
+        create_platform(test_db, code="INH_PLAT")
+        ensure_trading_day(test_db, date(2025, 3, 7), is_open=True)
+        ensure_trading_day(test_db, date(2025, 3, 10), is_open=True)
+        # D-3 快照：CASH = 9900
+        create_position_snapshot(
+            test_db, portfolio_code="INH_P", product_code="CASH", market="",
+            snapshot_date=date(2025, 3, 7), amount=9900.0, market_value=9900.0,
+            platform_code="INH_PLAT", asset_type="cash",
+        )
+        # D-2 有 manual 覆盖为 10000，先生成 D-2 快照
+        create_manual_market_value(
+            test_db, portfolio_code="INH_P", platform_code="INH_PLAT",
+            product_code="CASH", record_date=date(2025, 3, 8),
+            market_value=10000.0,
+        )
+        # 模拟 D-2 快照落库（manual 覆盖后的值）
+        create_position_snapshot(
+            test_db, portfolio_code="INH_P", product_code="CASH", market="",
+            snapshot_date=date(2025, 3, 8), amount=10000.0, market_value=10000.0,
+            platform_code="INH_PLAT", asset_type="cash",
+        )
+        # D-1 窗口内申购 +1000
+        create_trade(
+            test_db, "INH_P", "CASH", "",
+            trade_type="buy", amount=1000.0, price=None,
+            platform_code="INH_PLAT", trade_date=date(2025, 3, 9),
+            confirm_date=date(2025, 3, 9), status="confirmed",
+        )
+        # 生成 D-1 快照
+        positions = _generate_portfolio_position(test_db, "INH_P", date(2025, 3, 10))
+        cash_positions = [p for p in positions if p.product_code == "CASH"]
+        assert len(cash_positions) == 1
+        # 基线 = D-2 快照 10000（含 manual）+ 窗口 1000 = 11000
+        assert Decimal(str(cash_positions[0].amount)) == Decimal("11000")
