@@ -561,3 +561,56 @@ class TestPositionListener:
         test_db.delete(pos)
         with pytest.raises(RuntimeError):
             test_db.commit()
+
+
+class TestCashViaGetCashValue:
+    """#48 快照 CASH 持仓统一走 get_cash_value（含 manual_market_value 覆盖）"""
+
+    def test_manual_market_value_override_applied(self, test_db):
+        """快照生成时 manual_market_value 绝对替换生效（通过 get_cash_value 路径）"""
+        from tests.factories import create_manual_market_value
+        create_portfolio(test_db, code="MMV_P", status="active")
+        create_platform(test_db, code="MMV_PLAT")
+        ensure_trading_day(test_db, date(2025, 3, 10), is_open=True)
+        # 确认一笔 CASH buy 10000（模拟申购确认后的现金）
+        create_trade(
+            test_db, "MMV_P", "CASH", "",
+            trade_type="buy", amount=10000.0, price=None,
+            platform_code="MMV_PLAT", trade_date=date(2025, 3, 7),
+            confirm_date=date(2025, 3, 7), status="confirmed",
+        )
+        # 设置 manual_market_value 覆盖为 8888
+        create_manual_market_value(
+            test_db, portfolio_code="MMV_P", platform_code="MMV_PLAT",
+            product_code="CASH", record_date=date(2025, 3, 10),
+            market_value=8888.0,
+        )
+        # 生成快照
+        positions = _generate_portfolio_position(test_db, "MMV_P", date(2025, 3, 10))
+        cash_positions = [p for p in positions if p.product_code == "CASH"]
+        assert len(cash_positions) == 1
+        # 应被 manual 覆盖为 8888，而非原始 10000
+        assert Decimal(str(cash_positions[0].amount)) == Decimal("8888")
+
+    def test_cash_from_confirmed_trades_without_manual(self, test_db):
+        """无 manual 覆盖时，CASH 持仓 = compute_cash_balance 结果"""
+        create_portfolio(test_db, code="CV_P", status="active")
+        create_platform(test_db, code="CV_PLAT")
+        ensure_trading_day(test_db, date(2025, 3, 10), is_open=True)
+        # CASH buy 5000 + CASH sell 2000 = 净 3000
+        create_trade(
+            test_db, "CV_P", "CASH", "",
+            trade_type="buy", amount=5000.0, price=None,
+            platform_code="CV_PLAT", trade_date=date(2025, 3, 7),
+            confirm_date=date(2025, 3, 7), status="confirmed",
+        )
+        create_trade(
+            test_db, "CV_P", "CASH", "",
+            trade_type="sell", amount=2000.0, price=None,
+            platform_code="CV_PLAT", trade_date=date(2025, 3, 8),
+            confirm_date=date(2025, 3, 8), status="confirmed",
+        )
+        positions = _generate_portfolio_position(test_db, "CV_P", date(2025, 3, 10))
+        cash_positions = [p for p in positions if p.product_code == "CASH"]
+        assert len(cash_positions) == 1
+        assert Decimal(str(cash_positions[0].amount)) == Decimal("3000")

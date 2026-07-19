@@ -31,6 +31,7 @@ class TradeUpdate(BaseModel):
     price: Optional[float] = None
     fee: Optional[float] = None
     actual_amount: Optional[float] = None
+    trade_date: Optional[date] = None
     confirm_date: Optional[date] = None
     status: Optional[str] = None
     notes: Optional[str] = None

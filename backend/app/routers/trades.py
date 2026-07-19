@@ -157,8 +157,11 @@ def create_trade(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"error": "INVALID_AMOUNT", "message": "买入金额必须大于0"},
             )
-        # 按平台计算可用现金
-        available_cash = calculate_available_cash(db, trade.portfolio_code, trade.platform_code)
+        # 按平台计算可用现金（传入 trade_date 截止，补录历史交易时排除后续 confirmed）
+        available_cash = calculate_available_cash(
+            db, trade.portfolio_code, trade.platform_code,
+            as_of_date=trade.trade_date,
+        )
         if Decimal(str(trade.amount)) > available_cash:
             msg = "买入金额超过可用现金"
             if trade.platform_code:
@@ -199,7 +202,8 @@ def create_trade(
                 detail={"error": "INVALID_SHARES", "message": "卖出份额必须大于0"},
             )
         available_shares = calculate_available_shares(
-            db, trade.portfolio_code, trade.product_code, trade.market
+            db, trade.portfolio_code, trade.product_code, trade.market,
+            as_of_date=trade.trade_date,
         )
         if Decimal(str(trade.shares)) > available_shares:
             raise HTTPException(
@@ -342,7 +346,7 @@ def cancel_trade(
     if trade.market == "CN_EXCHANGE":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "CANNOT_CANCEL_EXCHANGE", "message": "场内交易不可取消"},
+            detail={"error": "CANNOT_CANCEL_EXCHANGE", "message": "场内交易不可取消，请使用 PUT 修改字段或 DELETE 删除后重新创建"},
         )
 
     trade.status = "cancelled"
@@ -435,6 +439,21 @@ def update_trade(
     # 若改动涉及配对同步相关字段，同步 transfer_group 配对 CASH 腿
     if needs_sync and db_trade.transfer_group:
         sync_transfer_group(db, db_trade, db_trade.status, db_trade.confirm_date)
+
+    # 金额字段变动时，同步配对 CASH 腿金额（#46）
+    amount_fields = {"actual_amount", "amount", "fee", "shares", "price"}
+    if db_trade.transfer_group and db_trade.product_code != "CASH":
+        if update_data.keys() & amount_fields:
+            paired = db.query(Trade).filter(
+                Trade.transfer_group == db_trade.transfer_group,
+                Trade.id != db_trade.id,
+                Trade.product_code == "CASH",
+            ).first()
+            if paired:
+                # CASH 腿金额 = 基金腿 actual_amount（买入=支出，卖出=收入）
+                new_amount = db_trade.actual_amount or db_trade.amount
+                paired.amount = new_amount
+                paired.actual_amount = new_amount
 
     db.commit()
     db.refresh(db_trade)
