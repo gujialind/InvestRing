@@ -138,7 +138,8 @@ def create_subscription(
                 detail={"error": "INVALID_SHARES", "message": "赎回份额必须大于0"},
             )
         available = calculate_investor_available_shares(
-            db, subscription.portfolio_code, subscription.investor_code
+            db, subscription.portfolio_code, subscription.investor_code,
+            as_of_date=subscription.apply_date,
         )
         if Decimal(str(subscription.shares)) > available:
             raise HTTPException(

@@ -205,3 +205,41 @@ class TestSubscriptionPermissions:
         resp = client.get("/api/subscriptions", headers=admin_headers)
         assert resp.status_code == 200
         assert "items" in resp.json()
+
+
+class TestAsOfDateRedeemValidation:
+    """#47 补录历史赎回时 as_of_date 排除后续 confirmed"""
+
+    def test_backfill_redeem_not_blocked_by_later_confirmed(self, client, admin_headers, test_db):
+        """补录历史日赎回，后续 confirmed 赎回不应计入扣减"""
+        create_portfolio(test_db, code="ASOF_RP", status="active")
+        create_investor(test_db, code="ASOF_RI")
+        ensure_trading_day(test_db, date(2025, 1, 6), is_open=True)
+        ensure_trading_day(test_db, date(2025, 1, 7), is_open=True)
+        ensure_trading_day(test_db, date(2025, 1, 8), is_open=True)
+        ensure_trading_day(test_db, date(2025, 1, 9), is_open=True)
+        # 快照：投资人份额=1000
+        create_value_snapshot(test_db, "ASOF_RP", date(2025, 1, 6),
+                              total_value=1000, total_shares=1000, unit_price=1.0)
+        create_investor_holding(test_db, "ASOF_RP", "ASOF_RI", date(2025, 1, 6), shares=1000)
+        # 后续 confirmed 赎回 800（confirm_date=1/8，快照后）
+        create_subscription(
+            test_db, "ASOF_RP", "ASOF_RI", sub_type="redeem",
+            shares=800, apply_date=date(2025, 1, 7),
+            confirm_date=date(2025, 1, 8), status="confirmed",
+        )
+        # 补录 1/7 赎回 500：as_of=1/7 时后续 confirm_date=1/8 不计入，可用=1000
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "ASOF_RP",
+                "investor_code": "ASOF_RI",
+                "sub_type": "redeem",
+                "shares": 500,
+                "apply_date": "2025-01-07",
+                "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        # 不应被 INSUFFICIENT_SHARES 拒绝
+        assert resp.status_code in (200, 201), f"Expected success, got {resp.status_code}: {resp.json()}"
