@@ -11,6 +11,10 @@ class InvestorHolding(Base):
     shares = Column(Numeric(15, 4), nullable=False)
     frozen_shares = Column(Numeric(15, 4), default=0)
     cost_per_share = Column(Numeric(10, 4))
+    # 派生字段（#40 改进1）：快照生成时回填，历史快照可为 NULL
+    market_value = Column(Numeric(15, 4))  # shares * 组合净值
+    total_cost = Column(Numeric(15, 4))    # shares * cost_per_share
+    profit = Column(Numeric(15, 4))         # market_value - total_cost
     snapshot_date = Column(Date, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 

@@ -63,7 +63,7 @@ calculate_available_cash = compute_cash_balance(latest_snapshot_date)
                           + SUM(confirmed event cash_change WHERE ex_date > latest_snapshot_date)
 ```
 
-> 实时预览调 `compute_cash_balance(today)`，快照生成调 `get_cash_value(date)`（含 `manual_market_value` 绝对替换）。对外披露读快照表，修正走 regen。
+> 实时预览调 `compute_cash_balance(today)`；快照生成走 `_generate_portfolio_position` 增量累加路径（前一日 CASH 基准 + 窗口内 confirmed CASH trades + event cash_change 增量 + `manual_market_value` 绝对覆盖）。对外披露读快照表，修正走 regen。
 
 **基金可用份额实时计算**：
 ```
@@ -105,7 +105,7 @@ calculate_available_cash = compute_cash_balance(latest_snapshot_date)
 
 **transfer_group 原子翻转**：confirm/unconfirm/cancel 基金腿时，配对 CASH 腿自动同步。
 
-**快照表中 CASH 持仓**：由 `get_cash_value` → `compute_cash_balance` 统一计算，不再在 `_generate_portfolio_position` 中增量累加。事件 `cash_dividend` / `forced_adjustment` 的 `cash_change` 由 `compute_cash_balance` 直接从 event 表读取，不生成 CASH trade。
+**快照表中 CASH 持仓**：由 `_generate_portfolio_position` 增量累加计算（前一日 CASH 基准 + 窗口内 confirmed CASH trades + event cash_change 增量），`manual_market_value` 绝对覆盖。实时计算（`calculate_available_cash` 基线）走 `get_cash_value` → `compute_cash_balance`。事件 `cash_dividend` / `forced_adjustment` 的 `cash_change` 在快照生成中由增量累加读取，在实时计算中由 `compute_cash_balance` 从 event 表读取，不生成 CASH trade。
 
 **现金中转约束**：卖出 pending 不自动增加可用现金，买入只能用已有可用现金。现金不足时需分两步操作（先卖后买）。
 
