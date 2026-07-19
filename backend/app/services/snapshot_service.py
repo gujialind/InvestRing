@@ -19,6 +19,7 @@ from app.models import (
 )
 from app.services.trading_utils import is_trading_day as _trading_utils_is_trading_day, get_next_trading_day
 from app.services.subscription_service import unconfirm_single_subscription
+from app.services.position_service import get_cash_value
 from app.models.manual_market_value import ManualMarketValue
 
 logger = logging.getLogger(__name__)
@@ -501,22 +502,17 @@ def _generate_portfolio_position(
     # 应用期间内的已确认交易（从prev_snapshot次日到target_date）
     start_apply_date = prev_snapshot + timedelta(days=1) if prev_snapshot else target_date
     
-    # 处理买入交易
+    # 处理买入交易（排除 CASH，CASH 由 get_cash_value 统一计算）
     buy_trades = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
         Trade.trade_type == "buy",
         Trade.status == "confirmed",
+        Trade.product_code != "CASH",
         Trade.confirm_date >= start_apply_date,
         Trade.confirm_date <= target_date
     ).all()
     
     for trade in buy_trades:
-        if trade.product_code == "CASH":
-            cash_key = ("CASH", "", trade.platform_code)
-            if cash_key not in positions:
-                positions[cash_key] = {"shares": None, "amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
-            positions[cash_key]["amount"] += Decimal(str(trade.amount or 0))
-            continue
         key = (trade.product_code, trade.market, trade.platform_code)
         if key not in positions:
             product = db.query(Product).filter(
@@ -543,22 +539,17 @@ def _generate_portfolio_position(
 
         positions[key]["shares"] += new_shares
     
-    # 处理卖出交易
+    # 处理卖出交易（排除 CASH，CASH 由 get_cash_value 统一计算）
     sell_trades = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
         Trade.trade_type == "sell",
         Trade.status == "confirmed",
+        Trade.product_code != "CASH",
         Trade.confirm_date >= start_apply_date,
         Trade.confirm_date <= target_date
     ).all()
     
     for trade in sell_trades:
-        if trade.product_code == "CASH":
-            cash_key = ("CASH", "", trade.platform_code)
-            if cash_key not in positions:
-                positions[cash_key] = {"shares": None, "amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
-            positions[cash_key]["amount"] -= Decimal(str(trade.amount or 0))
-            continue
         key = (trade.product_code, trade.market, trade.platform_code)
         if key in positions:
             positions[key]["shares"] -= Decimal(str(trade.shares or 0))
@@ -577,12 +568,7 @@ def _generate_portfolio_position(
 
     for event in confirmed_events:
         if event.event_type in ("cash_dividend", "forced_adjustment"):
-            if event.cash_change:
-                cash_key = ("CASH", "", event.platform_code)
-                if cash_key not in positions:
-                    positions[cash_key] = {"shares": None, "amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
-                positions[cash_key]["amount"] += Decimal(str(event.cash_change))
-            continue
+            continue  # 现金影响由 get_cash_value 统一计算
 
         # 按平台精确匹配持仓
         fund_key = (event.product_code, event.market, event.platform_code)
@@ -606,18 +592,43 @@ def _generate_portfolio_position(
         if event.shares_change is not None:
             positions[fund_key]["shares"] = old_shares + Decimal(str(event.shares_change))
 
-    # CASH 持仓：应用 manual_market_value 绝对覆盖（日期精确匹配）
+    # CASH 持仓：统一调用 get_cash_value（消除增量累加双路径，#48）
+    cash_platforms = set()
+    # 从前日快照收集已有 CASH 平台
     for key, pos_data in list(positions.items()):
         if pos_data.get("asset_type") == "cash":
-            _, _, plat_code = key
-            manual = db.query(ManualMarketValue).filter(
-                ManualMarketValue.portfolio_code == portfolio_code,
-                ManualMarketValue.platform_code == plat_code,
-                ManualMarketValue.product_code == "CASH",
-                ManualMarketValue.date == target_date,
-            ).first()
-            if manual:
-                pos_data["amount"] = Decimal(str(manual.market_value))
+            cash_platforms.add(key[2])
+            del positions[key]
+    # 从历史 CASH trades 收集平台（get_cash_value 做全量计算，平台发现也需全量）
+    window_cash_trades = db.query(Trade.platform_code).filter(
+        Trade.portfolio_code == portfolio_code,
+        Trade.product_code == "CASH",
+        Trade.status == "confirmed",
+        Trade.confirm_date <= target_date,
+    ).distinct().all()
+    for (plat,) in window_cash_trades:
+        if plat:
+            cash_platforms.add(plat)
+    # 从历史事件收集平台
+    window_cash_events = db.query(ShareChangeEvent.platform_code).filter(
+        ShareChangeEvent.portfolio_code == portfolio_code,
+        ShareChangeEvent.status == "confirmed",
+        ShareChangeEvent.ex_date <= target_date,
+        ShareChangeEvent.platform_code.isnot(None),
+        ShareChangeEvent.cash_change.isnot(None),
+        ShareChangeEvent.cash_change != 0,
+    ).distinct().all()
+    for (plat,) in window_cash_events:
+        cash_platforms.add(plat)
+
+    for plat in cash_platforms:
+        cash_val = get_cash_value(db, portfolio_code, plat, target_date)
+        positions[("CASH", "", plat)] = {
+            "shares": None,
+            "amount": cash_val,
+            "cost_price": None,
+            "asset_type": "cash",
+        }
 
     # 构建最终的持仓快照对象
     result_positions = []

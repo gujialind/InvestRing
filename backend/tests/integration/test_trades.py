@@ -466,3 +466,148 @@ class TestUpdateDeletePairedSync:
         test_db.expire_all()
         after = test_db.query(Trade).filter(Trade.transfer_group == tg).count()
         assert after == 0
+
+
+class TestUpdateAmountSyncCashLeg:
+    """#46 PUT 改金额后配对 CASH 腿同步"""
+
+    def test_update_actual_amount_syncs_cash_leg(self, client, admin_headers, test_db):
+        """修改基金腿 actual_amount 后，配对 CASH 腿 amount 同步更新"""
+        create_portfolio(test_db, code="AMT_P1", status="active")
+        create_product(test_db, code="ETF_AMT", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       confirm_days=0)
+        create_platform(test_db, code="AMT_PLAT")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        create_trade(
+            test_db, "AMT_P1", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="AMT_PLAT", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+        # 创建基金买入（自动生成配对 CASH 腿）
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "AMT_P1",
+                "product_code": "ETF_AMT",
+                "market": "CN_EXCHANGE",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "price": 1.5,
+                "platform_code": "AMT_PLAT",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201)
+        trade_id = resp.json()["id"]
+        fund_leg = test_db.query(Trade).get(trade_id)
+        tg = fund_leg.transfer_group
+        paired = test_db.query(Trade).filter(
+            Trade.transfer_group == tg, Trade.id != trade_id
+        ).first()
+        assert paired is not None
+        original_paired_amount = float(paired.amount)
+
+        # PUT 修改 actual_amount
+        upd = client.put(
+            f"/api/trades/{trade_id}",
+            json={"actual_amount": 8000.0},
+            headers=admin_headers,
+        )
+        assert upd.status_code == 200
+        test_db.expire_all()
+        paired_after = test_db.query(Trade).filter(
+            Trade.transfer_group == tg, Trade.id != trade_id
+        ).first()
+        # 配对 CASH 腿金额应同步为新的 actual_amount
+        assert float(paired_after.amount) == 8000.0
+        assert float(paired_after.actual_amount) == 8000.0
+        assert float(paired_after.amount) != original_paired_amount
+
+
+class TestAsOfDateSellValidation:
+    """#47 补录历史卖出时 as_of_date 排除后续 confirmed"""
+
+    def test_backfill_sell_not_blocked_by_later_confirmed(self, client, admin_headers, test_db):
+        """补录历史日卖出，后续 confirmed 卖出不应计入扣减"""
+        create_portfolio(test_db, code="ASOF_P1", status="active")
+        create_product(test_db, code="FUND_ASOF", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       confirm_days=1)
+        create_platform(test_db, code="ASOF_PLAT")
+        ensure_trading_day(test_db, date(2025, 1, 6), is_open=True)
+        ensure_trading_day(test_db, date(2025, 1, 7), is_open=True)
+        ensure_trading_day(test_db, date(2025, 1, 8), is_open=True)
+        ensure_trading_day(test_db, date(2025, 1, 9), is_open=True)
+        ensure_trading_day(test_db, date(2025, 1, 10), is_open=True)
+        # 快照：shares=1000
+        create_value_snapshot(test_db, "ASOF_P1", date(2025, 1, 6),
+                              total_value=1000, total_shares=1000, unit_price=1.0)
+        create_position_snapshot(
+            test_db, "ASOF_P1", "FUND_ASOF", "CN_OTC", date(2025, 1, 6),
+            shares=1000, platform_code="ASOF_PLAT",
+        )
+        # 后续 confirmed 卖出 800（confirm_date=1/9，快照后）
+        create_trade(
+            test_db, "ASOF_P1", "FUND_ASOF", "CN_OTC",
+            trade_type="sell", shares=800, status="confirmed",
+            trade_date=date(2025, 1, 8), confirm_date=date(2025, 1, 9),
+            platform_code="ASOF_PLAT",
+        )
+        # 补录 1/7 卖出 500：as_of=1/7 时后续 1/9 confirmed 不计入，可用=1000
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "ASOF_P1",
+                "product_code": "FUND_ASOF",
+                "market": "CN_OTC",
+                "trade_type": "sell",
+                "shares": 500,
+                "price": 1.0,
+                "platform_code": "ASOF_PLAT",
+                "trade_date": "2025-01-07",
+            },
+            headers=admin_headers,
+        )
+        # 不应被 INSUFFICIENT_SHARES 拒绝
+        assert resp.status_code in (200, 201), f"Expected success, got {resp.status_code}: {resp.json()}"
+
+
+class TestCancelExchangeErrorMessage:
+    """#49 场内 cancel 错误信息包含修正路径"""
+
+    def test_cancel_exchange_message_has_correction_path(self, client, admin_headers, test_db):
+        """场内交易 cancel 拒绝时 message 包含 PUT 和 DELETE 关键词"""
+        create_portfolio(test_db, code="MSG_P1", status="active")
+        create_product(test_db, code="ETF_MSG", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       confirm_days=0)
+        create_platform(test_db, code="MSG_PLAT")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        create_trade(
+            test_db, "MSG_P1", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="MSG_PLAT", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+        # 创建场内 pending trade（手动插入，因为场内创建后一般当天确认）
+        from decimal import Decimal
+        t = Trade(
+            portfolio_code="MSG_P1", product_code="ETF_MSG", market="CN_EXCHANGE",
+            platform_code="MSG_PLAT", trade_type="buy",
+            amount=Decimal("5000"), price=Decimal("1.5"),
+            fee=Decimal("0"), actual_amount=Decimal("5000"),
+            trade_date=date(2025, 10, 6), status="pending",
+        )
+        test_db.add(t)
+        test_db.commit()
+        test_db.refresh(t)
+
+        resp = client.post(f"/api/trades/{t.id}/cancel", headers=admin_headers)
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "CANNOT_CANCEL_EXCHANGE"
+        assert "PUT" in detail["message"]
+        assert "DELETE" in detail["message"]
