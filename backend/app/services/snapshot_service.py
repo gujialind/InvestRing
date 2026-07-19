@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Dict, Any, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, delete
 
 from app.models import (
     Portfolio, PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
@@ -404,11 +404,20 @@ def _delete_existing_snapshots(
     cascaded = _cascade_unconfirm_subscriptions(db, portfolio_code, target_date)
     # 级联回退依赖该快照的事件
     cascaded_events = _cascade_unconfirm_share_change_events(db, portfolio_code, target_date)
+    # #40 改进4：级联回退详情日志
+    logger.info(
+        f"级联回退: portfolio={portfolio_code}, date={target_date}, "
+        f"subscriptions={len(cascaded)}, events={len(cascaded_events)}"
+    )
 
-    pp_deleted = db.query(PortfolioPosition).filter(
-        PortfolioPosition.portfolio_code == portfolio_code,
-        PortfolioPosition.snapshot_date == target_date
-    ).delete()
+    # #40 改进2：用 db.execute(delete()) 绕过 instance-level before_delete listener
+    # （bulk SQL delete 不触发 mapper event，明确表达内部快照删除意图）
+    pp_deleted = db.execute(
+        delete(PortfolioPosition).where(
+            PortfolioPosition.portfolio_code == portfolio_code,
+            PortfolioPosition.snapshot_date == target_date,
+        )
+    ).rowcount
     
     nav_deleted = db.query(PortfolioValueSnapshot).filter(
         PortfolioValueSnapshot.portfolio_code == portfolio_code,
@@ -655,6 +664,11 @@ def _generate_portfolio_position(
         
         # 计算冻结份额（pending卖出）
         frozen_shares = _calculate_frozen_shares(db, portfolio_code, product_code, market, target_date)
+        # 计算冻结金额（pending CASH sells，仅 CASH 持仓行；#40 改进1）
+        frozen_amount = (
+            _calculate_frozen_amount(db, portfolio_code, platform_code, target_date)
+            if is_cash else Decimal("0")
+        )
         
         position = PortfolioPosition(
             portfolio_code=portfolio_code,
@@ -664,7 +678,7 @@ def _generate_portfolio_position(
             shares=float(pos_data["shares"]) if pos_data["shares"] and not is_cash else None,
             amount=float(pos_data["amount"]) if is_cash and pos_data["amount"] is not None else None,
             frozen_shares=float(frozen_shares) if frozen_shares > 0 else 0,
-            frozen_amount=0,  # 简化：暂不计算冻结金额
+            frozen_amount=float(frozen_amount) if frozen_amount > 0 else 0,
             cost_price=float(pos_data["cost_price"]) if pos_data["cost_price"] else None,
             unit_price=float(unit_price) if unit_price else None,
             market_value=float(market_value) if market_value is not None else None,
@@ -704,6 +718,7 @@ def _generate_portfolio_value_snapshot(
         PortfolioValueSnapshot.snapshot_date < target_date
     ).scalar()
 
+    prev_pvs = None
     if prev_pvs_date:
         prev_pvs = db.query(PortfolioValueSnapshot).filter(
             PortfolioValueSnapshot.portfolio_code == portfolio_code,
@@ -742,12 +757,19 @@ def _generate_portfolio_value_snapshot(
     # 计算冻结份额（pending赎回）
     frozen_shares = _calculate_portfolio_frozen_shares(db, portfolio_code, target_date)
     
+    # 计算净值涨跌幅（#40 改进1，复用已查到的 prev_pvs）
+    if prev_pvs and prev_pvs.unit_price and prev_pvs.unit_price > 0:
+        unit_price_change_pct = (unit_price - Decimal(str(prev_pvs.unit_price))) / Decimal(str(prev_pvs.unit_price))
+    else:
+        unit_price_change_pct = Decimal("0")
+    
     snapshot = PortfolioValueSnapshot(
         portfolio_code=portfolio_code,
         snapshot_date=target_date,
         total_value=float(total_value),
         total_shares=float(total_shares),
         unit_price=float(unit_price.quantize(Decimal("0.0001"))),
+        unit_price_change_pct=float(unit_price_change_pct.quantize(Decimal("0.0001"))) if unit_price_change_pct else 0,
         frozen_shares=float(frozen_shares) if frozen_shares > 0 else 0,
     )
     
@@ -843,6 +865,11 @@ def _generate_investor_holding(
             db, portfolio_code, investor.code, target_date
         )
         
+        # 派生字段（#40 改进1）
+        market_value = prev_shares * Decimal(str(value_snapshot.unit_price))
+        total_cost = prev_shares * prev_cost
+        profit = market_value - total_cost
+        
         holding = InvestorHolding(
             portfolio_code=portfolio_code,
             investor_code=investor.code,
@@ -850,6 +877,9 @@ def _generate_investor_holding(
             shares=float(prev_shares),
             frozen_shares=float(frozen_shares) if frozen_shares > 0 else 0,
             cost_per_share=float(prev_cost.quantize(Decimal("0.0001"))) if prev_cost > 0 else 0,
+            market_value=float(market_value),
+            total_cost=float(total_cost),
+            profit=float(profit),
         )
         result_holdings.append(holding)
     
@@ -1279,6 +1309,30 @@ def _calculate_investor_frozen_shares(
         Subscription.apply_date <= target_date
     ).scalar()
     
+    return Decimal(str(result or 0))
+
+
+def _calculate_frozen_amount(
+    db: Session,
+    portfolio_code: str,
+    platform_code: Optional[str],
+    target_date: date
+) -> Decimal:
+    """计算 CASH 持仓在指定日期的冻结金额（pending CASH sells，#40 改进1）。
+
+    pending CASH sell 表示已承诺待执行的现金支出，需在 frozen_amount 中预留。
+    按平台维度过滤，与 portfolio_position 的 CASH 分平台存储一致。
+    """
+    query = db.query(func.sum(Trade.amount)).filter(
+        Trade.portfolio_code == portfolio_code,
+        Trade.product_code == "CASH",
+        Trade.trade_type == "sell",
+        Trade.status == "pending",
+        Trade.trade_date <= target_date,
+    )
+    if platform_code:
+        query = query.filter(Trade.platform_code == platform_code)
+    result = query.scalar()
     return Decimal(str(result or 0))
 
 

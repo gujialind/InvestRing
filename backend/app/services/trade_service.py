@@ -85,21 +85,31 @@ def sync_transfer_group(
         Trade.transfer_group == trade.transfer_group,
         Trade.id != trade.id,
     ).all()
-    for paired_trade in paired:
-        paired_trade.status = target_status
-        if confirm_date is not None:
-            paired_trade.confirm_date = confirm_date
-        elif target_status == "pending":
-            # unconfirm 时需要重新计算期望确认日
-            paired_product = db.query(Product).filter(
-                Product.code == paired_trade.product_code,
-                Product.market == paired_trade.market,
-            ).first()
-            if paired_product:
-                paired_confirm_days = paired_product.confirm_days or 0
-                paired_trade.confirm_date = get_next_trading_day(
-                    db, paired_trade.trade_date, days=paired_confirm_days
-                )
+    # #37 savepoint：配对腿更新失败回滚 savepoint，不影响外层事务
+    # 用连接级 SAVEPOINT（db.connection().begin_nested()）而非 session 级
+    # db.begin_nested()，避免触发 after_transaction_end 事件与测试隔离监听器冲突
+    sp = db.connection().begin_nested()
+    try:
+        for paired_trade in paired:
+            paired_trade.status = target_status
+            if confirm_date is not None:
+                paired_trade.confirm_date = confirm_date
+            elif target_status == "pending":
+                # unconfirm 时需要重新计算期望确认日
+                paired_product = db.query(Product).filter(
+                    Product.code == paired_trade.product_code,
+                    Product.market == paired_trade.market,
+                ).first()
+                if paired_product:
+                    paired_confirm_days = paired_product.confirm_days or 0
+                    paired_trade.confirm_date = get_next_trading_day(
+                        db, paired_trade.trade_date, days=paired_confirm_days
+                    )
+        db.flush()  # 确保 ORM 变更在 savepoint 内写入 DB
+        sp.commit()
+    except Exception:
+        sp.rollback()
+        raise
 
 
 def confirm_single_trade(

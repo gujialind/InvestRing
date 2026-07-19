@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Numeric, Date, DateTime, Integer, ForeignKey, ForeignKeyConstraint, func, CheckConstraint, UniqueConstraint
+from sqlalchemy import Column, String, Numeric, Date, DateTime, Integer, ForeignKey, ForeignKeyConstraint, func, CheckConstraint, UniqueConstraint, event
 from app.database import Base
 
 
@@ -31,4 +31,21 @@ class PortfolioPosition(Base):
             name='check_nav_or_non_nav'
         ),
         UniqueConstraint('portfolio_code', 'product_code', 'market', 'platform_code', 'snapshot_date', name='uix_position_snapshot'),
+    )
+
+
+# #40 改进2：ORM 层兜底，禁止 instance-level update/delete（HTTP API 已禁，此处防内部代码）
+# bulk delete（db.query(...).delete() / db.execute(delete(...))）不触发 instance event，
+# _delete_existing_snapshots 通过 db.execute(delete()) 绕过（明确表达内部删除意图）。
+@event.listens_for(PortfolioPosition, "before_update")
+def _prevent_position_update(mapper, connection, target):
+    raise RuntimeError(
+        "portfolio_position 快照不可更新，请使用 recalculate_snapshots 重算"
+    )
+
+
+@event.listens_for(PortfolioPosition, "before_delete")
+def _prevent_position_delete(mapper, connection, target):
+    raise RuntimeError(
+        "portfolio_position 快照不可直接删除，请使用 DELETE /snapshots/{portfolio}/{date}"
     )

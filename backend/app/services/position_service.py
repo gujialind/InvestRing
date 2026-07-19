@@ -32,7 +32,9 @@ def compute_cash_balance(
     源1：trade 表 confirmed CASH trades（confirm_date <= as_of_date）
     源2：event 表 confirmed events（ex_date <= as_of_date, cash_change != 0）
 
-    不含 manual_market_value 覆盖。实时预览和快照生成均调用此函数。
+    不含 manual_market_value 覆盖。用于实时可用现金计算（calculate_available_cash 基线）
+    和 cash-position 端点审计字段。快照生成走 _generate_portfolio_position 增量累加路径，
+    不调用此函数。
     """
     if as_of_date is None:
         as_of_date = date.today()
