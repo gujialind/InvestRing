@@ -2,8 +2,8 @@
 # 单元测试：持仓服务现金计算 (test_position_service.py)
 # ============================================================================
 # 覆盖 app/services/position_service.py 中的现金计算函数：
-# - get_cash_value（含 manual_market_value 绝对替换）
-# - calculate_available_cash（基线纳入 manual 覆盖，回归 issue #14）
+# - get_cash_value（含 manual_market_value 绝对替换，辅助审计场景）
+# - calculate_available_cash（基线读快照表，回归 issue #52）
 # ============================================================================
 
 from datetime import date
@@ -28,11 +28,15 @@ SNAP_DATE = date(2025, 1, 6)  # 周一，交易日
 
 
 def _seed_cash_baseline(db, portfolio_code="GV_P", platform_code="GV_PLAT", amount=6000):
-    """构造基线：组合 + 平台 + 快照 + 一笔 confirmed CASH buy（amount）"""
+    """构造基线：组合 + 平台 + 价值快照 + CASH 持仓快照 + 一笔 confirmed CASH buy（amount）"""
     create_portfolio(db, code=portfolio_code, status="active")
     create_platform(db, code=platform_code)
     create_value_snapshot(db, portfolio_code, SNAP_DATE,
                           total_value=amount, total_shares=amount, unit_price=1.0)
+    create_position_snapshot(
+        db, portfolio_code, "CASH", "", SNAP_DATE,
+        amount=amount, platform_code=platform_code, asset_type="cash",
+    )
     create_trade(
         db, portfolio_code, "CASH", "",
         trade_type="buy", amount=amount, status="confirmed",
@@ -82,24 +86,31 @@ class TestGetCashValue:
 
 
 class TestCalculateAvailableCashWithOverride:
-    """calculate_available_cash 含 manual_market_value 覆盖测试（核心修复验证）"""
+    """基线读快照表（#52）：manual 覆盖已 baked in 快照，实时计算自然继承"""
 
-    def test_baseline_includes_override(self, test_db):
-        """基线纳入 manual 覆盖值（核心 bug 修复）"""
-        _seed_cash_baseline(test_db)
-        create_manual_market_value(
-            test_db, "GV_P", "GV_PLAT", "CASH",
-            record_date=SNAP_DATE, market_value=6001.39,
+    def test_baseline_reads_from_snapshot(self, test_db):
+        """基线直接读快照表 CASH amount（快照已含 manual 覆盖）"""
+        # 模拟快照生成时已 bake in manual 覆盖值 6001.39
+        create_portfolio(test_db, code="GV_P", status="active")
+        create_platform(test_db, code="GV_PLAT")
+        create_value_snapshot(test_db, "GV_P", SNAP_DATE,
+                              total_value=6001.39, total_shares=6001.39, unit_price=1.0)
+        create_position_snapshot(
+            test_db, "GV_P", "CASH", "", SNAP_DATE,
+            amount=6001.39, platform_code="GV_PLAT", asset_type="cash",
         )
         cash = calculate_available_cash(test_db, "GV_P", "GV_PLAT")
         assert cash == Decimal("6001.39")
 
     def test_override_plus_post_snapshot_trade(self, test_db):
-        """覆盖基线 + 快照后 confirmed trade"""
-        _seed_cash_baseline(test_db)
-        create_manual_market_value(
-            test_db, "GV_P", "GV_PLAT", "CASH",
-            record_date=SNAP_DATE, market_value=6001.39,
+        """快照基线（含覆盖）+ 快照后 confirmed trade"""
+        create_portfolio(test_db, code="GV_P", status="active")
+        create_platform(test_db, code="GV_PLAT")
+        create_value_snapshot(test_db, "GV_P", SNAP_DATE,
+                              total_value=6001.39, total_shares=6001.39, unit_price=1.0)
+        create_position_snapshot(
+            test_db, "GV_P", "CASH", "", SNAP_DATE,
+            amount=6001.39, platform_code="GV_PLAT", asset_type="cash",
         )
         # 快照后 confirmed CASH buy
         create_trade(
@@ -112,11 +123,14 @@ class TestCalculateAvailableCashWithOverride:
         assert cash == Decimal("6101.39")
 
     def test_override_minus_pending_sell(self, test_db):
-        """覆盖基线 - pending sell 预留"""
-        _seed_cash_baseline(test_db)
-        create_manual_market_value(
-            test_db, "GV_P", "GV_PLAT", "CASH",
-            record_date=SNAP_DATE, market_value=6001.39,
+        """快照基线（含覆盖）- pending sell 预留"""
+        create_portfolio(test_db, code="GV_P", status="active")
+        create_platform(test_db, code="GV_PLAT")
+        create_value_snapshot(test_db, "GV_P", SNAP_DATE,
+                              total_value=6001.39, total_shares=6001.39, unit_price=1.0)
+        create_position_snapshot(
+            test_db, "GV_P", "CASH", "", SNAP_DATE,
+            amount=6001.39, platform_code="GV_PLAT", asset_type="cash",
         )
         # pending CASH sell（已承诺未执行，需预留）
         create_trade(
@@ -129,7 +143,7 @@ class TestCalculateAvailableCashWithOverride:
         assert cash == Decimal("5501.39")
 
     def test_no_snapshot_ignores_override(self, test_db):
-        """无快照时，不应用 manual 覆盖"""
+        """无快照时，降级为全量流水计算，不应用 manual 覆盖"""
         create_portfolio(test_db, code="GV_NOSNAP", status="active")
         create_platform(test_db, code="GV_PLAT2")
         # 无快照时写入 manual 覆盖
@@ -141,15 +155,29 @@ class TestCalculateAvailableCashWithOverride:
         cash = calculate_available_cash(test_db, "GV_NOSNAP", "GV_PLAT2")
         assert cash == Decimal("0")
 
-    def test_override_non_matching_date_no_effect(self, test_db):
-        """覆盖日期 != latest_date 时，不影响可用现金"""
-        _seed_cash_baseline(test_db)
-        create_manual_market_value(
-            test_db, "GV_P", "GV_PLAT", "CASH",
-            record_date=date(2025, 1, 20), market_value=9999,
+    def test_manual_override_inherited_from_snapshot(self, test_db):
+        """核心场景（#52）：历史 manual 覆盖已 baked in 快照，实时计算自然继承"""
+        # 模拟：D-2 设置了 manual 覆盖 10000，D-1 快照继承了该值 + 增量 200 = 10200
+        # 当前最新快照 = D-1，无 manual 记录在 D-1
+        create_portfolio(test_db, code="GV_P", status="active")
+        create_platform(test_db, code="GV_PLAT")
+        create_value_snapshot(test_db, "GV_P", SNAP_DATE,
+                              total_value=10200, total_shares=10200, unit_price=1.0)
+        create_position_snapshot(
+            test_db, "GV_P", "CASH", "", SNAP_DATE,
+            amount=10200, platform_code="GV_PLAT", asset_type="cash",
+        )
+        # 无 manual_market_value 记录在 SNAP_DATE
+        # 流水只有一笔原始 buy 6000（全量重算会得 6000，但快照基线应为 10200）
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="buy", amount=6000, status="confirmed",
+            trade_date=date(2025, 1, 2), confirm_date=date(2025, 1, 2),
+            platform_code="GV_PLAT",
         )
         cash = calculate_available_cash(test_db, "GV_P", "GV_PLAT")
-        assert cash == Decimal("6000")
+        # 应读快照基线 10200，而非全量流水 6000
+        assert cash == Decimal("10200")
 
 
 class TestCalculateAvailableCashAsOfDate:
@@ -163,10 +191,14 @@ class TestCalculateAvailableCashAsOfDate:
             test_db, "GV_P", date(2025, 1, 13),
             total_value=20000, total_shares=20000, unit_price=1.0,
         )
+        create_position_snapshot(
+            test_db, "GV_P", "CASH", "", date(2025, 1, 13),
+            amount=20000, platform_code="GV_PLAT", asset_type="cash",
+        )
         cash = calculate_available_cash(
             test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)
         )
-        # 基线落在 2025-01-06，无后续快照内 trade，应为 6000
+        # 基线落在 2025-01-06（<= as_of_date），无后续快照内 trade，应为 6000
         assert cash == Decimal("6000")
 
     def test_as_of_date_after_range_inclusive(self, test_db):
