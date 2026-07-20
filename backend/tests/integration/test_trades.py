@@ -9,7 +9,6 @@ from tests.factories import (
     create_portfolio, create_product, create_platform, create_trade,
     create_position_snapshot, create_value_snapshot, create_investor_holding,
     create_investor, ensure_trading_day, create_price_record,
-    create_manual_market_value,
 )
 from app.models.trade import Trade
 
@@ -105,29 +104,25 @@ class TestBuyTrade:
         assert resp.status_code in (400, 422)
 
     def test_buy_succeeds_with_manual_override(self, client, admin_headers, test_db):
-        """manual 覆盖后，买入金额在覆盖值内应成功（回归 issue #14）"""
+        """manual 覆盖 baked in 快照后，买入金额在覆盖值内应成功（回归 issue #52）"""
         create_portfolio(test_db, code="TRD_OVR", status="active")
         create_product(test_db, code="ETF_OVR", market="CN_EXCHANGE",
                        product_type="ETF", asset_class_code="STOCK_CN_LARGE")
         create_platform(test_db, code="TRD_OVR_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
-        # 快照日 + confirmed CASH buy（计算现金 = 6000）
+        # 快照日 + 持仓快照（模拟快照生成时已 bake in manual 覆盖值 6001.39）
         create_value_snapshot(test_db, "TRD_OVR", date(2025, 10, 3),
-                              total_value=6000, total_shares=6000, unit_price=1.0)
-        create_trade(
+                              total_value=6001.39, total_shares=6001.39, unit_price=1.0)
+        create_position_snapshot(
             test_db, "TRD_OVR", "CASH", "",
-            trade_type="buy", amount=6000.0, price=None,
-            platform_code="TRD_OVR_PLAT", trade_date=date(2025, 10, 3),
-            confirm_date=date(2025, 10, 3), status="confirmed",
-        )
-        # manual 覆盖 → 现金 = 6001.39
-        create_manual_market_value(
-            test_db, "TRD_OVR", "TRD_OVR_PLAT", "CASH",
-            record_date=date(2025, 10, 3), market_value=6001.39,
+            snapshot_date=date(2025, 10, 3),
+            amount=6001.39, unit_price=None, cost_price=None,
+            market_value=6001.39, platform_code="TRD_OVR_PLAT",
+            asset_type="cash",
         )
 
-        # 买入 6001（> 计算值 6000，< 覆盖值 6001.39）→ 修复前 422，修复后成功
+        # 买入 6001（< 快照基线 6001.39）→ 应成功
         resp = client.post(
             "/api/trades",
             json={

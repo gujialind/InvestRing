@@ -10,7 +10,7 @@ from tests.factories import (
     create_portfolio, create_product, create_platform,
     create_position_snapshot, create_value_snapshot,
     create_investor_holding, create_investor, create_trade,
-    create_subscription, ensure_trading_day, create_manual_market_value,
+    create_subscription, ensure_trading_day,
 )
 
 
@@ -79,22 +79,18 @@ class TestAvailableCash:
         assert resp.status_code == 200
 
     def test_available_cash_reflects_manual_override(self, client, admin_headers, test_db):
-        """available-cash 端点应反映 manual 覆盖值（回归 issue #14）"""
+        """available-cash 端点应反映快照中已 bake in 的 manual 覆盖值（回归 issue #52）"""
         create_portfolio(test_db, code="AC_OVR", status="active")
         create_platform(test_db, code="AC_OVR_PLAT")
-        # 快照日 + confirmed CASH buy（计算现金 = 6000）
+        # 快照日 + 持仓快照（模拟快照生成时已 bake in manual 覆盖值 6001.39）
         create_value_snapshot(test_db, "AC_OVR", date(2025, 10, 31),
-                              total_value=6000, total_shares=6000, unit_price=1.0)
-        create_trade(
+                              total_value=6001.39, total_shares=6001.39, unit_price=1.0)
+        create_position_snapshot(
             test_db, "AC_OVR", "CASH", "",
-            trade_type="buy", amount=6000.0, price=None,
-            platform_code="AC_OVR_PLAT", trade_date=date(2025, 10, 31),
-            confirm_date=date(2025, 10, 31), status="confirmed",
-        )
-        # manual 覆盖 → 现金 = 6001.39
-        create_manual_market_value(
-            test_db, "AC_OVR", "AC_OVR_PLAT", "CASH",
-            record_date=date(2025, 10, 31), market_value=6001.39,
+            snapshot_date=date(2025, 10, 31),
+            amount=6001.39, unit_price=None, cost_price=None,
+            market_value=6001.39, platform_code="AC_OVR_PLAT",
+            asset_type="cash",
         )
 
         resp = client.get(

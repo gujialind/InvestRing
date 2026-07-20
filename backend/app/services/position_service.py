@@ -32,9 +32,11 @@ def compute_cash_balance(
     源1：trade 表 confirmed CASH trades（confirm_date <= as_of_date）
     源2：event 表 confirmed events（ex_date <= as_of_date, cash_change != 0）
 
-    不含 manual_market_value 覆盖。用于实时可用现金计算（calculate_available_cash 基线）
-    和 cash-position 端点审计字段。快照生成走 _generate_portfolio_position 增量累加路径，
-    不调用此函数。
+    不含 manual_market_value 覆盖。用于：
+    - 无快照时 calculate_available_cash 的降级基线
+    - cash-position 端点审计字段（computed_value）
+    快照生成走 _generate_portfolio_position 增量累加路径，不调用此函数。
+    有快照时 calculate_available_cash 直接读 portfolio_position 快照表，亦不调用此函数。
     """
     if as_of_date is None:
         as_of_date = date.today()
@@ -88,6 +90,9 @@ def get_cash_value(
 
     target_date 为 None 时：compute_cash_balance 降级为 today，
     且跳过 manual 覆盖查询（无快照日可匹配）。
+
+    注意：calculate_available_cash 已改为直接读快照表基线（#52），
+    本函数保留用于 cash-position 端点审计展示等辅助场景。
     """
     v = compute_cash_balance(db, portfolio_code, platform_code, target_date)
     if target_date is not None:
@@ -111,8 +116,9 @@ def calculate_available_cash(
     """
     组合可用现金实时计算（显式流水版）。
 
-    基线 = 最新快照日现金（get_cash_value(snapshot_date)，含 manual_market_value 绝对替换，
-    与快照落库口径一致；无快照时用 compute_cash_balance）
+    基线 = 最新快照日 portfolio_position 快照表中 CASH amount
+    （与 _generate_portfolio_position 增量范式口径一致，manual_market_value
+    覆盖已 baked in 快照，自然继承；无快照时降级为 compute_cash_balance 全量流水）
     + 快照后 confirmed CASH trades（buy +, sell −）
     − 所有 pending CASH sells（已承诺未执行）
     + 快照后 confirmed event cash_change
@@ -126,9 +132,19 @@ def calculate_available_cash(
     else:
         latest_date = get_latest_snapshot_date(db, portfolio_code)
 
-    # 基线：快照日现金（含 manual_market_value 绝对替换，与快照落库口径一致）
+    # 基线：直接读快照表 CASH 持仓（与 _generate_portfolio_position 增量范式口径一致，
+    # manual_market_value 覆盖已 baked in 快照，自然继承）
     if latest_date is not None:
-        cash = get_cash_value(db, portfolio_code, platform_code, latest_date)
+        cash_query = db.query(PortfolioPosition).filter(
+            PortfolioPosition.portfolio_code == portfolio_code,
+            PortfolioPosition.product_code == "CASH",
+            PortfolioPosition.snapshot_date == latest_date,
+        )
+        if platform_code:
+            cash_query = cash_query.filter(PortfolioPosition.platform_code == platform_code)
+        cash = sum(
+            Decimal(str(p.amount or 0)) for p in cash_query.all()
+        )
     else:
         cash = compute_cash_balance(db, portfolio_code, platform_code, as_of_date)
 
