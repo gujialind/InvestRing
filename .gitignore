@@ -41,6 +41,7 @@ yarn.lock
 
 # AI IDE
 .trae/
+.qoder/cache/
 
 # AI Coding Assistants (multi-IDE)
 .hermes/
