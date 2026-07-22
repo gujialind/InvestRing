@@ -8,6 +8,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
+import uuid
 
 from sqlalchemy.orm import Session
 
@@ -247,7 +248,8 @@ def create_trade(
     """创建调仓交易记录。
 
     confirm_date：Trade 创建时按 product.confirm_days 计算，测试中可显式传入。
-    transfer_group：配对 CASH trade 的关联标识，普通调仓不传。
+    transfer_group：配对 CASH trade 的关联标识；未传时自动生成唯一占位值
+        （模型层 transfer_group NOT NULL，且满足 uq_trade_transfer_group 唯一约束）。
     """
     trade = Trade(
         portfolio_code=portfolio_code,
@@ -255,7 +257,7 @@ def create_trade(
         product_code=product_code,
         market=market,
         trade_type=trade_type,
-        transfer_group=transfer_group,
+        transfer_group=transfer_group or f"test_{uuid.uuid4().hex[:12]}",
         amount=Decimal(str(amount)),
         shares=Decimal(str(shares)) if shares is not None else None,
         price=Decimal(str(price)) if price is not None else None,

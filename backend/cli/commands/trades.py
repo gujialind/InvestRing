@@ -80,8 +80,9 @@ def create_trade(
         from app.models.trade import Trade
         from app.models.portfolio import Portfolio
         from app.models.product import Product
-        from app.services.trading_utils import is_trading_day
+        from app.services.trading_utils import is_trading_day, get_next_trading_day
         from app.services.position_service import calculate_available_cash, calculate_available_shares
+        from app.services.trade_service import attach_paired_cash_leg
 
         td = parse_date(trade_date)
         if not is_trading_day(db, td):
@@ -99,7 +100,14 @@ def create_trade(
         if not product:
             error("NOT_FOUND", f"产品 {product_code}({market}) 不存在")
 
+        # 禁止直接创建裸 CASH 交易：现金变动只能来自申赎/调仓配对/现金转移
+        if product_code == "CASH":
+            error("CASH_TRADE_FORBIDDEN", "不支持直接创建 CASH 交易，请使用现金转移或申购赎回入口")
+
         fee_d = Decimal(str(fee))
+        # 预期确认日（对齐 router：创建时即设定日期字段）
+        confirm_days = product.confirm_days or 0
+        expected_confirm_date = get_next_trading_day(db, td, days=confirm_days)
 
         if trade_type == "buy":
             if not actual_amount or actual_amount <= 0:
@@ -116,6 +124,7 @@ def create_trade(
                 platform_code=platform_code, trade_type="buy",
                 shares=shares_d, amount=amount, price=price_d, fee=fee_d,
                 actual_amount=actual_amount_d, trade_date=td,
+                confirm_date=expected_confirm_date,
                 status="pending", notes=notes,
             )
         elif trade_type == "sell":
@@ -132,12 +141,15 @@ def create_trade(
                 platform_code=platform_code, trade_type="sell",
                 shares=shares_d, amount=amount, price=price, fee=fee_d,
                 actual_amount=actual_amount_d, trade_date=td,
+                confirm_date=expected_confirm_date,
                 status="pending", notes=notes,
             )
         else:
             error("INVALID_TYPE", "类型必须为 buy 或 sell")
 
+        # 基金腿必配 CASH 腿（显式记录现金变动），两腿在 cli_context 单次 commit 中原子落库
         db.add(new_trade)
+        attach_paired_cash_leg(db, new_trade, actual_amount_d, expected_confirm_date)
         db.flush()
         db.refresh(new_trade)
         success(data=serialize_model(new_trade))

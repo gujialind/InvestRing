@@ -595,6 +595,7 @@ class TestCancelExchangeErrorMessage:
             amount=Decimal("5000"), price=Decimal("1.5"),
             fee=Decimal("0"), actual_amount=Decimal("5000"),
             trade_date=date(2025, 10, 6), status="pending",
+            transfer_group="rebal_msgtest001",
         )
         test_db.add(t)
         test_db.commit()
@@ -606,3 +607,72 @@ class TestCancelExchangeErrorMessage:
         assert detail["error"] == "CANNOT_CANCEL_EXCHANGE"
         assert "PUT" in detail["message"]
         assert "DELETE" in detail["message"]
+
+
+class TestCashTradeForbidden:
+    """#53 禁止直接创建裸 CASH 交易"""
+
+    def test_create_cash_trade_rejected(self, client, admin_headers, test_db):
+        """REST POST /api/trades 传 product_code=CASH 应被 422 CASH_TRADE_FORBIDDEN 拒绝"""
+        create_portfolio(test_db, code="CASH_FBD", status="active")
+        create_platform(test_db, code="CASH_FBD_PLAT")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "CASH_FBD",
+                "product_code": "CASH",
+                "market": "",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "platform_code": "CASH_FBD_PLAT",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, f"Response: {resp.status_code} {resp.json()}"
+        assert resp.json()["detail"]["error"] == "CASH_TRADE_FORBIDDEN"
+
+    def test_create_fund_buy_generates_paired_cash_leg(self, client, admin_headers, test_db):
+        """REST 基金买入自动生成共享 transfer_group 的配对 CASH 腿"""
+        create_portfolio(test_db, code="PAIR_P1", status="active")
+        create_product(test_db, code="ETF_PAIR", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       confirm_days=0)
+        create_platform(test_db, code="PAIR_PLAT")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        create_trade(
+            test_db, "PAIR_P1", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="PAIR_PLAT", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "PAIR_P1",
+                "product_code": "ETF_PAIR",
+                "market": "CN_EXCHANGE",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "price": 1.5,
+                "platform_code": "PAIR_PLAT",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), f"Response: {resp.status_code} {resp.json()}"
+        fund_id = resp.json()["id"]
+        fund_leg = test_db.query(Trade).get(fund_id)
+        assert fund_leg.transfer_group is not None
+        assert fund_leg.transfer_group.startswith("rebal_")
+        paired = test_db.query(Trade).filter(
+            Trade.transfer_group == fund_leg.transfer_group,
+            Trade.id != fund_id,
+        ).all()
+        assert len(paired) == 1
+        assert paired[0].product_code == "CASH"
+        assert paired[0].trade_type == "sell"
+        assert float(paired[0].amount) == 10000.0

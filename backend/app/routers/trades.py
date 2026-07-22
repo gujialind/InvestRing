@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date
 from decimal import Decimal
-import uuid
 from app.database import get_db
 from app.models.trade import Trade
 from app.models.portfolio import Portfolio
@@ -16,7 +15,7 @@ from app.services.position_service import (
     calculate_available_cash,
     calculate_available_shares,
 )
-from app.services.trade_service import confirm_single_trade, sync_transfer_group
+from app.services.trade_service import confirm_single_trade, sync_transfer_group, attach_paired_cash_leg
 
 
 def _get_next_trading_day(db: Session, from_date: date, days: int = 1) -> date:
@@ -137,6 +136,16 @@ def create_trade(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    # 禁止直接创建裸 CASH 交易：现金变动只能来自申赎/调仓配对/现金转移
+    if trade.product_code == "CASH":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "CASH_TRADE_FORBIDDEN",
+                "message": "不支持直接创建 CASH 交易，请使用现金转移或申购赎回入口",
+            },
+        )
+
     # 场内交易必须提供有效价格（实时撮合价，不能用收盘价替代）
     if product.market == "CN_EXCHANGE" and (trade.price is None or trade.price <= 0):
         raise HTTPException(
@@ -239,32 +248,9 @@ def create_trade(
         raise HTTPException(status_code=400, detail="Invalid trade type")
 
     # 为基金调仓生成配对 CASH trade（显式记录现金变动）
-    # CASH 产品（如现金转移）不生成配对，由各自创建逻辑处理
-    if trade.product_code != "CASH":
-        transfer_group = f"rebal_{uuid.uuid4().hex[:12]}"
-        new_trade.transfer_group = transfer_group
-
-        cash_trade_amount = actual_amount
-        cash_trade = Trade(
-            portfolio_code=trade.portfolio_code,
-            platform_code=trade.platform_code,
-            product_code="CASH",
-            market="",
-            trade_type="sell" if trade.trade_type == "buy" else "buy",
-            shares=None,
-            amount=cash_trade_amount,
-            price=Decimal("1"),
-            fee=Decimal("0"),
-            actual_amount=cash_trade_amount,
-            trade_date=trade.trade_date,
-            confirm_date=expected_confirm_date,
-            status="pending",
-            transfer_group=transfer_group,
-        )
-        db.add(new_trade)
-        db.add(cash_trade)
-    else:
-        db.add(new_trade)
+    # product_code == "CASH" 已在前置守卫拒绝，此处 new_trade 必为基金腿
+    db.add(new_trade)
+    attach_paired_cash_leg(db, new_trade, actual_amount, expected_confirm_date)
 
     db.commit()
     db.refresh(new_trade)
