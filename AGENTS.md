@@ -29,7 +29,6 @@
 | `backend/` | FastAPI + SQLAlchemy 后端；含 `app/`（应用）、`cli/`（管理 CLI）、`alembic/`（迁移）、`tests/` |
 | `frontend/` | Next.js 15 + React 19 前端（App Router，双端路由） |
 | `ir-cli/` | 独立轻量 HTTP 客户端 CLI（typer + httpx） |
-| `Docs/` | 背景设计文档（可能滞后） |
 | `nginx/`、`scripts/`、`docker-compose*.yml` | 部署与运维 |
 
 **技术栈总览**：后端 FastAPI + SQLAlchemy + MySQL(pymysql) + Alembic + APScheduler；前端 Next.js `^15.1` / React `^19` / TS `~5.6` / Tailwind `^4` / shadcn(Radix) / Zustand `^5` / react-query `^5`；数据源 Tushare / AkShare。
@@ -50,6 +49,7 @@
 - **固定生成顺序**：`portfolio_position` → `portfolio_value_snapshot` → `investor_holding`。
 - **生成前提**：`confirm_date <= snapshot_date` 的申赎/交易/事件均已确认，不存在会影响该日的 pending 记录（存在 `ex_date <= target_date` 的 pending 事件时快照检查返回 failed）。
 - **查询当前状态**：`WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ...)`。
+- **快照连续原则**：快照具有前后依赖性，快照生成必须严格按照交易日顺序生成，新生成的快照必须和已有快照连续（从已有快照的最新snapshot_date的下一个交易日开始生成），循环生成快照失败时停止生成，不允许跳过。
 
 ### 2.2 现金显式流水
 
@@ -149,6 +149,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 ### 3.4 快照删除与重算
 
 - **删除快照**（`_delete_existing_snapshots`）自动级联回退：`confirm_date==D` 的申购退回 pending 并删除关联 CASH trade；`ex_date==D` 或 `entitlement_date==D` 的 confirmed 事件退回 pending；基金级父事件的子记录（`parent_event_id`）被物理删除。批量删除从最新日倒序、逐日 commit。
+- 遵循**快照连续原则**，不能仅删除中间的快照，删除某日的快照其后的快照也一并删除，
 - **重算**（`recalculate_snapshots`）逐交易日重建，`auto_confirm_after_snapshot` 每日后自动重确认 `apply_date==D` 的申购、`confirm_date==D` 的 trade、`ex_date==D` 的事件；单笔失败不影响整批。
 
 ---
