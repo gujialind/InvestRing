@@ -35,7 +35,8 @@ class Trade(Base):
             ["product_code", "market"],
             ["product.code", "product.market"]
         ),
-        # transfer_group 唯一约束：防止重复确认生成重复 CASH trade
-        # MySQL 中 NULL 值不参与唯一性检查，故 transfer_group 为空的普通 trade 不受影响
+        # transfer_group 唯一约束：防止重复确认生成重复 CASH trade。
+        # transfer_group NOT NULL，每笔 trade 均属一个业务组；基金腿与 CASH 腿按
+        # product_code 区分、现金转移两腿按 trade_type 区分、申赎为单腿 sub_{id}，故无碰撞
         UniqueConstraint('transfer_group', 'product_code', 'trade_type', name='uq_trade_transfer_group'),
     )
