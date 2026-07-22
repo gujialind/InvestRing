@@ -5,6 +5,7 @@
 从路由层提取，供 HTTP API 手动确认与快照重算 auto_confirm 多处复用。
 """
 import logging
+import uuid
 from datetime import date
 from decimal import Decimal
 from typing import Optional
@@ -73,6 +74,43 @@ def get_nav_for_trade_confirmation(
             return Decimal(str(price_record.unit_price))
 
         return None
+
+
+def attach_paired_cash_leg(
+    db: Session,
+    fund_trade: Trade,
+    cash_amount: Decimal,
+    confirm_date: Optional[date],
+    status: str = "pending",
+) -> Trade:
+    """为基金腿生成 transfer_group 并构造/加入配对 CASH 腿。
+
+    cash_amount 采用 router 语义 = 基金腿 actual_amount（买入=支出含费，卖出=收入）。
+    供 REST router 与后端 CLI 共用，确保基金买/卖必配 CASH 腿。
+
+    Returns:
+        新建的 CASH 腿（已 db.add，未 commit）
+    """
+    group = f"rebal_{uuid.uuid4().hex[:12]}"
+    fund_trade.transfer_group = group
+    cash_trade = Trade(
+        portfolio_code=fund_trade.portfolio_code,
+        platform_code=fund_trade.platform_code,
+        product_code="CASH",
+        market="",
+        trade_type="sell" if fund_trade.trade_type == "buy" else "buy",
+        shares=None,
+        amount=cash_amount,
+        price=Decimal("1"),
+        fee=Decimal("0"),
+        actual_amount=cash_amount,
+        trade_date=fund_trade.trade_date,
+        confirm_date=confirm_date,
+        status=status,
+        transfer_group=group,
+    )
+    db.add(cash_trade)
+    return cash_trade
 
 
 def sync_transfer_group(

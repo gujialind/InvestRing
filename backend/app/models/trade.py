@@ -16,8 +16,8 @@ class Trade(Base):
     #   - 申购确认（CASH buy）/赎回确认（CASH sell）：sub_{subscription.id}
     #   - 基金买入/卖出（基金腿 + 配对 CASH 腿）：rebal_{uuid}
     #   - 平台间现金转移（CASH sell + CASH buy）：uuid（裸 uuid）
-    # 普通单腿 trade 该字段为 NULL，不参与配对与唯一约束
-    transfer_group = Column(String(36))
+    # 每笔 trade 均隶属一个业务组，不存在裸 trade（NOT NULL 保证数据规范）
+    transfer_group = Column(String(36), nullable=False)
     shares = Column(Numeric(15, 4))
     amount = Column(Numeric(15, 4), nullable=False)
     price = Column(Numeric(10, 4))
