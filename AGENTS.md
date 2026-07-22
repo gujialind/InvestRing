@@ -86,6 +86,7 @@ calculate_available_cash = 最新快照日 portfolio_position 的 CASH amount（
 - 快照生成走 `_generate_portfolio_position` 增量累加路径（前一日 CASH 基准 + 窗口内 confirmed CASH trades + event `cash_change` 增量 + `manual_market_value` 绝对覆盖）。
 - 有快照时 `calculate_available_cash` 直接读快照表基线；无快照时降级为 `compute_cash_balance`。
 - **现金中转约束**：卖出 pending 不自动增加可用现金，买入只能用已有可用现金；不足时须先卖后买两步操作。
+- **CASH trade 来源受限**：CASH trade 仅由申赎、基金调仓配对、跨平台现金转移三条路径生成（均预置 `transfer_group`）；`trade.transfer_group` 为 **NOT NULL**，REST 与 CLI 均禁止直接创建 `product_code="CASH"` 的交易（`CASH_TRADE_FORBIDDEN`）。
 - **平台维度**：现金按平台分别追踪，`portfolio_position` 的 CASH 记录唯一约束为 `(portfolio_code, product_code, market, platform_code, snapshot_date)`；申购/赎回必须指定 `platform_code`（现金归属平台）。跨平台转移的状态机见 §3.3。
 
 ### 2.3 实时可用量计算
@@ -196,7 +197,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 - **`snapshot_service.py`**：`generate_daily_snapshots` / `recalculate_snapshots` / `validate_snapshot_dependencies`；三个生成函数 `_generate_portfolio_position` → `_generate_portfolio_value_snapshot` → `_generate_investor_holding`（固定顺序）；`auto_confirm_after_snapshot`（重算后自动重确认）；`_delete_existing_snapshots`（删除级联回退）。`_generate_portfolio_position` 走增量累加：前一日 CASH 基准 + 窗口内 confirmed CASH trades + event `cash_change` 增量，`manual_market_value` 绝对覆盖；事件只读 `platform_code IS NOT NULL` 的 confirmed 记录，按 `entitlement_date` 升序、`fund_key=(product_code, market, platform_code)` 精确匹配。
 - **`position_service.py`**：`compute_cash_balance`、`get_cash_value`、`calculate_available_cash`、`calculate_available_shares`、`calculate_investor_available_shares`。
-- **`trade_service.py`**：`confirm_single_trade`（含 QDII 净值获取规则）、`sync_transfer_group`（配对腿原子同步）。
+- **`trade_service.py`**：`confirm_single_trade`（含 QDII 净值获取规则）、`sync_transfer_group`（配对腿原子同步）、`attach_paired_cash_leg`（基金腿创建时生成 `rebal_` 组并构造配对 CASH 腿，REST/CLI 共用）。
 - **`subscription_service.py`**：`confirm_single_subscription` / `unconfirm_single_subscription`（首次申购净值 1.0000、生成/删除配对 CASH trade、首次确认激活组合）。
 - **`market_data_service.py`**：价格/净值查询与同步、`submit_price_sync_job`、`recover_orphan_jobs`。
 - **`trading_calendar_service.py`** / **`trading_utils.py`**：交易日判断、下一/前一交易日、最新快照日查询。
@@ -205,7 +206,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 ### 4.4 数据模型与关键约束
 
 **唯一约束**：
-- `trade`：`(transfer_group, product_code, trade_type)` — 防重复确认生成重复 CASH trade（MySQL NULL 不参与唯一性，普通 trade 不受影响）。
+- `trade`：`(transfer_group, product_code, trade_type)` — 防重复确认生成重复 CASH trade。`transfer_group` **NOT NULL**（每笔 trade 必属一个业务组）：基金腿与 CASH 腿按 `product_code` 区分、现金转移两腿按 `trade_type` 区分、申赎为单腿 `sub_{id}`，故 NOT NULL 下仍无碰撞。
 - `portfolio_position`：`(portfolio_code, product_code, market, platform_code, snapshot_date)`；并有 CHECK 约束 `shares` 与 `amount` 二者恰有其一（净值型 vs 非净值型）。
 - `portfolio_value_snapshot`：`(portfolio_code, snapshot_date)`。
 - `manual_market_value`：`(portfolio_code, platform_code, product_code, date)`。
@@ -321,6 +322,7 @@ Next.js `^15.1` + React `^19` + TypeScript `~5.6` + TailwindCSS `^4`（CSS-first
 | 场内交易缺有效价格 | `MISSING_OR_INVALID_PRICE` |
 | 交易日 ≤ 最新快照日 | `DATE_BEFORE_SNAPSHOT` |
 | 场内 trade cancel | `CANNOT_CANCEL_EXCHANGE` |
+| 直接创建 CASH 交易（`product_code=CASH`） | `CASH_TRADE_FORBIDDEN`（REST 422 / CLI；须走申赎/现金转移/调仓配对） |
 
 - 金额：买入 `amount = actual_amount − fee`、`shares = amount/price`；卖出 `amount = actual_amount + fee`。
 - `confirm_date` 创建时即按 `product.confirm_days` 设定；`confirm` 可传参覆盖（补录）。
@@ -413,6 +415,7 @@ Next.js `^15.1` + React `^19` + TypeScript `~5.6` + TailwindCSS `^4`（CSS-first
 | `PLATFORM_REQUIRED` / `PLATFORM_NOT_ALLOWED` / `PLATFORM_NOT_COVERED` | 事件平台约束 |
 | `PORTFOLIO_NOT_ACTIVE` / `PENDING_TRANSACTIONS_EXIST` / `INVESTOR_HAS_SHARES` | 组合/投资人生命周期 |
 | `CANNOT_MODIFY_CONFIRMED` / `CANNOT_DELETE_CONFIRMED` / `CANNOT_CANCEL_EXCHANGE` / `CANNOT_UNCONFIRM_CHILD` | 状态保护 |
+| `CASH_TRADE_FORBIDDEN` | 直接创建裸 CASH 交易（须走申赎/现金转移/调仓配对入口） |
 
 **HTTP 状态码**：400 参数错误 / 401 未认证 / 403 无权限 / 404 不存在 / 409 冲突 / 422 业务校验失败 / 500 内部错误。
 
