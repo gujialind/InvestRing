@@ -11,7 +11,13 @@ class Trade(Base):
     product_code = Column(String(10), nullable=False)
     market = Column(String(20))
     trade_type = Column(String(10), nullable=False)
-    transfer_group = Column(String(36))  # 平台间现金转移配对标识
+    # 现金流水配对标识：关联同一业务操作产生的多条 trade（基金腿 + CASH 腿），
+    # 用于 confirm/unconfirm/cancel 时对配对 CASH 腿做原子翻转。编码规则：
+    #   - 申购确认（CASH buy）/赎回确认（CASH sell）：sub_{subscription.id}
+    #   - 基金买入/卖出（基金腿 + 配对 CASH 腿）：rebal_{uuid}
+    #   - 平台间现金转移（CASH sell + CASH buy）：uuid（裸 uuid）
+    # 普通单腿 trade 该字段为 NULL，不参与配对与唯一约束
+    transfer_group = Column(String(36))
     shares = Column(Numeric(15, 4))
     amount = Column(Numeric(15, 4), nullable=False)
     price = Column(Numeric(10, 4))
