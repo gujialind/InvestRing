@@ -45,7 +45,6 @@ yarn.lock
 # AI Coding Assistants (multi-IDE)
 .hermes/
 .qwen/
-.qoder/
 .lingma/
 .agents/
 .apifox/
