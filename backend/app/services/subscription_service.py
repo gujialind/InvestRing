@@ -166,6 +166,7 @@ def unconfirm_single_subscription(
     db: Session,
     subscription: Subscription,
     *,
+    check_snapshot: bool = True,
     auto_flush: bool = False,
 ) -> Subscription:
     """
@@ -176,6 +177,9 @@ def unconfirm_single_subscription(
     Args:
         db: 数据库会话
         subscription: 待取消确认的记录（必须为 confirmed 状态）
+        check_snapshot: 是否执行快照保护（默认 True）。用户触发的 unconfirm
+            应保持 True；快照删除级联回退（_cascade_unconfirm_subscriptions）
+            须显式传 False——此时快照正在被删除，不应被本检查阻断。
         auto_flush: 是否在结束时自动 flush
 
     Returns:
@@ -183,9 +187,27 @@ def unconfirm_single_subscription(
 
     Raises:
         InvalidStatusError: 状态不是 confirmed
+        BusinessError: 确认日及之后已有快照（SNAPSHOT_DEPENDENCY）
     """
     if subscription.status != "confirmed":
         raise InvalidStatusError("仅 confirmed 状态可取消确认")
+
+    # 快照保护：确认日及之后已有快照则拒绝（级联删除快照时 check_snapshot=False 跳过）
+    if check_snapshot and subscription.confirm_date:
+        snapshots_after = (
+            db.query(PortfolioValueSnapshot)
+            .filter(
+                PortfolioValueSnapshot.portfolio_code == subscription.portfolio_code,
+                PortfolioValueSnapshot.snapshot_date >= subscription.confirm_date,
+            )
+            .count()
+        )
+        if snapshots_after > 0:
+            raise BusinessError(
+                "SNAPSHOT_DEPENDENCY",
+                f"该申赎已被快照纳入（{subscription.confirm_date} 及之后有 {snapshots_after} 张快照），"
+                f"请先删除 {subscription.confirm_date} 及之后的快照",
+            )
 
     subscription.status = "pending"
     subscription.confirm_date = None

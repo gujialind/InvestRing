@@ -331,7 +331,7 @@ def _cascade_unconfirm_subscriptions(
         sub_id = sub.id
         sub_type = sub.sub_type
         try:
-            unconfirm_single_subscription(db, sub, auto_flush=False)
+            unconfirm_single_subscription(db, sub, check_snapshot=False, auto_flush=False)
             unconfirmed_list.append({
                 "id": sub_id,
                 "sub_type": sub_type,

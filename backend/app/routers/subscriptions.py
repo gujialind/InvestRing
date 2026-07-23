@@ -7,20 +7,11 @@ from app.database import get_db
 from app.models.subscription import Subscription
 from app.models.portfolio import Portfolio
 from app.models.investor import Investor
-from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.platform import Platform
-from app.services.trading_utils import (
-    is_trading_day,
-    get_next_trading_day,
-    get_latest_snapshot_date,
-)
-from app.services.position_service import calculate_investor_available_shares
 from app.services.subscription_service import (
     confirm_single_subscription,
     unconfirm_single_subscription,
     create_subscription as create_subscription_service,
-    NavNotAvailableError,
-    InvalidStatusError,
 )
 from app.schemas.subscription import SubscriptionCreate, SubscriptionUpdate, SubscriptionResponse
 from app.dependencies import get_current_user, get_current_admin
@@ -102,18 +93,7 @@ def confirm_subscription(
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
-    try:
-        confirm_single_subscription(db, subscription)
-    except InvalidStatusError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "INVALID_STATUS", "message": str(e)},
-        )
-    except NavNotAvailableError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "NAV_NOT_AVAILABLE", "message": str(e)},
-        )
+    confirm_single_subscription(db, subscription)
 
     db.commit()
     db.refresh(subscription)
@@ -162,35 +142,7 @@ def unconfirm_subscription(
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
-    # 快照保护：确认日及之后已有快照则拒绝
-    if subscription.status == "confirmed" and subscription.confirm_date:
-        snapshots_after = (
-            db.query(PortfolioValueSnapshot)
-            .filter(
-                PortfolioValueSnapshot.portfolio_code == subscription.portfolio_code,
-                PortfolioValueSnapshot.snapshot_date >= subscription.confirm_date,
-            )
-            .count()
-        )
-        if snapshots_after > 0:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": "SNAPSHOT_DEPENDENCY",
-                    "message": (
-                        f"该申赎已被快照纳入（{subscription.confirm_date} 及之后有 {snapshots_after} 张快照），"
-                        f"请先删除 {subscription.confirm_date} 及之后的快照"
-                    ),
-                },
-            )
-
-    try:
-        unconfirm_single_subscription(db, subscription)
-    except InvalidStatusError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "INVALID_STATUS", "message": str(e)},
-        )
+    unconfirm_single_subscription(db, subscription)
 
     db.commit()
     return {"message": "Subscription unconfirmed successfully"}

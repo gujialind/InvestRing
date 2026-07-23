@@ -89,22 +89,13 @@ def confirm_subscription(
     """确认申购赎回（首次申购净值固定1.0000，确认日期和净值均由后端自动计算）"""
     with cli_context() as db:
         from app.models.subscription import Subscription
-        from app.services.subscription_service import (
-            confirm_single_subscription,
-            NavNotAvailableError,
-            InvalidStatusError,
-        )
+        from app.services.subscription_service import confirm_single_subscription
 
         sub = db.query(Subscription).filter(Subscription.id == id).first()
         if not sub:
             error("NOT_FOUND", f"申购赎回记录 {id} 不存在")
 
-        try:
-            confirm_single_subscription(db, sub)
-        except InvalidStatusError as e:
-            error("INVALID_STATUS", str(e))
-        except NavNotAvailableError as e:
-            error("NAV_NOT_AVAILABLE", str(e))
+        confirm_single_subscription(db, sub)
 
         db.flush()
         db.refresh(sub)
@@ -139,37 +130,13 @@ def unconfirm_subscription(
     """取消确认（confirmed -> pending）"""
     with cli_context() as db:
         from app.models.subscription import Subscription
-        from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
-        from app.services.subscription_service import (
-            unconfirm_single_subscription,
-            InvalidStatusError,
-        )
+        from app.services.subscription_service import unconfirm_single_subscription
 
         sub = db.query(Subscription).filter(Subscription.id == id).first()
         if not sub:
             error("NOT_FOUND", f"申购赎回记录 {id} 不存在")
 
-        # 快照保护
-        if sub.status == "confirmed" and sub.confirm_date:
-            snapshots_after = (
-                db.query(PortfolioValueSnapshot)
-                .filter(
-                    PortfolioValueSnapshot.portfolio_code == sub.portfolio_code,
-                    PortfolioValueSnapshot.snapshot_date >= sub.confirm_date,
-                )
-                .count()
-            )
-            if snapshots_after > 0:
-                error(
-                    "SNAPSHOT_DEPENDENCY",
-                    f"该申赎已被快照纳入（{sub.confirm_date} 及之后有 {snapshots_after} 张快照），"
-                    f"请先删除 {sub.confirm_date} 及之后的快照",
-                )
-
-        try:
-            unconfirm_single_subscription(db, sub)
-        except InvalidStatusError as e:
-            error("INVALID_STATUS", str(e))
+        unconfirm_single_subscription(db, sub)
 
         db.flush()
         success(data={"message": "申购赎回已取消确认", "id": id})
