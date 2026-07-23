@@ -9,8 +9,10 @@ from decimal import Decimal
 from tests.factories import (
     create_portfolio, create_investor, create_subscription,
     create_investor_holding, create_value_snapshot, ensure_trading_day,
+    create_trade,
 )
 from app.models.subscription import Subscription
+from app.models.trade import Trade
 
 
 class TestSubscriptionCreate:
@@ -243,3 +245,66 @@ class TestAsOfDateRedeemValidation:
         )
         # 不应被 INSUFFICIENT_SHARES 拒绝
         assert resp.status_code in (200, 201), f"Expected success, got {resp.status_code}: {resp.json()}"
+
+
+class TestUnconfirmSubscriptionSnapshotProtection:
+    """unconfirm 申赎快照保护（SNAPSHOT_DEPENDENCY 检查已内嵌 subscription_service）"""
+
+    def test_unconfirm_blocked_by_snapshot(self, client, admin_headers, test_db):
+        """confirm_date 及之后已有快照时，unconfirm 返回 422 SNAPSHOT_DEPENDENCY 且状态不变"""
+        create_portfolio(test_db, code="SUB_UC1", status="active")
+        create_investor(test_db, code="SUB_UCI1")
+        sub = create_subscription(
+            test_db, "SUB_UC1", "SUB_UCI1",
+            sub_type="subscribe", amount=10000.0, shares=10000.0,
+            unit_price=1.0, apply_date=date(2025, 9, 1),
+            confirm_date=date(2025, 9, 2), status="confirmed",
+        )
+        # 在 confirm_date 生成组合快照 → 快照依赖成立
+        create_value_snapshot(
+            test_db, "SUB_UC1", date(2025, 9, 2),
+            total_value=10000, total_shares=10000, unit_price=1.0,
+        )
+
+        resp = client.post(
+            f"/api/subscriptions/{sub.id}/unconfirm",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "SNAPSHOT_DEPENDENCY"
+        # 检查发生在改字段之前，状态未被回退
+        still = test_db.query(Subscription).filter(Subscription.id == sub.id).first()
+        assert still.status == "confirmed"
+
+    def test_unconfirm_ok_without_snapshot(self, client, admin_headers, test_db):
+        """无快照依赖时 unconfirm 成功回退 pending 并级联删除配对 CASH trade"""
+        create_portfolio(test_db, code="SUB_UC2", status="active")
+        create_investor(test_db, code="SUB_UCI2")
+        sub = create_subscription(
+            test_db, "SUB_UC2", "SUB_UCI2",
+            sub_type="subscribe", amount=10000.0, shares=10000.0,
+            unit_price=1.0, apply_date=date(2025, 9, 1),
+            confirm_date=date(2025, 9, 2), status="confirmed",
+        )
+        # 配对 CASH trade（transfer_group=sub_{id}），unconfirm 应级联物理删除
+        create_trade(
+            test_db, "SUB_UC2", "CASH", "",
+            trade_type="buy", amount=10000.0, price=1.0,
+            trade_date=date(2025, 9, 1), confirm_date=date(2025, 9, 2),
+            actual_amount=10000.0, status="confirmed",
+            transfer_group=f"sub_{sub.id}",
+        )
+
+        resp = client.post(
+            f"/api/subscriptions/{sub.id}/unconfirm",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+
+        updated = test_db.query(Subscription).filter(Subscription.id == sub.id).first()
+        assert updated.status == "pending"
+        # 配对 CASH trade 已物理删除
+        remaining = test_db.query(Trade).filter(
+            Trade.transfer_group == f"sub_{sub.id}"
+        ).count()
+        assert remaining == 0
