@@ -48,59 +48,21 @@ def create_subscription(
     apply_date: str = typer.Option(..., "--apply-date", help="YYYY-MM-DD"),
     notes: Optional[str] = typer.Option(None, "--notes"),
 ):
-    """创建申购/赎回"""
+    """创建申购/赎回（校验由服务层统一处理）"""
     with cli_context() as db:
-        from app.models.subscription import Subscription
-        from app.models.portfolio import Portfolio
-        from app.models.investor import Investor
-        from app.models.platform import Platform
-        from app.services.trading_utils import is_trading_day
-        from app.services.position_service import calculate_investor_available_shares
+        from app.services.subscription_service import create_subscription as create_subscription_service
 
-        ad = parse_date(apply_date)
-        if not is_trading_day(db, ad):
-            error("NON_TRADING_DAY", "非交易日，请等待交易日再提交")
-
-        portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
-        if not portfolio:
-            error("NOT_FOUND", "组合不存在")
-        if portfolio.status not in ("active", "draft"):
-            error("PORTFOLIO_NOT_ACTIVE", "组合未激活")
-
-        investor = db.query(Investor).filter(Investor.code == investor_code).first()
-        if not investor:
-            error("NOT_FOUND", "投资人不存在")
-
-        # 校验平台存在性
-        platform = db.query(Platform).filter(Platform.code == platform_code).first()
-        if not platform:
-            error("PLATFORM_NOT_FOUND", f"平台 {platform_code} 不存在")
-
-        if sub_type == "subscribe":
-            if not amount or amount <= 0:
-                error("INVALID_AMOUNT", "申购金额必须大于0")
-            new_sub = Subscription(
-                portfolio_code=portfolio_code, investor_code=investor_code,
-                platform_code=platform_code,
-                sub_type="subscribe", amount=Decimal(str(amount)),
-                apply_date=ad, status="pending", notes=notes,
-            )
-        elif sub_type == "redeem":
-            if not shares or shares <= 0:
-                error("INVALID_SHARES", "赎回份额必须大于0")
-            available = calculate_investor_available_shares(db, portfolio_code, investor_code)
-            if Decimal(str(shares)) > available:
-                error("INSUFFICIENT_SHARES", f"赎回份额超过可用份额({float(available)})")
-            new_sub = Subscription(
-                portfolio_code=portfolio_code, investor_code=investor_code,
-                platform_code=platform_code,
-                sub_type="redeem", shares=Decimal(str(shares)),
-                apply_date=ad, status="pending", notes=notes,
-            )
-        else:
-            error("INVALID_TYPE", "类型必须为 subscribe 或 redeem")
-
-        db.add(new_sub)
+        new_sub = create_subscription_service(
+            db,
+            portfolio_code=portfolio_code,
+            investor_code=investor_code,
+            platform_code=platform_code,
+            sub_type=sub_type,
+            apply_date=parse_date(apply_date),
+            amount=Decimal(str(amount)) if amount is not None else None,
+            shares=Decimal(str(shares)) if shares is not None else None,
+            notes=notes,
+        )
         db.flush()
         db.refresh(new_sub)
         success(data=serialize_model(new_sub))

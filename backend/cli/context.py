@@ -26,11 +26,13 @@ def cli_context() -> Generator:
     行为：
     - 创建 SessionLocal session
     - 成功时 commit + close
+    - BusinessError -> 原始错误码 + exit(1)
     - ValueError -> VALIDATION_ERROR + exit(1)
     - IntegrityError -> ALREADY_EXISTS + exit(1)
     - 其他异常 -> INTERNAL_ERROR + exit(2)
     """
     from app.database import SessionLocal
+    from app.services.exceptions import BusinessError
 
     db = SessionLocal()
     try:
@@ -45,6 +47,10 @@ def cli_context() -> Generator:
             db.rollback()
         db.close()
         raise
+    except BusinessError as e:
+        db.rollback()
+        db.close()
+        error(e.code, e.message, e.details)
     except ValueError as e:
         db.rollback()
         db.close()

@@ -1,12 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Optional
 from app.database import get_db
 from app.models.investor import Investor
-from app.models.investor_holding import InvestorHolding
 from app.schemas.investor import InvestorCreate, InvestorUpdate, InvestorResponse
-from app.utils.security import get_password_hash
 from app.dependencies import get_current_admin
+from app.services import investor_service
 
 router = APIRouter()
 
@@ -35,19 +34,15 @@ def create_investor(
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
-    db_investor = db.query(Investor).filter(Investor.code == investor.code).first()
-    if db_investor:
-        raise HTTPException(status_code=400, detail="Investor already exists")
-
-    new_investor = Investor(
+    # REST 恒创建 viewer（不透传 role）；如需管理员请用 CLI
+    new_investor = investor_service.create_investor(
+        db,
         code=investor.code,
         name=investor.name,
-        role="viewer",
+        password=investor.password,
         phone=investor.phone,
         email=investor.email,
-        password_hash=get_password_hash(investor.password),
     )
-    db.add(new_investor)
     db.commit()
     db.refresh(new_investor)
     return new_investor
@@ -72,17 +67,8 @@ def update_investor(
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
-    db_investor = db.query(Investor).filter(Investor.code == code).first()
-    if not db_investor:
-        raise HTTPException(status_code=404, detail="Investor not found")
-
-    update_data = investor.dict(exclude_unset=True)
-    if "password" in update_data:
-        update_data["password_hash"] = get_password_hash(update_data.pop("password"))
-
-    for field, value in update_data.items():
-        setattr(db_investor, field, value)
-
+    updates = investor.dict(exclude_unset=True)
+    db_investor = investor_service.update_investor(db, code=code, updates=updates)
     db.commit()
     db.refresh(db_investor)
     return db_investor
@@ -94,26 +80,6 @@ def delete_investor(
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
-    investor = db.query(Investor).filter(Investor.code == code).first()
-    if not investor:
-        raise HTTPException(status_code=404, detail="Investor not found")
-
-    # 检查投资人是否仍持有份额
-    holding = (
-        db.query(InvestorHolding)
-        .filter(InvestorHolding.investor_code == code)
-        .order_by(InvestorHolding.snapshot_date.desc())
-        .first()
-    )
-    if holding and holding.shares > 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "error": "INVESTOR_HAS_SHARES",
-                "message": "投资人仍持有份额，需先全部赎回",
-            },
-        )
-
-    db.delete(investor)
+    investor_service.delete_investor(db, code)
     db.commit()
     return {"message": "Investor deleted successfully"}

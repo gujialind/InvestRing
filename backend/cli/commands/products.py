@@ -11,16 +11,6 @@ from cli.utils import serialize_model, paginate, pagination_meta
 app = typer.Typer(no_args_is_help=True)
 
 
-def _calculate_confirm_days(market: str, is_qdii: bool) -> int:
-    if market == "CN_EXCHANGE":
-        return 0
-    if market == "CN_OTC" and is_qdii:
-        return 2
-    if market == "CN_OTC":
-        return 1
-    return 0
-
-
 @app.command("list")
 def list_products(
     product_type: Optional[str] = typer.Option(None, "--product-type", help="ETF/OEF/LOF/CASH"),
@@ -54,22 +44,18 @@ def create_product(
 ):
     """创建产品（自动计算 confirm_days）"""
     with cli_context() as db:
-        from app.models.product import Product
+        from app.services import product_service
 
-        existing = db.query(Product).filter(
-            Product.code == code, Product.market == market
-        ).first()
-        if existing:
-            error("ALREADY_EXISTS", f"产品 {code}({market}) 已存在")
-
-        confirm_days = _calculate_confirm_days(market, is_qdii)
-        product = Product(
-            code=code, market=market or "", name=name,
-            product_type=product_type, asset_class_code=asset_class_code,
-            is_qdii=is_qdii, confirm_days=confirm_days,
+        product = product_service.create_product(
+            db,
+            code=code,
+            market=market,
+            name=name,
+            product_type=product_type,
+            asset_class_code=asset_class_code,
+            is_qdii=is_qdii,
             data_source=data_source,
         )
-        db.add(product)
         db.flush()
         db.refresh(product)
         success(data=serialize_model(product))
@@ -103,24 +89,19 @@ def update_product(
 ):
     """更新产品信息"""
     with cli_context() as db:
-        from app.models.product import Product
+        from app.services import product_service
 
-        product = db.query(Product).filter(
-            Product.code == code, Product.market == market
-        ).first()
-        if not product:
-            error("NOT_FOUND", f"产品 {code}({market}) 不存在")
-
+        updates = {}
         if name is not None:
-            product.name = name
+            updates["name"] = name
         if asset_class_code is not None:
-            product.asset_class_code = asset_class_code
+            updates["asset_class_code"] = asset_class_code
         if data_source is not None:
-            product.data_source = data_source
+            updates["data_source"] = data_source
         if is_qdii is not None:
-            product.is_qdii = is_qdii
-            product.confirm_days = _calculate_confirm_days(product.market, is_qdii)
+            updates["is_qdii"] = is_qdii
 
+        product = product_service.update_product(db, code=code, market=market, updates=updates)
         db.flush()
         db.refresh(product)
         success(data=serialize_model(product))

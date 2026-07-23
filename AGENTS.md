@@ -160,12 +160,16 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 | 目录 | 职责 |
 |------|------|
-| `app/routers/` | HTTP 端点：参数/权限校验、调用服务层、错误码映射 |
-| `app/services/` | 核心业务逻辑（快照、持仓计算、确认流程、数据同步、调度） |
+| `app/routers/` | HTTP 薄适配层：解析参数、鉴权（`Depends`）、调 service、`db.commit()`、序列化；业务错误交全局 handler，不写 try/except 业务分支 |
+| `app/services/` | 全部业务规则/不变量/计算/状态机/ORM 读写；**只抛领域异常、不 import fastapi、不 commit（可 flush）** |
 | `app/models/` | SQLAlchemy 表模型（23 张表） |
 | `app/schemas/` | Pydantic 请求/响应模型 |
 | `app/utils/` | 安全（密码/Token/登录锁）等工具 |
 | `app/config.py` / `database.py` / `dependencies.py` | 配置、DB 会话、鉴权依赖 |
+
+**分层约定（router / CLI 均为 service 薄适配器）**：业务逻辑单一实现于 service，REST 与两个 CLI 共用，杜绝并行实现漂移。
+- **事务边界交调用方**：service 不 `commit`/`rollback`（可 `flush`）；REST 在 router `db.commit()`，`backend/cli` 由 `cli_context()` 统一 commit。
+- **领域异常统一**：service 抛 `app/services/exceptions.py::BusinessError`（携 `code`/`message`/`http_status`/`details`）；`main.py` 全局 handler 映射为 `JSONResponse{"detail": {"error": code, "message": message}}`（保持前端契约；默认 422、重复创建类 400、NOT_FOUND 404）；`cli_context` 捕获后转 `{"error": {"code", "message"}}`。service 内**禁止** import/抛 `HTTPException`。
 
 ### 4.2 路由与 API 前缀总表
 
@@ -197,9 +201,15 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 ### 4.3 核心服务与关键函数
 
 - **`snapshot_service.py`**：`generate_daily_snapshots` / `recalculate_snapshots` / `validate_snapshot_dependencies`；三个生成函数 `_generate_portfolio_position` → `_generate_portfolio_value_snapshot` → `_generate_investor_holding`（固定顺序）；`auto_confirm_after_snapshot`（重算后自动重确认）；`_delete_existing_snapshots`（删除级联回退）。`_generate_portfolio_position` 走增量累加：前一日 CASH 基准 + 窗口内 confirmed CASH trades + event `cash_change` 增量，`manual_market_value` 绝对覆盖；事件只读 `platform_code IS NOT NULL` 的 confirmed 记录，按 `entitlement_date` 升序、`fund_key=(product_code, market, platform_code)` 精确匹配。
-- **`position_service.py`**：`compute_cash_balance`、`get_cash_value`、`calculate_available_cash`、`calculate_available_shares`、`calculate_investor_available_shares`。
-- **`trade_service.py`**：`confirm_single_trade`（含 QDII 净值获取规则）、`sync_transfer_group`（配对腿原子同步）、`attach_paired_cash_leg`（基金腿创建时生成 `rebal_` 组并构造配对 CASH 腿，REST/CLI 共用）。
-- **`subscription_service.py`**：`confirm_single_subscription` / `unconfirm_single_subscription`（首次申购净值 1.0000、生成/删除配对 CASH trade、首次确认激活组合）。
+- **`position_service.py`**：`compute_cash_balance`、`get_cash_value`、`calculate_available_cash`、`calculate_available_shares`、`calculate_investor_available_shares`、`update_cash_position`（现金重估写 `manual_market_value` 绝对替换，绝不直接写 `portfolio_position`）。
+- **`trade_service.py`**：`create_trade`（快照/价格/平台/`as_of_date` 校验 + 买卖金额份额计算 + `attach_paired_cash_leg`）、`confirm_single_trade`（含 QDII 净值获取规则，禁止向前查找）、`cancel_trade` / `unconfirm_trade`（快照保护 + `sync_transfer_group`）、`sync_transfer_group`（配对腿原子同步）、`attach_paired_cash_leg`（基金腿创建时生成 `rebal_` 组并构造配对 CASH 腿，REST/CLI 共用）。
+- **`subscription_service.py`**：`create_subscription`（含 `DATE_BEFORE_SNAPSHOT`、创建即设 `confirm_date`）、`confirm_single_subscription` / `unconfirm_single_subscription`（首次申购净值 1.0000、生成/删除配对 CASH trade、首次确认激活组合）。
+- **`share_change_event_service.py`**：`create/confirm/cancel/unconfirm_share_change_event` 全套 + `_compute_event_fields` / `check_platform_coverage` / `_confirm_fund_level_event`（基金级自动拆分子记录、平台分级校验、快照保护）。`snapshot_service.auto_confirm_after_snapshot` 由此模块 import（消除 service→router 反向依赖）。
+- **`cash_transfer_service.py`**：`create_cash_transfer`（对称状态：跨天两腿 pending / 当天两腿 confirmed）、`confirm_cash_transfer`（两腿同时确认 + `TRANSFER_NOT_READY`）、`list_cash_transfers`（按 `transfer_group` 分组）。
+- **`portfolio_service.py`**：`create/update/close/reactivate_portfolio`（`closed_at=datetime.utcnow()` 统一口径）、`get_nav_history` / `get_returns` / `get_cash_flow`。
+- **`product_service.py`**：`calculate_confirm_days`（单一实现：CN_EXCHANGE=0 / CN_OTC 非 QDII=1 / CN_OTC QDII=2 / 其他=1）、`create_product` / `update_product`。
+- **`investor_service.py`**：`create_investor`（`role` 默认 viewer，CLI 可显式传入以建管理员）、`update_investor`（`password`→`password_hash`）、`delete_investor`（`INVESTOR_HAS_SHARES` 保护）。
+- **`exceptions.py`**：`BusinessError` / `NotFoundError`——领域异常基类（见 §4.1），REST 全局 handler 与 `cli_context` 共同消费。
 - **`market_data_service.py`**：价格/净值查询与同步、`submit_price_sync_job`、`recover_orphan_jobs`。
 - **`trading_calendar_service.py`** / **`trading_utils.py`**：交易日判断、下一/前一交易日、最新快照日查询。
 - **`task_runner.py`** / **`scheduler_service.py`**：`run_nav_sync` / `run_calendar_sync` / `run_log_cleanup`；APScheduler 调度。

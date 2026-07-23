@@ -3,7 +3,6 @@ ir position - 持仓管理命令组
 """
 import typer
 from typing import Optional
-from datetime import date
 from decimal import Decimal
 from sqlalchemy import func
 
@@ -92,50 +91,23 @@ def update_cash_position(
     amount: float = typer.Option(..., "--amount"),
     update_date: str = typer.Option(None, "--update-date", help="YYYY-MM-DD"),
 ):
-    """更新现金持仓"""
+    """更新现金市值（写入 manual_market_value，绝对替换，不直接写快照表）"""
     with cli_context() as db:
-        from app.models.portfolio import Portfolio
-        from app.models.platform import Platform
-        from app.models.portfolio_position import PortfolioPosition
-        from app.services.trading_utils import is_trading_day
+        from app.services.position_service import update_cash_position as update_cash_service
 
-        portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
-        if not portfolio:
-            error("NOT_FOUND", "组合不存在")
-
-        platform = db.query(Platform).filter(Platform.code == platform_code).first()
-        if not platform:
-            error("NOT_FOUND", f"平台 {platform_code} 不存在")
-
-        target_date = parse_date(update_date) if update_date else date.today()
-        if not is_trading_day(db, target_date):
-            error("NON_TRADING_DAY", "非交易日，请等待交易日再提交")
-
-        cash_pos = db.query(PortfolioPosition).filter(
-            PortfolioPosition.portfolio_code == portfolio_code,
-            PortfolioPosition.product_code == "CASH",
-            PortfolioPosition.market == "",
-            PortfolioPosition.platform_code == platform_code,
-            PortfolioPosition.snapshot_date == target_date,
-        ).first()
-
-        if cash_pos:
-            cash_pos.amount = Decimal(str(amount))
-        else:
-            cash_pos = PortfolioPosition(
-                portfolio_code=portfolio_code, product_code="CASH",
-                market="", platform_code=platform_code,
-                amount=Decimal(str(amount)), shares=None,
-                snapshot_date=target_date,
-            )
-            db.add(cash_pos)
-
-        db.flush()
-        db.refresh(cash_pos)
+        result = update_cash_service(
+            db,
+            portfolio_code=portfolio_code,
+            platform_code=platform_code,
+            amount=Decimal(str(amount)),
+            update_date=parse_date(update_date) if update_date else None,
+        )
         success(data={
-            "message": "非净值资产更新成功",
-            "portfolio_code": portfolio_code,
-            "platform_code": platform_code,
-            "amount": float(cash_pos.amount),
-            "update_date": target_date.isoformat(),
+            "message": "现金市值覆盖已写入 manual_market_value，建议重新生成快照以更新持仓",
+            "portfolio_code": result["portfolio_code"],
+            "platform_code": result["platform_code"],
+            "amount": result["amount"],
+            "computed_value": result["computed_value"],
+            "update_date": result["update_date"].isoformat(),
+            "requires_snapshot_regen": True,
         })

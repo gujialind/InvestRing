@@ -18,6 +18,7 @@ from app.services.position_service import calculate_investor_available_shares
 from app.services.subscription_service import (
     confirm_single_subscription,
     unconfirm_single_subscription,
+    create_subscription as create_subscription_service,
     NavNotAvailableError,
     InvalidStatusError,
 )
@@ -60,110 +61,17 @@ def create_subscription(
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
-    # 交易日校验
-    if not is_trading_day(db, subscription.apply_date):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "NON_TRADING_DAY", "message": "非交易日，请等待交易日再提交"},
-        )
-
-    portfolio = (
-        db.query(Portfolio)
-        .filter(Portfolio.code == subscription.portfolio_code)
-        .first()
+    new_sub = create_subscription_service(
+        db,
+        portfolio_code=subscription.portfolio_code,
+        investor_code=subscription.investor_code,
+        platform_code=subscription.platform_code,
+        sub_type=subscription.sub_type,
+        apply_date=subscription.apply_date,
+        amount=subscription.amount,
+        shares=subscription.shares,
+        notes=subscription.notes,
     )
-    if not portfolio:
-        raise HTTPException(status_code=404, detail="Portfolio not found")
-    # 首次申购时组合状态为 draft，确认后变为 active
-    if portfolio.status not in ("active", "draft"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "PORTFOLIO_NOT_ACTIVE", "message": "组合未激活"},
-        )
-
-    # (a) 申请日必须晚于最新快照日
-    latest_snapshot_date = get_latest_snapshot_date(db, subscription.portfolio_code)
-    if latest_snapshot_date and subscription.apply_date <= latest_snapshot_date:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "error": "DATE_BEFORE_SNAPSHOT",
-                "message": f"申请日必须晚于最新快照日（{latest_snapshot_date}）",
-            },
-        )
-
-    investor = (
-        db.query(Investor)
-        .filter(Investor.code == subscription.investor_code)
-        .first()
-    )
-    if not investor:
-        raise HTTPException(status_code=404, detail="Investor not found")
-
-    # 校验平台存在性
-    platform = (
-        db.query(Platform)
-        .filter(Platform.code == subscription.platform_code)
-        .first()
-    )
-    if not platform:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "PLATFORM_NOT_FOUND", "message": f"平台 {subscription.platform_code} 不存在"},
-        )
-
-    if subscription.sub_type == "subscribe":
-        # 申购输入金额，系统计算份额（确认时计算）
-        if subscription.amount is None or subscription.amount <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={"error": "INVALID_AMOUNT", "message": "申购金额必须大于0"},
-            )
-        new_sub = Subscription(
-            portfolio_code=subscription.portfolio_code,
-            investor_code=subscription.investor_code,
-            platform_code=subscription.platform_code,
-            sub_type="subscribe",
-            amount=subscription.amount,
-            apply_date=subscription.apply_date,
-            confirm_date=get_next_trading_day(db, subscription.apply_date, days=1),
-            status="pending",
-            notes=subscription.notes,
-        )
-    elif subscription.sub_type == "redeem":
-        # 赎回输入份额，系统计算金额（按申请日净值）
-        if subscription.shares is None or subscription.shares <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={"error": "INVALID_SHARES", "message": "赎回份额必须大于0"},
-            )
-        available = calculate_investor_available_shares(
-            db, subscription.portfolio_code, subscription.investor_code,
-            as_of_date=subscription.apply_date,
-        )
-        if Decimal(str(subscription.shares)) > available:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": "INSUFFICIENT_SHARES",
-                    "message": "赎回份额超过可用份额",
-                },
-            )
-        new_sub = Subscription(
-            portfolio_code=subscription.portfolio_code,
-            investor_code=subscription.investor_code,
-            platform_code=subscription.platform_code,
-            sub_type="redeem",
-            shares=subscription.shares,
-            apply_date=subscription.apply_date,
-            confirm_date=get_next_trading_day(db, subscription.apply_date, days=1),
-            status="pending",
-            notes=subscription.notes,
-        )
-    else:
-        raise HTTPException(status_code=400, detail="Invalid subscription type")
-
-    db.add(new_sub)
     db.commit()
     db.refresh(new_sub)
     return new_sub
