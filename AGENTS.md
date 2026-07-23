@@ -321,6 +321,7 @@ Next.js `^15.1` + React `^19` + TypeScript `~5.6` + TailwindCSS `^4`（CSS-first
 | 买入金额 > 可用现金（pending 卖出不增加可用现金） | `INSUFFICIENT_CASH` |
 | 卖出份额 > 可用份额 | `INSUFFICIENT_SHARES` |
 | 场内交易缺有效价格 | `MISSING_OR_INVALID_PRICE` |
+| 场外基金确认传入价格与 T 日净值不一致 | `PRICE_NAV_MISMATCH` |
 | 交易日 ≤ 最新快照日 | `DATE_BEFORE_SNAPSHOT` |
 | 场内 trade cancel | `CANNOT_CANCEL_EXCHANGE` |
 | 直接创建 CASH 交易（`product_code=CASH`） | `CASH_TRADE_FORBIDDEN`（REST 422 / CLI；须走申赎/现金转移/调仓配对） |
@@ -328,7 +329,7 @@ Next.js `^15.1` + React `^19` + TypeScript `~5.6` + TailwindCSS `^4`（CSS-first
 - 金额：买入 `amount = actual_amount − fee`、`shares = amount/price`；卖出 `amount = actual_amount + fee`。
 - `confirm_date` 创建时即按 `product.confirm_days` 设定；`confirm` 可传参覆盖（补录）。
 - 基金买卖创建时自动生成配对 CASH trade（`rebal_{uuid}`），状态/日期与基金腿同步。
-- 确认取价规则：场内用收盘价、场外用净值；确认必须用 T 日净值（包括QDII），未同步则拒绝（禁止向前查找）；QDII快照/市值用 T-1 日净值。确认天数（T+N）见附录 C。
+- 确认取价规则：场内用成交价（录入交易时必填，见 §7.2）、场外用净值；确认必须用 T 日净值（包括QDII），未同步则拒绝（禁止向前查找）；QDII快照/市值用 T-1 日净值。确认天数（T+N）见附录 C。场外基金确认可选传入价格，仅用于与 T 日净值一致性校验（不一致报 `PRICE_NAV_MISMATCH`），不覆盖净值。
 
 ### 7.3 份额变动事件
 
@@ -410,6 +411,7 @@ Next.js `^15.1` + React `^19` + TypeScript `~5.6` + TailwindCSS `^4`（CSS-first
 | `INVALID_DATE_ORDER` / `INVALID_EX_DATE` / `INVALID_ENTITLEMENT_DATE` | 事件日期非法 |
 | `INSUFFICIENT_SHARES` / `INSUFFICIENT_CASH` | 份额/现金不足 |
 | `NAV_NOT_AVAILABLE` | 申请日组合快照不存在 |
+| `PRICE_NAV_MISMATCH` | 场外基金确认时传入价格与 T 日净值不一致 |
 | `SNAPSHOT_DEPENDENCY` | 记录已被快照纳入，需先删快照 |
 | `MISSING_POSITION_SNAPSHOT` | 权益登记日持仓快照不存在 |
 | `POSITION_TABLE_PROTECTED` | 持仓表禁止手动 CRUD |

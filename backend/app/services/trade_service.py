@@ -116,13 +116,24 @@ def attach_paired_cash_leg(
 def sync_transfer_group(
     db: Session, trade: Trade, target_status: str, confirm_date: Optional[date] = None
 ):
-    """同步 transfer_group 关联的另一腿状态"""
+    """同步 transfer_group 关联的另一腿状态与金额
+
+    - 传播 `target_status` 与 `confirm_date`（unconfirm 时重算期望确认日）
+    - 若源腿为基金腿（product_code != "CASH"），将其 actual_amount 镜像给配对
+      CASH 腿（CASH 腿金额恒等于基金腿 actual_amount）。确认时净值型基金
+      actual_amount 可能被重算，需同步；金额未变时为幂等写入
+    """
     if not trade.transfer_group:
         return
     paired = db.query(Trade).filter(
         Trade.transfer_group == trade.transfer_group,
         Trade.id != trade.id,
     ).all()
+    # CASH 腿金额 = 基金腿 actual_amount（买入=支出、卖出=收入）；
+    # 仅当源腿为基金腿时向 CASH 腿镜像，避免 CASH→CASH / CASH→基金误写
+    mirror_amount = None
+    if trade.product_code != "CASH":
+        mirror_amount = trade.actual_amount if trade.actual_amount is not None else trade.amount
     # #37 savepoint：配对腿更新失败回滚 savepoint，不影响外层事务
     # 用连接级 SAVEPOINT（db.connection().begin_nested()）而非 session 级
     # db.begin_nested()，避免触发 after_transaction_end 事件与测试隔离监听器冲突
@@ -143,6 +154,10 @@ def sync_transfer_group(
                     paired_trade.confirm_date = get_next_trading_day(
                         db, paired_trade.trade_date, days=paired_confirm_days
                     )
+            # 同步配对 CASH 腿金额（确认时净值重算后需同步）
+            if mirror_amount is not None and paired_trade.product_code == "CASH":
+                paired_trade.amount = mirror_amount
+                paired_trade.actual_amount = mirror_amount
         db.flush()  # 确保 ORM 变更在 savepoint 内写入 DB
         sp.commit()
     except Exception:
@@ -162,9 +177,11 @@ def confirm_single_trade(
     确认单笔调仓交易的核心逻辑，供手动确认与 auto_confirm 共用。
 
     - confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
-    - 净值型产品（OEF/LOF 且 CN_OTC）确认时获取 T 日净值并重算 shares/amount；
-      QDII 严格取 T 日净值，缺失时抛 HTTPException
-    - 场内产品不取净值（使用创建时的收盘价/手动价）
+    - 场外基金（OEF/LOF 且 CN_OTC）确认时获取 T 日（成交当日）净值并重算 shares/amount，
+      一律以净值计算；QDII 严格取 T 日净值，缺失时抛 HTTPException
+    - 场外基金若传入 price 仅作一致性校验：须与 T 日净值相等，否则抛 PRICE_NAV_MISMATCH，
+      手动价不覆盖净值（不传则直接取净值）
+    - 场内基金不取净值，使用创建时录入的成交价（成交价录入时必填，见 trades.py 创建校验）
     - 置 status=confirmed 并原子同步配对 CASH 腿
 
     Args:
@@ -172,7 +189,8 @@ def confirm_single_trade(
         trade: 待确认交易（须为 pending）
         product: 交易对应产品（CASH/未知产品可为 None，跳过净值逻辑）
         confirm_date: 覆盖确认日（补录场景）
-        price: 手动指定价格（优先于系统净值）
+        price: 手动价格；场外基金仅用于与 T 日净值一致性校验（不覆盖净值），
+            场内基金作为覆盖成交价
 
     Returns:
         确认后的 trade 对象（未 commit，事务由调用方控制）
@@ -181,20 +199,20 @@ def confirm_single_trade(
     if confirm_date is not None:
         trade.confirm_date = confirm_date
 
-    # 净值型产品必须获取净值进行计算（场外基金）
-    is_nav_product = (
+    # 场外净值型基金（CN_OTC 的 OEF/LOF）确认时必须获取 T 日净值进行计算
+    is_otc_nav_fund = (
         bool(product)
         and product.product_type in ["OEF", "LOF"]
         and trade.market == "CN_OTC"
     )
 
-    if is_nav_product:
-        # 净值型产品：获取T日净值（QDII会抛出异常如果净值不存在）
+    if is_otc_nav_fund:
+        # 净值型产品：获取T日净值
         nav_price = get_nav_for_trade_confirmation(
             db, trade.product_code, trade.market, trade.trade_date, product.is_qdii
         )
 
-        # 非QDII产品可能返回None
+        # 净值不存在，无法确认交易
         if nav_price is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -204,20 +222,33 @@ def confirm_single_trade(
                 }
             )
 
-        # 如果传入了价格，使用传入的价格；否则使用系统获取的净值
-        final_price = Decimal(str(price)) if price is not None else nav_price
+        # 手动价格为可选校验项：传入时必须与 T 日净值一致，否则拒绝确认由用户修正；
+        # 场外基金一律以 T 日净值计算，手动价不参与计算、也不覆盖净值
+        if price is not None:
+            input_price = Decimal(str(price)).quantize(Decimal("0.0001"))
+            if input_price != nav_price.quantize(Decimal("0.0001")):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "error": "PRICE_NAV_MISMATCH",
+                        "message": f"传入价格({input_price})与T={trade.trade_date}净值({nav_price})不一致，请核对后修改，或不传价格直接取净值"
+                    }
+                )
+
+        final_price = nav_price
 
         trade.price = final_price
         if trade.trade_type == "buy":
             amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
             trade.shares = amount / final_price
             trade.amount = amount
+            
         else:
             amount = Decimal(str(trade.shares)) * final_price
             trade.actual_amount = amount - Decimal(str(trade.fee))
             trade.amount = amount
     elif price is not None:
-        # 非净值型产品但传入了价格（如手动指定）
+        # 场内基金/其他非净值型：仅在传入价格时按传入成交价重算（补录/手动覆盖场景）
         trade.price = Decimal(str(price))
         if trade.trade_type == "buy":
             amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
