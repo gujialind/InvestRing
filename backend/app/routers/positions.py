@@ -179,82 +179,25 @@ def update_cash_position(
     - 写入 manual_market_value 表（绝对替换），不再直接写 portfolio_position
     - 写入后提示用户重新生成快照（非强制）
     """
-    from app.models.portfolio import Portfolio
-    from app.models.platform import Platform
-    from app.models.trading_calendar import TradingCalendar
-    from app.models.manual_market_value import ManualMarketValue
-    from app.services.position_service import compute_cash_balance
-    
-    # 检查组合是否存在
-    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
-    if not portfolio:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "PORTFOLIO_NOT_FOUND", "message": f"组合 {portfolio_code} 不存在"}
-        )
-    
-    # 校验平台存在性
-    platform = db.query(Platform).filter(Platform.code == request.platform_code).first()
-    if not platform:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "PLATFORM_NOT_FOUND", "message": f"平台 {request.platform_code} 不存在"}
-        )
-    
-    # 确定更新日期（默认为今天）
-    update_date = request.update_date or date.today()
-    
-    # 校验是否为交易日
-    trading_day = db.query(TradingCalendar).filter(
-        TradingCalendar.date == update_date,
-        TradingCalendar.is_open == True
-    ).first()
-    
-    if not trading_day:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "error": "NON_TRADING_DAY",
-                "message": "非交易日，请等待交易日再提交"
-            }
-        )
-    
-    # 计算当前隐式值（用于审计）
-    computed = compute_cash_balance(db, portfolio_code, request.platform_code, update_date)
+    from app.services.position_service import update_cash_position as update_cash_service
 
-    # 查找或创建 manual_market_value 记录（upsert）
-    manual = db.query(ManualMarketValue).filter(
-        ManualMarketValue.portfolio_code == portfolio_code,
-        ManualMarketValue.platform_code == request.platform_code,
-        ManualMarketValue.product_code == "CASH",
-        ManualMarketValue.date == update_date,
-    ).first()
-    
-    if manual:
-        manual.market_value = Decimal(str(request.amount))
-        manual.computed_value = computed
-    else:
-        manual = ManualMarketValue(
-            portfolio_code=portfolio_code,
-            platform_code=request.platform_code,
-            product_code="CASH",
-            date=update_date,
-            market_value=Decimal(str(request.amount)),
-            computed_value=computed,
-            created_by=current_user.code if hasattr(current_user, 'code') else None,
-        )
-        db.add(manual)
-    
+    result = update_cash_service(
+        db,
+        portfolio_code=portfolio_code,
+        platform_code=request.platform_code,
+        amount=request.amount,
+        update_date=request.update_date,
+        created_by=current_user.code if hasattr(current_user, 'code') else None,
+    )
     db.commit()
-    db.refresh(manual)
-    
+
     return {
         "success": True,
         "message": "现金市值覆盖已写入 manual_market_value，建议重新生成快照以更新持仓",
-        "portfolio_code": portfolio_code,
-        "platform_code": request.platform_code,
-        "amount": float(manual.market_value),
-        "computed_value": float(computed) if computed is not None else None,
-        "update_date": update_date.isoformat(),
+        "portfolio_code": result["portfolio_code"],
+        "platform_code": result["platform_code"],
+        "amount": result["amount"],
+        "computed_value": result["computed_value"],
+        "update_date": result["update_date"].isoformat(),
         "requires_snapshot_regen": True,
     }

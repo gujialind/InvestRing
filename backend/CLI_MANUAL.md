@@ -320,7 +320,7 @@ ir position available-shares <PORTFOLIO_CODE> <PRODUCT_CODE> [--market <市场>]
 
 #### `ir position update-cash`
 
-更新非净值类现金持仓。
+更新非净值类现金市值：写入 `manual_market_value`（绝对替换），**不直接写快照表 `portfolio_position`**；写入后需重新生成快照方能反映到持仓（响应含 `requires_snapshot_regen: true`）。与 REST `POST /api/positions/portfolio/{code}/cash-position` 共用同一 service。
 
 ```bash
 ir position update-cash <PORTFOLIO_CODE> --platform-code <平台代码> --amount <金额> [--update-date YYYY-MM-DD]
@@ -329,7 +329,7 @@ ir position update-cash <PORTFOLIO_CODE> --platform-code <平台代码> --amount
 | 参数 | 必填 | 说明 |
 |------|:----:|------|
 | `--platform-code` | 是 | 所属平台代码 |
-| `--amount` | 是 | 现金金额 |
+| `--amount` | 是 | 现金金额（绝对值，覆盖当日该平台现金市值） |
 | `--update-date` | 否 | 更新日期（默认今天，必须是交易日） |
 
 ---
@@ -518,10 +518,11 @@ ir share-event list [--portfolio-code <组合>] [--page N] [--page-size N] [--al
 ir share-event create \
   --portfolio-code <组合> --product-code <产品> --market <市场> \
   --event-type <事件类型> \
-  --event-date YYYY-MM-DD --entitlement-date YYYY-MM-DD \
+  --ex-date YYYY-MM-DD --entitlement-date YYYY-MM-DD \
+  [--platform-code <平台>] \
   [--entitlement-shares N] [--shares-before N] [--shares-change N] [--shares-after N] \
   [--ratio N] [--div-cash N] [--reinvest-nav N] [--cash-change N] \
-  [--event-source <来源>] [--notes <备注>]
+  [--event-source <来源>] [--notes <备注>] [--force-cover]
 ```
 
 | 参数 | 必填 | 说明 |
@@ -530,8 +531,9 @@ ir share-event create \
 | `--product-code` | 是 | 产品代码 |
 | `--market` | 是 | 市场类型 |
 | `--event-type` | 是 | 事件类型（见下表） |
-| `--event-date` | 是 | 事件发生日期 |
-| `--entitlement-date` | 是 | 权益登记日（**必须是交易日**） |
+| `--ex-date` | 是 | 除息日/应用日（**必须是交易日**，且 > 权益登记日） |
+| `--entitlement-date` | 是 | 权益登记日（基数日，**必须是交易日**） |
+| `--platform-code` | 视类型 | 平台级事件（cash_dividend/reinvest_dividend/forced_adjustment）必填 |
 | `--entitlement-shares` | 否 | 权益登记日份额 |
 | `--shares-before` | 否 | 变动前份额 |
 | `--shares-change` | 否 | 变动份额 |
@@ -542,6 +544,7 @@ ir share-event create \
 | `--cash-change` | 否 | 现金变动 |
 | `--event-source` | 否 | 事件来源 |
 | `--notes` | 否 | 备注 |
+| `--force-cover` | 否 | 平台覆盖不全时降为 warning（默认阻断） |
 
 **事件类型：**
 
@@ -567,7 +570,7 @@ ir share-event get <ID>
 更新事件信息。
 
 ```bash
-ir share-event update <ID> [--event-date YYYY-MM-DD] [--entitlement-shares N] [--ratio N] \
+ir share-event update <ID> [--ex-date YYYY-MM-DD] [--entitlement-shares N] [--ratio N] \
   [--div-cash N] [--reinvest-nav N] [--cash-change N] [--notes <备注>]
 ```
 
@@ -596,6 +599,16 @@ ir share-event confirm <ID>
 ```bash
 ir share-event cancel <ID>
 ```
+
+#### `ir share-event unconfirm`
+
+取消确认事件（`confirmed` → `pending`）。
+
+```bash
+ir share-event unconfirm <ID>
+```
+
+> **约束**：仅 `confirmed` 状态可取消确认；`ex_date` 及之后已有快照则返回 `SNAPSHOT_DEPENDENCY`（需先删除对应快照）。基金级父记录会级联删除其拆分子记录后置 `pending`；子记录单独 unconfirm 会被拒绝（`CANNOT_UNCONFIRM_CHILD`）。
 
 ---
 

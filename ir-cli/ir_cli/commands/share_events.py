@@ -38,6 +38,7 @@ def create(
     shares_change: Optional[float] = typer.Option(None, "--shares-change", help="份额变化量"),
     cash_change: Optional[float] = typer.Option(None, "--cash-change", help="现金变化量"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
+    force_cover: bool = typer.Option(False, "--force-cover", help="平台覆盖不全时降为 warning（默认阻断）"),
 ):
     """创建份额变动事件"""
     client = APIClient.from_config()
@@ -57,7 +58,11 @@ def create(
     }.items():
         if v is not None:
             body[k] = v
-    result = client.post("/api/share-change-events", json_data=body)
+    result = client.post(
+        "/api/share-change-events",
+        json_data=body,
+        params={"force_cover": force_cover},
+    )
     success(data=result["data"])
 
 
@@ -117,4 +122,17 @@ def cancel(id: int = typer.Argument(..., help="事件ID")):
     """取消事件"""
     client = APIClient.from_config()
     result = client.post(f"/api/share-change-events/{id}/cancel")
+    success(data=result["data"])
+
+
+@app.command("unconfirm")
+def unconfirm(id: int = typer.Argument(..., help="事件ID")):
+    """取消确认事件。
+
+    约束：仅 confirmed 状态可取消确认；ex_date 及之后已有快照则返回
+    SNAPSHOT_DEPENDENCY。基金级父记录会级联删除子记录后置 pending；
+    子记录单独 unconfirm 会被拒绝（CANNOT_UNCONFIRM_CHILD）。
+    """
+    client = APIClient.from_config()
+    result = client.post(f"/api/share-change-events/{id}/unconfirm")
     success(data=result["data"])

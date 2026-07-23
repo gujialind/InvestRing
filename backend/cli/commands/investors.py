@@ -40,18 +40,17 @@ def create_investor(
 ):
     """创建投资人"""
     with cli_context() as db:
-        from app.models.investor import Investor
-        from app.utils.security import get_password_hash
+        from app.services import investor_service
 
-        existing = db.query(Investor).filter(Investor.code == code).first()
-        if existing:
-            error("ALREADY_EXISTS", f"投资人 {code} 已存在")
-
-        investor = Investor(
-            code=code, name=name, role=role, phone=phone, email=email,
-            password_hash=get_password_hash(password),
+        investor = investor_service.create_investor(
+            db,
+            code=code,
+            name=name,
+            password=password,
+            phone=phone,
+            email=email,
+            role=role,
         )
-        db.add(investor)
         db.flush()
         db.refresh(investor)
         success(data=serialize_model(investor, exclude=["password_hash"]))
@@ -82,24 +81,21 @@ def update_investor(
 ):
     """更新投资人信息"""
     with cli_context() as db:
-        from app.models.investor import Investor
-        from app.utils.security import get_password_hash
+        from app.services import investor_service
 
-        investor = db.query(Investor).filter(Investor.code == code).first()
-        if not investor:
-            error("NOT_FOUND", f"投资人 {code} 不存在")
-
+        updates = {}
         if name is not None:
-            investor.name = name
+            updates["name"] = name
         if role is not None:
-            investor.role = role
+            updates["role"] = role
         if phone is not None:
-            investor.phone = phone
+            updates["phone"] = phone
         if email is not None:
-            investor.email = email
+            updates["email"] = email
         if password is not None:
-            investor.password_hash = get_password_hash(password)
+            updates["password"] = password
 
+        investor = investor_service.update_investor(db, code=code, updates=updates)
         db.flush()
         db.refresh(investor)
         success(data=serialize_model(investor, exclude=["password_hash"]))
@@ -112,23 +108,8 @@ def delete_investor(
 ):
     """删除投资人（持有份额时禁止删除）"""
     with cli_context() as db:
-        from app.models.investor import Investor
-        from app.models.investor_holding import InvestorHolding
+        from app.services import investor_service
 
-        investor = db.query(Investor).filter(Investor.code == code).first()
-        if not investor:
-            error("NOT_FOUND", f"投资人 {code} 不存在")
-
-        # 检查是否持有份额
-        holding = (
-            db.query(InvestorHolding)
-            .filter(InvestorHolding.investor_code == code)
-            .order_by(InvestorHolding.snapshot_date.desc())
-            .first()
-        )
-        if holding and holding.shares and holding.shares > 0:
-            error("INVESTOR_HAS_SHARES", "投资人仍持有份额，请先全部赎回")
-
-        db.delete(investor)
+        investor_service.delete_investor(db, code)
         db.flush()
         success(data={"message": f"投资人 {code} 已删除"})

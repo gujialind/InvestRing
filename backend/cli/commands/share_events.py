@@ -3,6 +3,7 @@ ir share-event - 份额变动事件命令组
 """
 import typer
 from typing import Optional
+from decimal import Decimal
 from cli.context import cli_context
 from cli.output import success, error
 from cli.utils import serialize_model, paginate, pagination_meta, parse_date
@@ -40,7 +41,7 @@ def create_event(
         help="cash_dividend/reinvest_dividend/share_split/share_merge/bonus_share/forced_adjustment"),
     ex_date: str = typer.Option(..., "--ex-date", help="YYYY-MM-DD"),
     entitlement_date: str = typer.Option(..., "--entitlement-date", help="YYYY-MM-DD"),
-    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="现金分红归属平台"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台级事件必填"),
     entitlement_shares: Optional[float] = typer.Option(None, "--entitlement-shares"),
     shares_before: Optional[float] = typer.Option(None, "--shares-before"),
     shares_change: Optional[float] = typer.Option(None, "--shares-change"),
@@ -51,39 +52,38 @@ def create_event(
     cash_change: Optional[float] = typer.Option(None, "--cash-change"),
     event_source: Optional[str] = typer.Option(None, "--event-source"),
     notes: Optional[str] = typer.Option(None, "--notes"),
+    force_cover: bool = typer.Option(False, "--force-cover", help="平台覆盖不全时降为 warning"),
 ):
-    """创建份额变动事件（权益登记日必须是交易日）"""
+    """创建份额变动事件（校验/平台分级约束由服务层统一处理）"""
     with cli_context() as db:
-        from decimal import Decimal
-        from app.models.share_change_event import ShareChangeEvent
-        from app.models.portfolio import Portfolio
-        from app.services.trading_utils import is_trading_day
-
-        ex_date = parse_date(ex_date)
-        entitlement_date = parse_date(entitlement_date)
-
-        if not is_trading_day(db, entitlement_date):
-            error("INVALID_ENTITLEMENT_DATE", "权益登记日不是交易日")
-
-        portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
-        if not portfolio:
-            error("NOT_FOUND", "组合不存在")
+        from app.services.share_change_event_service import (
+            create_share_change_event as create_event_service,
+        )
 
         def to_d(v):
             return Decimal(str(v)) if v is not None else None
 
-        event = ShareChangeEvent(
-            portfolio_code=portfolio_code, product_code=product_code, market=market,
-            event_type=event_type, ex_date=ex_date, entitlement_date=entitlement_date,
+        event = create_event_service(
+            db,
+            portfolio_code=portfolio_code,
+            event_type=event_type,
+            ex_date=parse_date(ex_date),
+            entitlement_date=parse_date(entitlement_date),
+            product_code=product_code,
+            market=market,
             platform_code=platform_code,
             entitlement_shares=to_d(entitlement_shares),
-            shares_before=to_d(shares_before), shares_change=to_d(shares_change),
-            shares_after=to_d(shares_after), ratio=to_d(ratio),
-            div_cash=to_d(div_cash), reinvest_nav=to_d(reinvest_nav),
+            shares_before=to_d(shares_before),
+            shares_change=to_d(shares_change),
+            shares_after=to_d(shares_after),
+            ratio=to_d(ratio),
+            div_cash=to_d(div_cash),
+            reinvest_nav=to_d(reinvest_nav),
             cash_change=to_d(cash_change),
-            event_source=event_source, notes=notes, status="pending",
+            event_source=event_source or "manual",
+            notes=notes,
+            force_cover=force_cover,
         )
-        db.add(event)
         db.flush()
         db.refresh(event)
         success(data=serialize_model(event))
@@ -116,7 +116,6 @@ def update_event(
 ):
     """更新份额变动事件"""
     with cli_context() as db:
-        from decimal import Decimal
         from app.models.share_change_event import ShareChangeEvent
 
         event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
@@ -158,6 +157,10 @@ def delete_event(
         event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
         if not event:
             error("NOT_FOUND", f"事件 {id} 不存在")
+        # 父记录：先删除所有子记录
+        db.query(ShareChangeEvent).filter(
+            ShareChangeEvent.parent_event_id == event.id
+        ).delete(synchronize_session=False)
         db.delete(event)
         db.flush()
         success(data={"message": f"事件 {id} 已删除"})
@@ -167,25 +170,17 @@ def delete_event(
 def confirm_event(
     id: int = typer.Argument(...),
 ):
-    """确认份额变动事件（校验权益登记日持仓快照存在）"""
+    """确认份额变动事件（计算/基金级自动拆分由服务层统一处理）"""
     with cli_context() as db:
         from app.models.share_change_event import ShareChangeEvent
-        from app.models.portfolio_position import PortfolioPosition
+        from app.services.share_change_event_service import (
+            confirm_share_change_event as confirm_event_service,
+        )
 
         event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
         if not event:
             error("NOT_FOUND", f"事件 {id} 不存在")
-        if event.status != "pending":
-            error("INVALID_STATUS", "仅 pending 状态可确认")
-
-        snapshot = db.query(PortfolioPosition).filter(
-            PortfolioPosition.portfolio_code == event.portfolio_code,
-            PortfolioPosition.snapshot_date == event.entitlement_date,
-        ).first()
-        if not snapshot:
-            error("MISSING_POSITION_SNAPSHOT", "权益登记日持仓快照不存在")
-
-        event.status = "confirmed"
+        confirm_event_service(db, event)
         db.flush()
         db.refresh(event)
         success(data={"message": "事件确认成功", "event": serialize_model(event)})
@@ -198,12 +193,33 @@ def cancel_event(
     """取消份额变动事件（仅 pending 状态）"""
     with cli_context() as db:
         from app.models.share_change_event import ShareChangeEvent
+        from app.services.share_change_event_service import (
+            cancel_share_change_event as cancel_event_service,
+        )
 
         event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
         if not event:
             error("NOT_FOUND", f"事件 {id} 不存在")
-        if event.status != "pending":
-            error("INVALID_STATUS", "仅 pending 状态可取消")
-        event.status = "cancelled"
+        cancel_event_service(db, event)
         db.flush()
         success(data={"message": "事件已取消", "id": id})
+
+
+@app.command("unconfirm")
+def unconfirm_event(
+    id: int = typer.Argument(...),
+):
+    """取消确认份额变动事件（快照保护 + 子记录级联 + 清空计算字段）"""
+    with cli_context() as db:
+        from app.models.share_change_event import ShareChangeEvent
+        from app.services.share_change_event_service import (
+            unconfirm_share_change_event as unconfirm_event_service,
+        )
+
+        event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
+        if not event:
+            error("NOT_FOUND", f"事件 {id} 不存在")
+        unconfirm_event_service(db, event)
+        db.flush()
+        db.refresh(event)
+        success(data={"message": "事件已取消确认", "event": serialize_model(event)})

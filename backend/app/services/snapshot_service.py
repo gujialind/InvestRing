@@ -1060,7 +1060,7 @@ def auto_confirm_after_snapshot(
         try:
             if event.platform_code is None:
                 # 基金级事件：自动拆分为各平台子记录
-                from app.routers.share_change_events import _confirm_fund_level_event
+                from app.services.share_change_event_service import _confirm_fund_level_event
                 _confirm_fund_level_event(db, event)
             else:
                 # 平台级事件：按 platform_code 过滤读取 entitlement_shares
@@ -1075,7 +1075,7 @@ def auto_confirm_after_snapshot(
                 event.entitlement_shares = entitlement_shares
                 event.shares_before = entitlement_shares
 
-                from app.routers.share_change_events import _compute_event_fields
+                from app.services.share_change_event_service import _compute_event_fields
                 _compute_event_fields(event)
                 event.status = "confirmed"
                 event.confirmed_at = datetime.now()

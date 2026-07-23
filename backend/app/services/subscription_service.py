@@ -15,27 +15,36 @@ from app.models.subscription import Subscription
 from app.models.portfolio import Portfolio
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.trade import Trade
-from app.services.trading_utils import get_next_trading_day
+from app.models.investor import Investor
+from app.models.platform import Platform
+from app.services.trading_utils import (
+    get_next_trading_day,
+    is_trading_day,
+    get_latest_snapshot_date,
+)
+from app.services.position_service import calculate_investor_available_shares
+from app.services.exceptions import BusinessError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
 
-class NavNotAvailableError(Exception):
-    """申请日组合快照不存在时抛出"""
+class NavNotAvailableError(BusinessError):
+    """申请日组合快照不存在时抛出（映射 NAV_NOT_AVAILABLE）"""
 
     def __init__(self, portfolio_code: str, apply_date: date):
         self.portfolio_code = portfolio_code
         self.apply_date = apply_date
         super().__init__(
-            f"申请日 {apply_date} 的组合 {portfolio_code} 净值快照不存在，请先生成快照"
+            "NAV_NOT_AVAILABLE",
+            f"申请日 {apply_date} 的组合 {portfolio_code} 净值快照不存在，请先生成快照",
         )
 
 
-class InvalidStatusError(Exception):
-    """状态不符合要求时抛出"""
+class InvalidStatusError(BusinessError):
+    """状态不符合要求时抛出（映射 INVALID_STATUS）"""
 
     def __init__(self, message: str):
-        super().__init__(message)
+        super().__init__("INVALID_STATUS", message)
 
 
 def confirm_single_subscription(
@@ -199,3 +208,77 @@ def unconfirm_single_subscription(
     logger.info(f"取消确认: id={subscription.id}")
 
     return subscription
+
+
+def create_subscription(
+    db: Session,
+    *,
+    portfolio_code: str,
+    investor_code: str,
+    platform_code: str,
+    sub_type: str,
+    apply_date: date,
+    amount: Optional[Decimal] = None,
+    shares: Optional[Decimal] = None,
+    notes: Optional[str] = None,
+) -> Subscription:
+    """创建申购/赎回（含全部校验），供 REST 与 CLI 共用。
+
+    创建时即设定 confirm_date=T+1（与 REST 口径一致）。不 commit。
+    """
+    if not is_trading_day(db, apply_date):
+        raise BusinessError("NON_TRADING_DAY", "非交易日，请等待交易日再提交")
+
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise NotFoundError("NOT_FOUND", "组合不存在")
+    # 首次申购时组合状态为 draft，确认后变为 active
+    if portfolio.status not in ("active", "draft"):
+        raise BusinessError("PORTFOLIO_NOT_ACTIVE", "组合未激活")
+
+    # 申请日必须晚于最新快照日
+    latest_snapshot_date = get_latest_snapshot_date(db, portfolio_code)
+    if latest_snapshot_date and apply_date <= latest_snapshot_date:
+        raise BusinessError(
+            "DATE_BEFORE_SNAPSHOT",
+            f"申请日必须晚于最新快照日（{latest_snapshot_date}）",
+        )
+
+    investor = db.query(Investor).filter(Investor.code == investor_code).first()
+    if not investor:
+        raise NotFoundError("NOT_FOUND", "投资人不存在")
+
+    platform = db.query(Platform).filter(Platform.code == platform_code).first()
+    if not platform:
+        raise NotFoundError("PLATFORM_NOT_FOUND", f"平台 {platform_code} 不存在")
+
+    confirm_date = get_next_trading_day(db, apply_date, days=1)
+
+    if sub_type == "subscribe":
+        if amount is None or Decimal(str(amount)) <= 0:
+            raise BusinessError("INVALID_AMOUNT", "申购金额必须大于0")
+        new_sub = Subscription(
+            portfolio_code=portfolio_code, investor_code=investor_code,
+            platform_code=platform_code, sub_type="subscribe",
+            amount=Decimal(str(amount)), apply_date=apply_date,
+            confirm_date=confirm_date, status="pending", notes=notes,
+        )
+    elif sub_type == "redeem":
+        if shares is None or Decimal(str(shares)) <= 0:
+            raise BusinessError("INVALID_SHARES", "赎回份额必须大于0")
+        available = calculate_investor_available_shares(
+            db, portfolio_code, investor_code, as_of_date=apply_date
+        )
+        if Decimal(str(shares)) > available:
+            raise BusinessError("INSUFFICIENT_SHARES", "赎回份额超过可用份额")
+        new_sub = Subscription(
+            portfolio_code=portfolio_code, investor_code=investor_code,
+            platform_code=platform_code, sub_type="redeem",
+            shares=Decimal(str(shares)), apply_date=apply_date,
+            confirm_date=confirm_date, status="pending", notes=notes,
+        )
+    else:
+        raise BusinessError("INVALID_TYPE", "类型必须为 subscribe 或 redeem")
+
+    db.add(new_sub)
+    return new_sub

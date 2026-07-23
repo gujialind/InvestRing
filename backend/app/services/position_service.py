@@ -14,10 +14,14 @@ from app.models.portfolio_position import PortfolioPosition
 from app.models.share_change_event import ShareChangeEvent
 from app.models.subscription import Subscription
 from app.models.trade import Trade
+from app.models.portfolio import Portfolio
+from app.models.platform import Platform
 from app.services.trading_utils import (
     get_latest_snapshot_date,
     get_latest_snapshot_date_le,
+    is_trading_day,
 )
+from app.services.exceptions import BusinessError, NotFoundError
 
 
 def compute_cash_balance(
@@ -329,3 +333,66 @@ def calculate_investor_available_shares(
             shares -= Decimal(s.shares) if s.shares else Decimal("0")
 
     return shares
+
+
+def update_cash_position(
+    db: Session,
+    *,
+    portfolio_code: str,
+    platform_code: str,
+    amount: Decimal,
+    update_date: Optional[date] = None,
+    created_by: Optional[str] = None,
+) -> dict:
+    """现金市值修正：写 manual_market_value（绝对替换），供 REST 与 CLI 共用。
+
+    绝不直接写 portfolio_position（快照表受 ORM 事件保护）。
+    写入后需重新生成快照才会反映到持仓。不 commit。
+
+    Returns:
+        dict：portfolio_code/platform_code/amount/computed_value/update_date(date)
+    """
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise NotFoundError("PORTFOLIO_NOT_FOUND", f"组合 {portfolio_code} 不存在")
+
+    platform = db.query(Platform).filter(Platform.code == platform_code).first()
+    if not platform:
+        raise NotFoundError("PLATFORM_NOT_FOUND", f"平台 {platform_code} 不存在")
+
+    target_date = update_date or date.today()
+    if not is_trading_day(db, target_date):
+        raise BusinessError("NON_TRADING_DAY", "非交易日，请等待交易日再提交")
+
+    # 计算当前隐式值（用于审计）
+    computed = compute_cash_balance(db, portfolio_code, platform_code, target_date)
+
+    manual = db.query(ManualMarketValue).filter(
+        ManualMarketValue.portfolio_code == portfolio_code,
+        ManualMarketValue.platform_code == platform_code,
+        ManualMarketValue.product_code == "CASH",
+        ManualMarketValue.date == target_date,
+    ).first()
+    if manual:
+        manual.market_value = Decimal(str(amount))
+        manual.computed_value = computed
+    else:
+        manual = ManualMarketValue(
+            portfolio_code=portfolio_code,
+            platform_code=platform_code,
+            product_code="CASH",
+            date=target_date,
+            market_value=Decimal(str(amount)),
+            computed_value=computed,
+            created_by=created_by,
+        )
+        db.add(manual)
+    db.flush()
+
+    return {
+        "portfolio_code": portfolio_code,
+        "platform_code": platform_code,
+        "amount": float(manual.market_value),
+        "computed_value": float(computed) if computed is not None else None,
+        "update_date": target_date,
+    }

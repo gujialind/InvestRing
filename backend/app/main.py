@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.database import engine, Base, SessionLocal
 from app.routers import auth, investors, portfolios, products, platforms, trading_calendar, data_sources, market_data, subscriptions, trades, share_change_events, positions, logs, tasks, notifications, snapshots, cash_transfers, sync_jobs
+from app.services.exceptions import BusinessError
 from app.init_tasks import init_scheduled_tasks
 
 Base.metadata.create_all(bind=engine)
@@ -48,6 +50,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(BusinessError)
+async def business_error_handler(request: Request, exc: BusinessError):
+    """统一领域异常映射：保持 detail.{error,message} 契约不变。"""
+    detail = {"error": exc.code, "message": exc.message}
+    if exc.details:
+        detail["details"] = exc.details
+    return JSONResponse(status_code=exc.http_status, content={"detail": detail})
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
