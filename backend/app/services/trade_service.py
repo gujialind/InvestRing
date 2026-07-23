@@ -22,58 +22,35 @@ logger = logging.getLogger(__name__)
 
 
 def get_nav_for_trade_confirmation(
-    db: Session, product_code: str, market: str, trade_date: date, is_qdii: bool
+    db: Session, product_code: str, market: str, trade_date: date
 ) -> Optional[Decimal]:
     """
     获取调仓交易确认时的净值
 
     规则：
-    - QDII产品：必须使用T日净值，禁止向前查找
-    - 非QDII净值型产品：必须使用T日净值，禁止向前查找
+    - 场外基金统一取 T 日（成交当日）净值，禁止向前查找，不区分 QDII/非 QDII。
+      QDII 与非 QDII 的差异仅在确认间隔（T+2 / T+1），已通过创建时设定的
+      confirm_date 体现；到确认日净值理应可取，缺失则由调用方拒绝确认。
 
     Args:
         db: 数据库会话
         product_code: 产品代码
         market: 市场类型
         trade_date: 交易日期（T日）
-        is_qdii: 是否为QDII产品
 
     Returns:
         净值（Decimal），如果不存在则返回 None（由调用方决定是否拒绝）
-
-    Raises:
-        HTTPException: QDII产品T日净值不存在时抛出异常
     """
-    if is_qdii:
-        # QDII：必须取T日净值，禁止向前查找
-        price_record = db.query(PriceRecord).filter(
-            PriceRecord.product_code == product_code,
-            PriceRecord.market == market,
-            PriceRecord.date == trade_date
-        ).first()
+    price_record = db.query(PriceRecord).filter(
+        PriceRecord.product_code == product_code,
+        PriceRecord.market == market,
+        PriceRecord.date == trade_date
+    ).first()
 
-        if not price_record or not price_record.unit_price:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": "MISSING_QDII_NAV",
-                    "message": f"QDII产品{product_code}在T={trade_date}的净值尚未同步，请等待T+2日后重试或手动指定净值"
-                }
-            )
-
+    if price_record and price_record.unit_price:
         return Decimal(str(price_record.unit_price))
-    else:
-        # 非QDII：必须取T日净值，禁止向前查找（对齐文档"禁止向前查找"）
-        price_record = db.query(PriceRecord).filter(
-            PriceRecord.product_code == product_code,
-            PriceRecord.market == market,
-            PriceRecord.date == trade_date
-        ).first()
 
-        if price_record and price_record.unit_price:
-            return Decimal(str(price_record.unit_price))
-
-        return None
+    return None
 
 
 def attach_paired_cash_leg(
@@ -177,8 +154,8 @@ def confirm_single_trade(
     确认单笔调仓交易的核心逻辑，供手动确认与 auto_confirm 共用。
 
     - confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
-    - 场外基金（OEF/LOF 且 CN_OTC）确认时获取 T 日（成交当日）净值并重算 shares/amount，
-      一律以净值计算；QDII 严格取 T 日净值，缺失时抛 HTTPException
+    - 场外基金（OEF/LOF 且 CN_OTC）确认时统一获取 T 日（成交当日）净值并重算 shares/amount，
+      不区分 QDII/非 QDII，一律以净值计算；缺失 T 日净值时抛 MISSING_NAV 拒绝确认
     - 场外基金若传入 price 仅作一致性校验：须与 T 日净值相等，否则抛 PRICE_NAV_MISMATCH，
       手动价不覆盖净值（不传则直接取净值）
     - 场内基金不取净值，使用创建时录入的成交价（成交价录入时必填，见 trades.py 创建校验）
@@ -209,7 +186,7 @@ def confirm_single_trade(
     if is_otc_nav_fund:
         # 净值型产品：获取T日净值
         nav_price = get_nav_for_trade_confirmation(
-            db, trade.product_code, trade.market, trade.trade_date, product.is_qdii
+            db, trade.product_code, trade.market, trade.trade_date
         )
 
         # 净值不存在，无法确认交易
