@@ -50,6 +50,7 @@ yarn.lock
 .agents/
 .apifox/
 .qoderignore
+.workbuddy
 
 # Hermes skills (project-level)
 skills/
