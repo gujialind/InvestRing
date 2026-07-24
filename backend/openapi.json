@@ -4690,7 +4690,7 @@
           "snapshots"
         ],
         "summary": "Delete Snapshots Bulk",
-        "description": "批量删除从 from_date 开始的所有快照（含 from_date）\n\n从最新快照日开始倒序删除，确保级联回退的顺序正确。\n每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。\n\n权限：仅admin",
+        "description": "批量删除从 from_date 开始的所有快照（含 from_date）\n\n从最新快照日开始倒序删除，确保级联回退的顺序正确。\n每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。\n必须显式传 confirm=true，否则返回 422 CONFIRM_REQUIRED（兼作影响面预览）。\n\n权限：仅admin",
         "operationId": "delete_snapshots_bulk_api_v1_snapshots__portfolio_code__bulk__from_date__delete",
         "security": [
           {
@@ -4716,6 +4716,18 @@
               "format": "date",
               "title": "From Date"
             }
+          },
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "必须显式传 confirm=true 才执行删除",
+              "default": false,
+              "title": "Confirm"
+            },
+            "description": "必须显式传 confirm=true 才执行删除"
           }
         ],
         "responses": {

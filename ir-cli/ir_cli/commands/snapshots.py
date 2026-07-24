@@ -2,7 +2,7 @@
 import typer
 from typing import Optional
 from ir_cli.client import APIClient
-from ir_cli.output import success
+from ir_cli.output import success, error
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -77,8 +77,11 @@ def delete(
 def delete_bulk(
     portfolio_code: str = typer.Argument(..., help="组合代码"),
     from_date: str = typer.Argument(..., help="起始日期(YYYY-MM-DD)，含当日及之后全部快照"),
+    yes: bool = typer.Option(False, "--yes", help="跳过确认，未提供则拒绝执行"),
 ):
     """批量删除从 from_date 起（含当日）的所有快照，倒序级联回退"""
+    if not yes:
+        error("CONFIRM_REQUIRED", "批量删除快照不可逆，请追加 --yes 确认")
     client = APIClient.from_config()
-    result = client.delete(f"{PREFIX}/{portfolio_code}/bulk/{from_date}")
+    result = client.delete(f"{PREFIX}/{portfolio_code}/bulk/{from_date}", params={"confirm": True})
     success(data=result["data"])
