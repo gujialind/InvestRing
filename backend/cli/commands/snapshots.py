@@ -115,9 +115,11 @@ def delete_snapshot(
 def delete_snapshots_bulk(
     portfolio_code: str = typer.Argument(...),
     from_date: str = typer.Argument(..., help="YYYY-MM-DD，含当日"),
-    yes: bool = typer.Option(False, "--yes"),
+    yes: bool = typer.Option(False, "--yes", help="跳过确认，未提供则拒绝执行"),
 ):
     """批量删除从 from_date 起（含当日）的所有快照，从最新日倒序级联回退"""
+    if not yes:
+        error("CONFIRM_REQUIRED", "批量删除快照不可逆，请追加 --yes 确认")
     with cli_context() as db:
         from app.services.snapshot_service import _delete_existing_snapshots
         from app.models.portfolio_value_snapshot import PortfolioValueSnapshot

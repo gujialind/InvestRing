@@ -822,6 +822,20 @@ ir snapshot status <PORTFOLIO_CODE>
 ir snapshot delete <PORTFOLIO_CODE> <SNAPSHOT_DATE> [--yes]
 ```
 
+#### `ir snapshot delete-bulk`
+
+批量删除从起始日期（含当日）起的所有快照，从最新快照日倒序逐日删除并级联回退。
+
+```bash
+ir snapshot delete-bulk <PORTFOLIO_CODE> <FROM_DATE> --yes
+```
+
+| 参数 | 默认值 | 说明 |
+|------|:------:|------|
+| `--yes` | false | 必传。不带 `--yes` 时拒绝执行（`CONFIRM_REQUIRED`） |
+
+> **破坏性操作**：逐日 commit，不可中途回滚。对应的 REST 端点 `DELETE /api/v1/snapshots/{portfolio_code}/bulk/{from_date}` 同样要求显式传 `confirm=true`，否则返回 422 `CONFIRM_REQUIRED`（兼作影响面预览）。
+
 ---
 
 ### 4.12 `ir system` — 系统管理

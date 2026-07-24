@@ -205,6 +205,7 @@ def delete_snapshot(
 def delete_snapshots_bulk(
     portfolio_code: str,
     from_date: date,
+    confirm: bool = Query(False, description="必须显式传 confirm=true 才执行删除"),
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
@@ -213,6 +214,7 @@ def delete_snapshots_bulk(
     
     从最新快照日开始倒序删除，确保级联回退的顺序正确。
     每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。
+    必须显式传 confirm=true，否则返回 422 CONFIRM_REQUIRED（兼作影响面预览）。
     
     权限：仅admin
     """
@@ -234,6 +236,16 @@ def delete_snapshots_bulk(
         .order_by(PortfolioValueSnapshot.snapshot_date.desc())
         .all()
     ]
+    
+    # 破坏性操作守卫：逐日 commit 不可中途回滚，必须显式确认
+    if not confirm:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "CONFIRM_REQUIRED",
+                "message": f"将删除组合 {portfolio_code} 从 {from_date} 起的 {len(snapshot_dates)} 个快照，请携带 confirm=true 确认",
+            },
+        )
     
     if not snapshot_dates:
         return {
