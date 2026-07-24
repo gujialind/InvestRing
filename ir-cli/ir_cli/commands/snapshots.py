@@ -71,3 +71,14 @@ def delete(
     client = APIClient.from_config()
     result = client.delete(f"{PREFIX}/{portfolio_code}/{snapshot_date}")
     success(data=result["data"])
+
+
+@app.command("delete-bulk")
+def delete_bulk(
+    portfolio_code: str = typer.Argument(..., help="组合代码"),
+    from_date: str = typer.Argument(..., help="起始日期(YYYY-MM-DD)，含当日及之后全部快照"),
+):
+    """批量删除从 from_date 起（含当日）的所有快照，倒序级联回退"""
+    client = APIClient.from_config()
+    result = client.delete(f"{PREFIX}/{portfolio_code}/bulk/{from_date}")
+    success(data=result["data"])

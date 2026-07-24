@@ -43,3 +43,14 @@ def list_transfers(
     params = {"page": page, "page_size": page_size}
     result = client.get(f"/api/portfolios/{portfolio_code}/cash-transfers", params=params)
     success(data=result["data"], meta=result.get("meta"))
+
+
+@app.command("confirm")
+def confirm(
+    transfer_group: str = typer.Argument(..., help="转移组标识"),
+    portfolio_code: str = typer.Option(..., "--portfolio-code", help="组合代码"),
+):
+    """确认跨天现金转移（两腿同时确认）"""
+    client = APIClient.from_config()
+    result = client.post(f"/api/portfolios/{portfolio_code}/cash-transfer/{transfer_group}/confirm")
+    success(data=result["data"])

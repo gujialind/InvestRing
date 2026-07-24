@@ -33,6 +33,7 @@ from cli.commands import (
     snapshots,
     cash_transfers,
     sync_jobs,
+    notifications,
 )
 
 app.add_typer(auth.app, name="auth", help="认证管理")
@@ -51,3 +52,4 @@ app.add_typer(tasks.app, name="task", help="任务管理")
 app.add_typer(snapshots.app, name="snapshot", help="快照管理")
 app.add_typer(cash_transfers.app, name="cash-transfer", help="平台间现金转移")
 app.add_typer(sync_jobs.app, name="sync-job", help="价格同步任务")
+app.add_typer(notifications.app, name="notification", help="通知管理")

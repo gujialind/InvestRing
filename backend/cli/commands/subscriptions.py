@@ -140,3 +140,66 @@ def unconfirm_subscription(
 
         db.flush()
         success(data={"message": "申购赎回已取消确认", "id": id})
+
+
+@app.command("update")
+def update_subscription(
+    id: int = typer.Argument(...),
+    amount: Optional[float] = typer.Option(None, "--amount", help="金额"),
+    shares: Optional[float] = typer.Option(None, "--shares", help="份额"),
+    unit_price: Optional[float] = typer.Option(None, "--unit-price", help="净值"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
+    confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="YYYY-MM-DD"),
+    notes: Optional[str] = typer.Option(None, "--notes"),
+):
+    """更新申购赎回（仅 pending 可改，confirmed 需先 unconfirm）"""
+    with cli_context() as db:
+        from app.models.subscription import Subscription
+
+        sub = db.query(Subscription).filter(Subscription.id == id).first()
+        if not sub:
+            error("NOT_FOUND", f"申购赎回记录 {id} 不存在")
+        if sub.status == "confirmed":
+            error("CANNOT_MODIFY_CONFIRMED", "已确认的申购赎回不可直接修改，请先取消确认后再修改")
+
+        updates = {}
+        if amount is not None:
+            updates["amount"] = Decimal(str(amount))
+        if shares is not None:
+            updates["shares"] = Decimal(str(shares))
+        if unit_price is not None:
+            updates["unit_price"] = Decimal(str(unit_price))
+        if platform_code is not None:
+            updates["platform_code"] = platform_code
+        if confirm_date is not None:
+            updates["confirm_date"] = parse_date(confirm_date)
+        if notes is not None:
+            updates["notes"] = notes
+        if not updates:
+            error("VALIDATION_ERROR", "未提供任何更新字段")
+
+        for field, value in updates.items():
+            setattr(sub, field, value)
+        db.flush()
+        db.refresh(sub)
+        success(data=serialize_model(sub))
+
+
+@app.command("delete")
+def delete_subscription(
+    id: int = typer.Argument(...),
+    yes: bool = typer.Option(False, "--yes"),
+):
+    """删除申购赎回（仅 pending 可删，confirmed 需先 unconfirm）"""
+    with cli_context() as db:
+        from app.models.subscription import Subscription
+
+        sub = db.query(Subscription).filter(Subscription.id == id).first()
+        if not sub:
+            error("NOT_FOUND", f"申购赎回记录 {id} 不存在")
+        if sub.status == "confirmed":
+            error("CANNOT_DELETE_CONFIRMED", "已确认的申购赎回不可直接删除，请先取消确认后再删除")
+
+        db.delete(sub)
+        db.flush()
+        success(data={"message": "申购赎回已删除", "id": id})

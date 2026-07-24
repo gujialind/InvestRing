@@ -90,3 +90,37 @@ def unconfirm(id: int = typer.Argument(..., help="申赎ID")):
     client = APIClient.from_config()
     result = client.post(f"/api/subscriptions/{id}/unconfirm")
     success(data=result["data"])
+
+
+@app.command("update")
+def update(
+    id: int = typer.Argument(..., help="申赎ID"),
+    amount: Optional[float] = typer.Option(None, "--amount", help="金额"),
+    shares: Optional[float] = typer.Option(None, "--shares", help="份额"),
+    unit_price: Optional[float] = typer.Option(None, "--unit-price", help="净值"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
+    confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="确认日期(YYYY-MM-DD)"),
+    notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
+):
+    """更新申赎（仅 pending 可改，confirmed 需先 unconfirm）"""
+    client = APIClient.from_config()
+    body = {}
+    for k, v in {
+        "amount": amount, "shares": shares, "unit_price": unit_price,
+        "platform_code": platform_code, "confirm_date": confirm_date, "notes": notes,
+    }.items():
+        if v is not None:
+            body[k] = v
+    if not body:
+        typer.echo("未提供任何更新字段")
+        raise typer.Exit(code=1)
+    result = client.put(f"/api/subscriptions/{id}", json_data=body)
+    success(data=result["data"])
+
+
+@app.command("delete")
+def delete(id: int = typer.Argument(..., help="申赎ID")):
+    """删除申赎（仅 pending 可删，confirmed 需先 unconfirm）"""
+    client = APIClient.from_config()
+    result = client.delete(f"/api/subscriptions/{id}")
+    success(data=result["data"])

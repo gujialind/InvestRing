@@ -25,6 +25,14 @@ def list_positions(
     success(data=result["data"], meta=result.get("meta"))
 
 
+@app.command("get")
+def get(id: int = typer.Argument(..., help="持仓ID")):
+    """获取单条持仓详情"""
+    client = APIClient.from_config()
+    result = client.get(f"/api/positions/{id}")
+    success(data=result["data"])
+
+
 @app.command("available-cash")
 def available_cash(
     portfolio_code: str = typer.Argument(..., help="组合代码"),
