@@ -53,6 +53,20 @@ def list_positions(
         )
 
 
+@app.command("get")
+def get_position(
+    id: int = typer.Argument(...),
+):
+    """查看单条持仓详情"""
+    with cli_context() as db:
+        from app.models.portfolio_position import PortfolioPosition
+
+        pos = db.query(PortfolioPosition).filter(PortfolioPosition.id == id).first()
+        if not pos:
+            error("NOT_FOUND", f"持仓记录 {id} 不存在")
+        success(data=serialize_model(pos))
+
+
 @app.command("available-cash")
 def available_cash(
     portfolio_code: str = typer.Argument(...),

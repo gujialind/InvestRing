@@ -12,7 +12,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-# 注册 15 个命令组
+# 注册 17 个命令组
 from ir_cli.commands import (
     auth,
     investors,
@@ -30,6 +30,7 @@ from ir_cli.commands import (
     snapshots,
     cash_transfers,
     sync_jobs,
+    notifications,
 )
 
 app.add_typer(auth.app, name="auth", help="认证管理")
@@ -48,3 +49,4 @@ app.add_typer(tasks.app, name="task", help="任务管理")
 app.add_typer(snapshots.app, name="snapshot", help="快照管理")
 app.add_typer(cash_transfers.app, name="cash-transfer", help="现金转移管理")
 app.add_typer(sync_jobs.app, name="sync-job", help="同步任务管理")
+app.add_typer(notifications.app, name="notification", help="通知管理")

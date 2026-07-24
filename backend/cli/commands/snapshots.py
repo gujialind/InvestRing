@@ -109,3 +109,56 @@ def delete_snapshot(
             output["message"] += f"（级联回退了 {len(cascaded)} 笔申购/赎回）"
 
         success(data=output)
+
+
+@app.command("delete-bulk")
+def delete_snapshots_bulk(
+    portfolio_code: str = typer.Argument(...),
+    from_date: str = typer.Argument(..., help="YYYY-MM-DD，含当日"),
+    yes: bool = typer.Option(False, "--yes"),
+):
+    """批量删除从 from_date 起（含当日）的所有快照，从最新日倒序级联回退"""
+    with cli_context() as db:
+        from app.services.snapshot_service import _delete_existing_snapshots
+        from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+
+        fd = parse_date(from_date)
+        snapshot_dates = [
+            row[0] for row in db.query(PortfolioValueSnapshot.snapshot_date)
+            .filter(
+                PortfolioValueSnapshot.portfolio_code == portfolio_code,
+                PortfolioValueSnapshot.snapshot_date >= fd,
+            )
+            .order_by(PortfolioValueSnapshot.snapshot_date.desc())
+            .all()
+        ]
+
+        if not snapshot_dates:
+            success(data={
+                "message": f"组合 {portfolio_code} 在 {fd} 之后无快照可删除",
+                "deleted_count": 0,
+            })
+
+        total_subs = 0
+        total_events = 0
+        details = []
+        for sd in snapshot_dates:
+            result = _delete_existing_snapshots(db, portfolio_code, sd)
+            subs = result.get("cascaded_subscriptions", [])
+            events = result.get("cascaded_events", [])
+            total_subs += len(subs)
+            total_events += len(events)
+            details.append({
+                "snapshot_date": sd.isoformat(),
+                "deleted": result["deleted"],
+                "cascaded_subs": len(subs),
+                "cascaded_events": len(events),
+            })
+            db.flush()
+
+        success(data={
+            "message": f"已删除组合 {portfolio_code} 从 {fd} 起的 {len(snapshot_dates)} 个快照"
+                       f"（级联回退 {total_subs} 笔申购/赎回，{total_events} 笔事件）",
+            "deleted_count": len(snapshot_dates),
+            "details": details,
+        })
