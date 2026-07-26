@@ -2,7 +2,8 @@
 import typer
 from typing import Optional
 from ir_cli.client import APIClient
-from ir_cli.output import success
+from ir_cli.output import error, success
+from ir_cli.utils import build_body, resolve_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -15,42 +16,44 @@ def list_products(
     data_source_status: Optional[str] = typer.Option(None, "--data-source-status", help="同步状态(pending/success/failed/error/skipped)"),
     page: int = typer.Option(1, "--page", help="页码"),
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
+    all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
+    fields: Optional[str] = typer.Option(None, "--fields", help="仅输出指定字段(逗号分隔)"),
 ):
     """获取产品列表"""
     client = APIClient.from_config()
-    params = {"page": page, "page_size": page_size}
-    if product_type is not None:
-        params["product_type"] = product_type
-    if market is not None:
-        params["market"] = market
-    if data_source is not None:
-        params["data_source"] = data_source
-    if data_source_status is not None:
-        params["data_source_status"] = data_source_status
-    result = client.get("/api/products", params=params)
-    success(data=result["data"], meta=result.get("meta"))
+    params = build_body(
+        product_type=product_type,
+        market=market,
+        data_source=data_source,
+        data_source_status=data_source_status,
+    )
+    run_list(client, "/api/products", params, page=page, page_size=page_size, all_pages=all_pages, fields=fields)
 
 
 @app.command("create")
 def create(
-    code: str = typer.Option(..., "--code", help="产品代码"),
-    name: str = typer.Option(..., "--name", help="产品名称"),
-    product_type: str = typer.Option(..., "--product-type", help="产品类型(ETF/OEF/LOF/CASH)"),
+    code: Optional[str] = typer.Option(None, "--code", help="产品代码(必填)"),
+    name: Optional[str] = typer.Option(None, "--name", help="产品名称(必填)"),
+    product_type: Optional[str] = typer.Option(None, "--product-type", help="产品类型(ETF/OEF/LOF/CASH)(必填)"),
     market: Optional[str] = typer.Option(None, "--market", help="市场类型"),
     asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code", help="资产分类代码"),
     confirm_days: int = typer.Option(1, "--confirm-days", help="确认天数"),
     is_qdii: bool = typer.Option(False, "--is-qdii/--no-qdii", help="是否QDII"),
+    json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """创建产品"""
     client = APIClient.from_config()
-    body = {
-        "code": code, "name": name, "product_type": product_type,
-        "confirm_days": confirm_days, "is_qdii": is_qdii,
-    }
-    if market is not None:
-        body["market"] = market
-    if asset_class_code is not None:
-        body["asset_class_code"] = asset_class_code
+    body = resolve_body(
+        json_body,
+        required=("code", "name", "product_type"),
+        code=code,
+        name=name,
+        product_type=product_type,
+        market=market,
+        asset_class_code=asset_class_code,
+        confirm_days=confirm_days,
+        is_qdii=is_qdii,
+    )
     result = client.post("/api/products", json_data=body)
     success(data=result["data"])
 
@@ -74,18 +77,19 @@ def update(
     asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code", help="资产分类代码"),
     confirm_days: Optional[int] = typer.Option(None, "--confirm-days", help="确认天数"),
     is_qdii: Optional[bool] = typer.Option(None, "--is-qdii/--no-qdii", help="是否QDII"),
+    json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """更新产品"""
     client = APIClient.from_config()
-    body = {}
-    if name is not None:
-        body["name"] = name
-    if asset_class_code is not None:
-        body["asset_class_code"] = asset_class_code
-    if confirm_days is not None:
-        body["confirm_days"] = confirm_days
-    if is_qdii is not None:
-        body["is_qdii"] = is_qdii
+    body = resolve_body(
+        json_body,
+        name=name,
+        asset_class_code=asset_class_code,
+        confirm_days=confirm_days,
+        is_qdii=is_qdii,
+    )
+    if not body:
+        error("VALIDATION_ERROR", "未提供任何更新字段")
     result = client.put(f"/api/products/{code}/{market}", json_data=body)
     success(data=result["data"])
 

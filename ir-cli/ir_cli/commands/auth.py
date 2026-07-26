@@ -2,7 +2,7 @@
 import typer
 from ir_cli import config
 from ir_cli.client import APIClient
-from ir_cli.output import success, error
+from ir_cli.output import EXIT_AUTH, success, error
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -54,7 +54,7 @@ def status():
     """显示当前用户和 token 状态（本地操作，不请求服务端）"""
     token_data = config.load_token()
     if not token_data:
-        error("AUTH_REQUIRED", "未登录或 token 已过期，请执行: ir auth login")
+        error("AUTH_REQUIRED", "未登录或 token 已过期，请执行: ir auth login", exit_code=EXIT_AUTH)
     base_url = config.get_base_url()
     success(data={
         "user": token_data.get("user"),

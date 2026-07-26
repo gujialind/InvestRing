@@ -2,7 +2,8 @@
 import typer
 from typing import Optional
 from ir_cli.client import APIClient
-from ir_cli.output import success
+from ir_cli.output import error, success
+from ir_cli.utils import build_body, resolve_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -13,47 +14,43 @@ def list_subs(
     investor_code: Optional[str] = typer.Option(None, "--investor-code", help="投资人代码"),
     page: int = typer.Option(1, "--page", help="页码"),
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
+    all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
+    fields: Optional[str] = typer.Option(None, "--fields", help="仅输出指定字段(逗号分隔)"),
 ):
     """获取申赎列表"""
     client = APIClient.from_config()
-    params = {"page": page, "page_size": page_size}
-    if portfolio_code is not None:
-        params["portfolio_code"] = portfolio_code
-    if investor_code is not None:
-        params["investor_code"] = investor_code
-    result = client.get("/api/subscriptions", params=params)
-    success(data=result["data"], meta=result.get("meta"))
+    params = build_body(portfolio_code=portfolio_code, investor_code=investor_code)
+    run_list(client, "/api/subscriptions", params, page=page, page_size=page_size, all_pages=all_pages, fields=fields)
 
 
 @app.command("create")
 def create(
-    portfolio_code: str = typer.Option(..., "--portfolio-code", help="组合代码"),
-    investor_code: str = typer.Option(..., "--investor-code", help="投资人代码"),
-    sub_type: str = typer.Option(..., "--type", help="类型(subscribe/redeem)"),
-    apply_date: str = typer.Option(..., "--apply-date", help="申请日期(YYYY-MM-DD)"),
+    portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码(必填)"),
+    investor_code: Optional[str] = typer.Option(None, "--investor-code", help="投资人代码(必填)"),
+    sub_type: Optional[str] = typer.Option(None, "--type", help="类型(subscribe/redeem)(必填)"),
+    apply_date: Optional[str] = typer.Option(None, "--apply-date", help="申请日期(YYYY-MM-DD)(必填)"),
     amount: Optional[float] = typer.Option(None, "--amount", help="金额(申购用)"),
     shares: Optional[float] = typer.Option(None, "--shares", help="份额(赎回用)"),
     unit_price: Optional[float] = typer.Option(None, "--unit-price", help="净值"),
-    platform_code: str = typer.Option(..., "--platform-code", help="交易平台代码"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="交易平台代码(必填)"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
+    json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """创建申赎申请"""
     client = APIClient.from_config()
-    body = {
-        "portfolio_code": portfolio_code,
-        "investor_code": investor_code,
-        "sub_type": sub_type,
-        "apply_date": apply_date,
-        "platform_code": platform_code,
-    }
-    if amount is not None:
-        body["amount"] = amount
-    if shares is not None:
-        body["shares"] = shares
-    if unit_price is not None:
-        body["unit_price"] = unit_price
-    if notes is not None:
-        body["notes"] = notes
+    body = resolve_body(
+        json_body,
+        required=("portfolio_code", "investor_code", "sub_type", "apply_date", "platform_code"),
+        portfolio_code=portfolio_code,
+        investor_code=investor_code,
+        sub_type=sub_type,
+        apply_date=apply_date,
+        amount=amount,
+        shares=shares,
+        unit_price=unit_price,
+        platform_code=platform_code,
+        notes=notes,
+    )
     result = client.post("/api/subscriptions", json_data=body)
     success(data=result["data"])
 
@@ -101,19 +98,21 @@ def update(
     platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
     confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="确认日期(YYYY-MM-DD)"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
+    json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """更新申赎（仅 pending 可改，confirmed 需先 unconfirm）"""
     client = APIClient.from_config()
-    body = {}
-    for k, v in {
-        "amount": amount, "shares": shares, "unit_price": unit_price,
-        "platform_code": platform_code, "confirm_date": confirm_date, "notes": notes,
-    }.items():
-        if v is not None:
-            body[k] = v
+    body = resolve_body(
+        json_body,
+        amount=amount,
+        shares=shares,
+        unit_price=unit_price,
+        platform_code=platform_code,
+        confirm_date=confirm_date,
+        notes=notes,
+    )
     if not body:
-        typer.echo("未提供任何更新字段")
-        raise typer.Exit(code=1)
+        error("VALIDATION_ERROR", "未提供任何更新字段")
     result = client.put(f"/api/subscriptions/{id}", json_data=body)
     success(data=result["data"])
 

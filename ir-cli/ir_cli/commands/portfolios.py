@@ -2,7 +2,8 @@
 import typer
 from typing import Optional
 from ir_cli.client import APIClient
-from ir_cli.output import success
+from ir_cli.output import error, success
+from ir_cli.utils import build_body, resolve_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -12,27 +13,31 @@ def list_portfolios(
     status: Optional[str] = typer.Option(None, "--status", help="状态筛选(draft/active/closed)"),
     page: int = typer.Option(1, "--page", help="页码"),
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
+    all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
+    fields: Optional[str] = typer.Option(None, "--fields", help="仅输出指定字段(逗号分隔)"),
 ):
     """获取组合列表"""
     client = APIClient.from_config()
-    params = {"page": page, "page_size": page_size}
-    if status is not None:
-        params["status"] = status
-    result = client.get("/api/portfolios", params=params)
-    success(data=result["data"], meta=result.get("meta"))
+    params = build_body(status=status)
+    run_list(client, "/api/portfolios", params, page=page, page_size=page_size, all_pages=all_pages, fields=fields)
 
 
 @app.command("create")
 def create(
-    code: str = typer.Option(..., "--code", help="组合代码"),
-    name: str = typer.Option(..., "--name", help="组合名称"),
+    code: Optional[str] = typer.Option(None, "--code", help="组合代码(必填)"),
+    name: Optional[str] = typer.Option(None, "--name", help="组合名称(必填)"),
     description: Optional[str] = typer.Option(None, "--description", help="描述"),
+    json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """创建组合"""
     client = APIClient.from_config()
-    body = {"code": code, "name": name}
-    if description is not None:
-        body["description"] = description
+    body = resolve_body(
+        json_body,
+        required=("code", "name"),
+        code=code,
+        name=name,
+        description=description,
+    )
     result = client.post("/api/portfolios", json_data=body)
     success(data=result["data"])
 
@@ -50,14 +55,13 @@ def update(
     code: str = typer.Argument(..., help="组合代码"),
     name: Optional[str] = typer.Option(None, "--name", help="组合名称"),
     description: Optional[str] = typer.Option(None, "--description", help="描述"),
+    json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """更新组合信息"""
     client = APIClient.from_config()
-    body = {}
-    if name is not None:
-        body["name"] = name
-    if description is not None:
-        body["description"] = description
+    body = resolve_body(json_body, name=name, description=description)
+    if not body:
+        error("VALIDATION_ERROR", "未提供任何更新字段")
     result = client.put(f"/api/portfolios/{code}", json_data=body)
     success(data=result["data"])
 
@@ -86,11 +90,7 @@ def nav_history(
 ):
     """获取净值历史"""
     client = APIClient.from_config()
-    params = {}
-    if start_date is not None:
-        params["start_date"] = start_date
-    if end_date is not None:
-        params["end_date"] = end_date
+    params = build_body(start_date=start_date, end_date=end_date)
     result = client.get(f"/api/portfolios/{code}/nav-history", params=params)
     success(data=result["data"])
 
