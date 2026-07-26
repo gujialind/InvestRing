@@ -9,7 +9,7 @@ from typing import Any, Optional
 import httpx
 
 from ir_cli import config
-from ir_cli.output import error, success
+from ir_cli.output import EXIT_AUTH, EXIT_CONNECTION, error, success
 
 
 class APIClient:
@@ -40,7 +40,7 @@ class APIClient:
         token_data = config.load_token()
         token = token_data["token"] if token_data else None
         if require_auth and not token:
-            error("AUTH_REQUIRED", "未登录或 token 已过期，请执行: ir auth login")
+            error("AUTH_REQUIRED", "未登录或 token 已过期，请执行: ir auth login", exit_code=EXIT_AUTH)
         return cls(base_url, token)
 
     def _handle_response(self, resp: httpx.Response) -> dict:
@@ -63,7 +63,12 @@ class APIClient:
                 }.get(resp.status_code)
                 if fallback:
                     detail = fallback
-            error(code, detail, details={"http_status": resp.status_code})
+            error(
+                code,
+                detail,
+                details={"http_status": resp.status_code},
+                exit_code=EXIT_AUTH if resp.status_code == 401 else 1,
+            )
 
         # 2xx 成功
         try:
@@ -73,12 +78,19 @@ class APIClient:
 
         # 分页响应: {items: [...], total, page, page_size}
         if isinstance(body, dict) and "items" in body and "total" in body:
+            total = body["total"]
+            page = body.get("page")
+            page_size = body.get("page_size")
+            has_more = None
+            if page is not None and page_size is not None:
+                has_more = page * page_size < total
             return {
                 "data": body["items"],
                 "meta": {
-                    "total": body["total"],
-                    "page": body.get("page"),
-                    "page_size": body.get("page_size"),
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "has_more": has_more,
                 },
             }
         return {"data": body}
@@ -110,9 +122,9 @@ class APIClient:
         try:
             resp = self._client.get(path, params=params)
         except httpx.ConnectError:
-            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置")
+            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
         except httpx.TimeoutException:
-            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}")
+            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
         return self._handle_response(resp)
 
     def post(self, path: str, json_data: Optional[dict] = None, params: Optional[dict] = None) -> dict:
@@ -120,9 +132,9 @@ class APIClient:
         try:
             resp = self._client.post(path, json=json_data, params=params)
         except httpx.ConnectError:
-            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置")
+            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
         except httpx.TimeoutException:
-            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}")
+            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
         return self._handle_response(resp)
 
     def put(self, path: str, json_data: Optional[dict] = None) -> dict:
@@ -130,9 +142,9 @@ class APIClient:
         try:
             resp = self._client.put(path, json=json_data)
         except httpx.ConnectError:
-            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置")
+            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
         except httpx.TimeoutException:
-            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}")
+            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
         return self._handle_response(resp)
 
     def delete(self, path: str, params: Optional[dict] = None) -> dict:
@@ -140,9 +152,9 @@ class APIClient:
         try:
             resp = self._client.delete(path, params=params)
         except httpx.ConnectError:
-            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置")
+            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
         except httpx.TimeoutException:
-            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}")
+            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
         return self._handle_response(resp)
 
     def get_all(self, path: str, params: Optional[dict] = None) -> dict:
@@ -164,7 +176,7 @@ class APIClient:
 
         return {
             "data": all_items,
-            "meta": {"total": len(all_items)},
+            "meta": {"total": len(all_items), "has_more": False},
         }
 
     def close(self):

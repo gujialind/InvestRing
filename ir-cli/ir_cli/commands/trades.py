@@ -2,7 +2,8 @@
 import typer
 from typing import Optional
 from ir_cli.client import APIClient
-from ir_cli.output import success
+from ir_cli.output import error, success
+from ir_cli.utils import build_body, resolve_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -12,22 +13,21 @@ def list_trades(
     portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码"),
     page: int = typer.Option(1, "--page", help="页码"),
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
+    all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
+    fields: Optional[str] = typer.Option(None, "--fields", help="仅输出指定字段(逗号分隔)"),
 ):
     """获取交易列表"""
     client = APIClient.from_config()
-    params = {"page": page, "page_size": page_size}
-    if portfolio_code is not None:
-        params["portfolio_code"] = portfolio_code
-    result = client.get("/api/trades", params=params)
-    success(data=result["data"], meta=result.get("meta"))
+    params = build_body(portfolio_code=portfolio_code)
+    run_list(client, "/api/trades", params, page=page, page_size=page_size, all_pages=all_pages, fields=fields)
 
 
 @app.command("create")
 def create(
-    portfolio_code: str = typer.Option(..., "--portfolio-code", help="组合代码"),
-    product_code: str = typer.Option(..., "--product-code", help="产品代码"),
-    trade_type: str = typer.Option(..., "--type", help="类型(buy/sell)"),
-    trade_date: str = typer.Option(..., "--trade-date", help="交易日期(YYYY-MM-DD)"),
+    portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码(必填)"),
+    product_code: Optional[str] = typer.Option(None, "--product-code", help="产品代码(必填)"),
+    trade_type: Optional[str] = typer.Option(None, "--type", help="类型(buy/sell)(必填)"),
+    trade_date: Optional[str] = typer.Option(None, "--trade-date", help="交易日期(YYYY-MM-DD)(必填)"),
     actual_amount: Optional[float] = typer.Option(None, "--actual-amount", help="实际金额"),
     fee: float = typer.Option(0, "--fee", help="手续费"),
     platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
@@ -36,30 +36,26 @@ def create(
     shares: Optional[float] = typer.Option(None, "--shares", help="份额"),
     amount: Optional[float] = typer.Option(None, "--amount", help="金额"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
+    json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """创建交易"""
     client = APIClient.from_config()
-    body = {
-        "portfolio_code": portfolio_code,
-        "product_code": product_code,
-        "trade_type": trade_type,
-        "trade_date": trade_date,
-        "fee": fee,
-    }
-    if actual_amount is not None:
-        body["actual_amount"] = actual_amount
-    if platform_code is not None:
-        body["platform_code"] = platform_code
-    if market is not None:
-        body["market"] = market
-    if price is not None:
-        body["price"] = price
-    if shares is not None:
-        body["shares"] = shares
-    if amount is not None:
-        body["amount"] = amount
-    if notes is not None:
-        body["notes"] = notes
+    body = resolve_body(
+        json_body,
+        required=("portfolio_code", "product_code", "trade_type", "trade_date"),
+        portfolio_code=portfolio_code,
+        product_code=product_code,
+        trade_type=trade_type,
+        trade_date=trade_date,
+        actual_amount=actual_amount,
+        fee=fee,
+        platform_code=platform_code,
+        market=market,
+        price=price,
+        shares=shares,
+        amount=amount,
+        notes=notes,
+    )
     result = client.post("/api/trades", json_data=body)
     success(data=result["data"])
 
@@ -124,32 +120,26 @@ def update(
     confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="确认日期(YYYY-MM-DD)"),
     trade_date: Optional[str] = typer.Option(None, "--trade-date", help="交易日期(YYYY-MM-DD)"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
+    json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """更新交易（仅 pending 状态可改，confirmed 需先 unconfirm）。
 
     改动 confirm_date/trade_date/status 会自动同步配对 CASH 腿。
     """
     client = APIClient.from_config()
-    body = {}
-    if shares is not None:
-        body["shares"] = shares
-    if amount is not None:
-        body["amount"] = amount
-    if price is not None:
-        body["price"] = price
-    if fee is not None:
-        body["fee"] = fee
-    if actual_amount is not None:
-        body["actual_amount"] = actual_amount
-    if confirm_date is not None:
-        body["confirm_date"] = confirm_date
-    if trade_date is not None:
-        body["trade_date"] = trade_date
-    if notes is not None:
-        body["notes"] = notes
+    body = resolve_body(
+        json_body,
+        shares=shares,
+        amount=amount,
+        price=price,
+        fee=fee,
+        actual_amount=actual_amount,
+        confirm_date=confirm_date,
+        trade_date=trade_date,
+        notes=notes,
+    )
     if not body:
-        typer.echo("未提供任何更新字段")
-        raise typer.Exit(code=1)
+        error("VALIDATION_ERROR", "未提供任何更新字段")
     result = client.put(f"/api/trades/{id}", json_data=body)
     success(data=result["data"])
 

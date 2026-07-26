@@ -3,6 +3,7 @@ import typer
 from typing import Optional
 from ir_cli.client import APIClient
 from ir_cli.output import success
+from ir_cli.utils import build_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -13,16 +14,13 @@ def list_positions(
     snapshot_date: Optional[str] = typer.Option(None, "--snapshot-date", help="快照日期(YYYY-MM-DD)"),
     page: int = typer.Option(1, "--page", help="页码"),
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
+    all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
+    fields: Optional[str] = typer.Option(None, "--fields", help="仅输出指定字段(逗号分隔)"),
 ):
     """获取持仓列表"""
     client = APIClient.from_config()
-    params = {"page": page, "page_size": page_size}
-    if portfolio_code is not None:
-        params["portfolio_code"] = portfolio_code
-    if snapshot_date is not None:
-        params["snapshot_date"] = snapshot_date
-    result = client.get("/api/positions", params=params)
-    success(data=result["data"], meta=result.get("meta"))
+    params = build_body(portfolio_code=portfolio_code, snapshot_date=snapshot_date)
+    run_list(client, "/api/positions", params, page=page, page_size=page_size, all_pages=all_pages, fields=fields)
 
 
 @app.command("get")
