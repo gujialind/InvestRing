@@ -22,7 +22,8 @@ class InvestRingEncoder(json.JSONEncoder):
     """自定义 JSON 编码器，处理 Decimal/date/datetime 类型"""
     def default(self, obj):
         if isinstance(obj, Decimal):
-            return float(round(obj, 4))
+            # 字符串化避免 float 二进制误差（如 0.1+0.2 问题），agent 可直接用于金额比对
+            return format(obj, "f")
         if isinstance(obj, datetime):
             return obj.isoformat()
         if isinstance(obj, date):

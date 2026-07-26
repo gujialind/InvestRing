@@ -1,10 +1,14 @@
 """系统管理命令组"""
 import typer
 from typing import Optional
+from ir_cli import config
 from ir_cli.client import APIClient
 from ir_cli.output import success
 
 app = typer.Typer(no_args_is_help=True)
+
+# 整年日历基本不变，本地缓存 7 天，calendar-sync 后自动失效
+CALENDAR_CACHE_TTL = 7 * 86400
 
 
 @app.command("calendar")
@@ -13,8 +17,17 @@ def calendar(
     start_date: Optional[str] = typer.Option(None, "--start-date", help="开始日期(YYYY-MM-DD)"),
     end_date: Optional[str] = typer.Option(None, "--end-date", help="结束日期(YYYY-MM-DD)"),
     is_open: Optional[bool] = typer.Option(None, "--is-open/--is-closed", help="是否交易日"),
+    no_cache: bool = typer.Option(False, "--no-cache", help="跳过本地缓存直接请求后端"),
 ):
-    """查询交易日历"""
+    """查询交易日历（按年整年查询时使用本地缓存，--no-cache 可绕过）"""
+    # 仅缓存无其他筛选条件的整年查询（结果稳定且命中率高）
+    cacheable = year is not None and start_date is None and end_date is None and is_open is None
+    cache_key = f"calendar_{year}"
+    if cacheable and not no_cache:
+        cached = config.load_cache(cache_key, CALENDAR_CACHE_TTL)
+        if cached is not None:
+            success(data=cached, meta={"cached": True})
+
     client = APIClient.from_config()
     params = {}
     if year is not None:
@@ -26,6 +39,8 @@ def calendar(
     if is_open is not None:
         params["is_open"] = is_open
     result = client.get("/api/trading-calendar", params=params)
+    if cacheable:
+        config.save_cache(cache_key, result["data"])
     success(data=result["data"])
 
 
@@ -33,9 +48,10 @@ def calendar(
 def calendar_sync(
     year: int = typer.Option(..., "--year", help="同步年份"),
 ):
-    """同步交易日历"""
+    """同步交易日历（成功后自动失效对应年份的本地缓存）"""
     client = APIClient.from_config()
     result = client.post("/api/trading-calendar/sync", json_data={"year": year})
+    config.clear_cache(f"calendar_{year}")
     success(data=result["data"])
 
 

@@ -1,4 +1,5 @@
 """申购赎回管理命令组"""
+import sys
 import typer
 from typing import Optional
 from ir_cli.client import APIClient
@@ -35,8 +36,9 @@ def create(
     platform_code: Optional[str] = typer.Option(None, "--platform-code", help="交易平台代码(必填)"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
+    auto_confirm: bool = typer.Option(False, "--confirm", help="创建成功后立即确认（快捷组合）"),
 ):
-    """创建申赎申请"""
+    """创建申赎申请（--confirm 可链式创建+确认）"""
     client = APIClient.from_config()
     body = resolve_body(
         json_body,
@@ -52,6 +54,11 @@ def create(
         notes=notes,
     )
     result = client.post("/api/subscriptions", json_data=body)
+    created = result["data"]
+    if auto_confirm and isinstance(created, dict) and created.get("id"):
+        # 确认失败时 stdout 为确认阶段的错误 JSON，stderr 保留已创建的 id 便于后续处理
+        print(f"[info] 申赎已创建 id={created['id']}，正在确认...", file=sys.stderr)
+        result = client.post(f"/api/subscriptions/{created['id']}/confirm")
     success(data=result["data"])
 
 
