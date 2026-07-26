@@ -3,7 +3,7 @@ import typer
 from typing import Optional
 from ir_cli.client import APIClient
 from ir_cli.output import error, success
-from ir_cli.utils import build_body, resolve_body, run_list
+from ir_cli.utils import SUMMARY_FIELDS, build_body, project_fields, resolve_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -48,6 +48,43 @@ def get(code: str = typer.Argument(..., help="组合代码")):
     client = APIClient.from_config()
     result = client.get(f"/api/portfolios/{code}")
     success(data=result["data"])
+
+
+@app.command("context")
+def context(code: str = typer.Argument(..., help="组合代码")):
+    """一次性获取组合操作上下文（供 AI agent 操作前侦察，替代 4-5 次分步查询）。
+
+    聚合：组合详情、快照状态（含最新快照日）、实时可用现金、pending 申赎/交易。
+    """
+    client = APIClient.from_config()
+    portfolio = client.get(f"/api/portfolios/{code}")["data"]
+    snapshot_status = client.get(f"/api/v1/snapshots/portfolios/{code}/status")["data"]
+    available_cash = client.get(f"/api/positions/portfolio/{code}/available-cash")["data"]
+    # 后端 list 端点不支持 status 过滤，全量拉取后本地筛 pending（摘要字段输出）
+    subs = client.get_all("/api/subscriptions", params={"portfolio_code": code})["data"]
+    trades = client.get_all("/api/trades", params={"portfolio_code": code})["data"]
+    pending_subs = project_fields(
+        [s for s in subs if s.get("status") == "pending"], SUMMARY_FIELDS["subscription"]
+    )
+    pending_trades = project_fields(
+        [t for t in trades if t.get("status") == "pending"], SUMMARY_FIELDS["trade"]
+    )
+    hints = None
+    if pending_subs or pending_trades:
+        hints = [
+            f"存在 {len(pending_subs)} 笔 pending 申赎、{len(pending_trades)} 笔 pending 交易，"
+            "生成快照前需先 confirm 或 cancel 影响目标日的记录"
+        ]
+    success(
+        data={
+            "portfolio": portfolio,
+            "snapshot_status": snapshot_status,
+            "available_cash": available_cash,
+            "pending_subscriptions": pending_subs,
+            "pending_trades": pending_trades,
+        },
+        hints=hints,
+    )
 
 
 @app.command("update")

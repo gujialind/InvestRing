@@ -4,9 +4,14 @@ import typer
 from typing import Optional
 from ir_cli.client import APIClient
 from ir_cli.output import error, success
-from ir_cli.utils import build_body, resolve_body, run_list
+from ir_cli.utils import SUMMARY_FIELDS, build_body, project_fields, resolve_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
+
+# --quiet 时写操作仅输出的关键字段
+QUIET_FIELDS = "id,status,confirm_date"
+# 确认后提醒：快照未生成前不计入持仓
+SNAPSHOT_HINT = "确认后需生成确认日快照才计入持仓: ir snapshot generate --portfolio-code <code> --target-date <confirm_date>"
 
 
 @app.command("list")
@@ -16,11 +21,16 @@ def list_trades(
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
     all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
     fields: Optional[str] = typer.Option(None, "--fields", help="仅输出指定字段(逗号分隔)"),
+    full: bool = typer.Option(False, "--full", help="输出全字段（默认仅摘要字段）"),
 ):
-    """获取交易列表"""
+    """获取交易列表（默认输出摘要字段，--full 全字段）"""
     client = APIClient.from_config()
     params = build_body(portfolio_code=portfolio_code)
-    run_list(client, "/api/trades", params, page=page, page_size=page_size, all_pages=all_pages, fields=fields)
+    run_list(
+        client, "/api/trades", params,
+        page=page, page_size=page_size, all_pages=all_pages,
+        fields=fields, default_fields=SUMMARY_FIELDS["trade"], full=full,
+    )
 
 
 @app.command("create")
@@ -39,6 +49,7 @@ def create(
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
     auto_confirm: bool = typer.Option(False, "--confirm", help="创建成功后立即确认（快捷组合）"),
+    quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
 ):
     """创建交易（--confirm 可链式创建+确认）"""
     client = APIClient.from_config()
@@ -64,7 +75,14 @@ def create(
         # 确认失败时 stdout 为确认阶段的错误 JSON，stderr 保留已创建的 id 便于后续处理
         print(f"[info] 交易已创建 id={created['id']}，正在确认...", file=sys.stderr)
         result = client.post(f"/api/trades/{created['id']}/confirm")
-    success(data=result["data"])
+    data = result["data"]
+    hints = None
+    if isinstance(data, dict):
+        if data.get("status") == "pending":
+            hints = [f"ir trade confirm {data.get('id')}"]
+        elif data.get("status") == "confirmed":
+            hints = [SNAPSHOT_HINT]
+    success(data=project_fields(data, QUIET_FIELDS) if quiet else data, hints=hints)
 
 
 @app.command("get")
@@ -80,6 +98,7 @@ def confirm(
     id: int = typer.Argument(..., help="交易ID"),
     confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="确认日期(YYYY-MM-DD)"),
     price: Optional[float] = typer.Option(None, "--price", help="确认价格"),
+    quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
 ):
     """确认交易"""
     client = APIClient.from_config()
@@ -89,11 +108,15 @@ def confirm(
     if price is not None:
         params["price"] = price
     result = client.post(f"/api/trades/{id}/confirm", params=params)
-    success(data=result["data"])
+    data = result["data"]
+    success(data=project_fields(data, QUIET_FIELDS) if quiet else data, hints=[SNAPSHOT_HINT])
 
 
 @app.command("cancel")
-def cancel(id: int = typer.Argument(..., help="交易ID")):
+def cancel(
+    id: int = typer.Argument(..., help="交易ID"),
+    quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
+):
     """取消交易。
 
     约束：仅场外（CN_OTC）pending 状态交易可取消；场内交易当天确认，不可取消。
@@ -101,11 +124,15 @@ def cancel(id: int = typer.Argument(..., help="交易ID")):
     """
     client = APIClient.from_config()
     result = client.post(f"/api/trades/{id}/cancel")
-    success(data=result["data"])
+    data = result["data"]
+    success(data=project_fields(data, QUIET_FIELDS) if quiet else data)
 
 
 @app.command("unconfirm")
-def unconfirm(id: int = typer.Argument(..., help="交易ID")):
+def unconfirm(
+    id: int = typer.Argument(..., help="交易ID"),
+    quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
+):
     """取消确认交易。
 
     约束：仅 confirmed 状态可取消确认；若 confirm_date 及之后已有快照，
@@ -113,7 +140,8 @@ def unconfirm(id: int = typer.Argument(..., help="交易ID")):
     """
     client = APIClient.from_config()
     result = client.post(f"/api/trades/{id}/unconfirm")
-    success(data=result["data"])
+    data = result["data"]
+    success(data=project_fields(data, QUIET_FIELDS) if quiet else data)
 
 
 @app.command("update")
