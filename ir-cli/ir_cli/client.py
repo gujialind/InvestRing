@@ -20,7 +20,13 @@ class APIClient:
         headers = {"Accept": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        timeout = float(os.environ.get("IR_HTTP_TIMEOUT", "300"))
+        # 连接超时短（快速发现服务不可达），读超时长（兼容快照重算等长任务）
+        timeout = httpx.Timeout(
+            connect=float(os.environ.get("IR_CONNECT_TIMEOUT", "5")),
+            read=float(os.environ.get("IR_HTTP_TIMEOUT", "300")),
+            write=30.0,
+            pool=5.0,
+        )
         self._client = httpx.Client(
             base_url=self.base_url,
             headers=headers,
@@ -39,26 +45,25 @@ class APIClient:
 
     def _handle_response(self, resp: httpx.Response) -> dict:
         """统一处理 HTTP 响应"""
-        if resp.status_code == 401:
-            error("AUTH_REQUIRED", "认证失败或 token 已过期，请执行: ir auth login")
-        elif resp.status_code == 403:
-            error("FORBIDDEN", "无权限执行此操作")
-        elif resp.status_code == 404:
+        if resp.status_code >= 400:
+            default_code = {
+                401: "AUTH_REQUIRED",
+                403: "FORBIDDEN",
+                404: "NOT_FOUND",
+                409: "CONFLICT",
+                422: "VALIDATION_ERROR",
+            }.get(resp.status_code, "SERVER_ERROR" if resp.status_code >= 500 else "HTTP_ERROR")
+            code = self._extract_error_code(resp, default_code)
             detail = self._extract_detail(resp)
-            error("NOT_FOUND", detail)
-        elif resp.status_code == 409:
-            detail = self._extract_detail(resp)
-            error("CONFLICT", detail)
-        elif resp.status_code == 422:
-            detail = self._extract_detail(resp)
-            code = self._extract_error_code(resp, "VALIDATION_ERROR")
-            error(code, detail)
-        elif resp.status_code >= 500:
-            detail = self._extract_detail(resp)
-            error("SERVER_ERROR", detail)
-        elif resp.status_code >= 400:
-            detail = self._extract_detail(resp)
-            error("HTTP_ERROR", detail)
+            # 后端无结构化 message 时使用友好提示兜底
+            if detail.startswith(f"HTTP {resp.status_code}"):
+                fallback = {
+                    401: "认证失败或 token 已过期，请执行: ir auth login",
+                    403: "无权限执行此操作",
+                }.get(resp.status_code)
+                if fallback:
+                    detail = fallback
+            error(code, detail, details={"http_status": resp.status_code})
 
         # 2xx 成功
         try:
@@ -90,7 +95,7 @@ class APIClient:
             return f"HTTP {resp.status_code}: {resp.text[:200]}"
 
     def _extract_error_code(self, resp: httpx.Response, default: str) -> str:
-        """从 422 响应中提取结构化错误码"""
+        """从错误响应中提取后端结构化业务错误码（detail.error），缺失时用默认码"""
         try:
             body = resp.json()
             detail = body.get("detail", {})
