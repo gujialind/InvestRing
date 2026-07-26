@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /home/collyn/projects/InvestRing/.qoder/specs/ 2>/dev/null || echo \"Directory does not exist\")",
+      "Bash(ls -la /home/collyn/projects/InvestRing/backend/app/routers/ 2>/dev/null || echo \"Directory does not exist\")",
+      "Bash(ls -la /home/collyn/projects/InvestRing/backend/app/models/ 2>/dev/null || echo \"Directory does not exist\")",
+      "Bash(ls:*)",
+      "Bash(wc -c /home/collyn/projects/InvestRing/backend/openapi.json 2>/dev/null; echo \"---ROOT FILES---\"; ls -la /home/collyn/projects/InvestRing/ 2>/dev/null; echo \"---APINFOX/HTTP search \\(excluding .venv\\)---\"; find /home/collyn/projects/InvestRing -maxdepth 3 \\\\\\( -iname \"*apifox*\" -o -iname \"*.http\" -o -iname \"rest-client*\" -o -iname \"bruno*\" \\\\\\) -not -path \"*/.venv/*\" 2>/dev/null; echo \"---.qoder dir---\"; ls -la /home/collyn/projects/InvestRing/.qoder/ 2>/dev/null)",
+      "Bash(ls -la /home/collyn/projects/InvestRing/.apifox/ 2>/dev/null; echo \"---contents of any config files---\"; find /home/collyn/projects/InvestRing/.apifox -maxdepth 2 -type f 2>/dev/null)",
+      "Bash(python3:*)",
+      "Bash(which gh 2>/dev/null && gh --version || echo \"NOT_INSTALLED\")",
+      "Bash(grep -q 'HOME/.local/bin' ~/.bashrc 2>/dev/null && echo \"ALREADY_IN_BASHRC\" || echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc && echo \"ADDED_TO_BASHRC\")",
+      "Bash(gh issue:*)",
+      "Bash(gh issue view 14 --repo \"$\\(git remote get-url origin | sed 's/.*github.com[:/]\\\\\\(.*\\\\\\)\\\\.git/\\\\1/; s/.*github.com[:/]\\\\\\(.*\\\\\\)/\\\\1/'\\)\" --json title,body,labels,state,comments 2>/dev/null || echo \"--- trying without repo detection ---\" && gh issue view 14 --json title,body,labels,state,comments 2>&1)",
+      "Bash(git:*)"
+    ]
+  }
+}
