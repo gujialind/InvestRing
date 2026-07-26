@@ -9,7 +9,7 @@ import json
 import sys
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 
 class InvestRingEncoder(json.JSONEncoder):
@@ -44,7 +44,7 @@ def success(data: Any, meta: Optional[dict] = None) -> None:
     sys.exit(0)
 
 
-def error(code: str, message: str, details: Optional[dict] = None) -> None:
+def error(code: str, message: str, details: Optional[dict] = None) -> NoReturn:
     """
     错误输出并退出（exit code 1）
 
