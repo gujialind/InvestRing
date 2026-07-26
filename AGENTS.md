@@ -48,7 +48,7 @@
 - **固定生成顺序**：`portfolio_position` → `portfolio_value_snapshot` → `investor_holding`。
 - **生成前提**：`confirm_date <= snapshot_date` 的申赎/交易/事件均已确认，不存在会影响该日的 pending 记录（存在 `ex_date <= target_date` 的 pending 事件时快照检查返回 failed）。
 - **查询当前状态**：`WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ...)`。
-- **快照连续原则**：快照具有前后依赖性，快照生成必须严格按照交易日顺序生成，新生成的快照必须和已有快照连续（从已有快照的最新snapshot_date的下一个交易日开始生成），循环生成快照失败时停止生成，不允许跳过。
+- **快照连续原则**：快照具有前后依赖性，快照生成必须严格按照交易日顺序生成，新生成的快照必须和已有快照连续（从已有快照的最新snapshot_date的下一个交易日开始生成），循环生成快照失败时停止生成，不允许跳过。单日生成入口（`generate_daily_snapshots`）强制此校验：目标日仅允许为最新快照日（重建最新一日）或其下一个交易日，否则返回 `SNAPSHOT_NOT_CONTINUOUS`（重算路径逐日重建时内部 bypass）。
 
 ### 2.2 现金显式流水
 
@@ -422,6 +422,7 @@ Next.js `^15.1` + React `^19` + TypeScript `~5.6` + TailwindCSS `^4`（CSS-first
 | `NAV_NOT_AVAILABLE` | 申请日组合快照不存在 |
 | `PRICE_NAV_MISMATCH` | 场外基金确认时传入价格与 T 日净值不一致 |
 | `SNAPSHOT_DEPENDENCY` | 记录已被快照纳入，需先删快照 |
+| `SNAPSHOT_NOT_CONTINUOUS` | 单日生成快照的目标日非最新快照日或其下一个交易日（跳日/重建中间日） |
 | `MISSING_POSITION_SNAPSHOT` | 权益登记日持仓快照不存在 |
 | `POSITION_TABLE_PROTECTED` | 持仓表禁止手动 CRUD |
 | `PLATFORM_REQUIRED` / `PLATFORM_NOT_ALLOWED` / `PLATFORM_NOT_COVERED` | 事件平台约束 |

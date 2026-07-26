@@ -18,6 +18,7 @@ from app.models import (
     TradingCalendar, Investor, AssetClassification
 )
 from app.services.trading_utils import is_trading_day as _trading_utils_is_trading_day, get_next_trading_day
+from app.services.exceptions import BusinessError
 from app.services.subscription_service import unconfirm_single_subscription
 from app.models.manual_market_value import ManualMarketValue
 
@@ -28,6 +29,7 @@ def generate_daily_snapshots(
     db: Session,
     portfolio_code: str,
     target_date: date,
+    check_continuity: bool = True,
 ) -> Dict[str, Any]:
     """
     生成指定组合在指定日期的三张快照表
@@ -36,16 +38,20 @@ def generate_daily_snapshots(
         db: 数据库会话
         portfolio_code: 组合代码
         target_date: 目标日期
+        check_continuity: 是否强制快照连续性校验（重算路径逐日重建时须 bypass）
         
     Returns:
         生成结果
         
     Raises:
         ValueError: 当依赖数据不完整或校验失败时
+        BusinessError: SNAPSHOT_NOT_CONTINUOUS——目标日与已有快照不连续
     """
     # 1. 前置校验
     _validate_portfolio(db, portfolio_code)
     _validate_trading_day(db, target_date)
+    if check_continuity:
+        _validate_snapshot_continuity(db, portfolio_code, target_date)
     
     if failed_checks := [
         v for v in validate_snapshot_dependencies(db, portfolio_code, target_date)
@@ -208,8 +214,9 @@ def recalculate_snapshots(
                     )
 
                 # 先生成快照（作为自动确认的 NAV 依赖）
+                # 重算逐日重建，当前日之后的旧快照仍存在，须 bypass 连续性校验
                 snapshot_result = generate_daily_snapshots(
-                    db, portfolio.code, current_date,
+                    db, portfolio.code, current_date, check_continuity=False,
                 )
 
                 # 自动确认 apply_date<=current_date 的 pending 申购/赎回
@@ -301,6 +308,35 @@ def _validate_trading_day(db: Session, target_date: date):
 def _is_trading_day(db: Session, target_date: date) -> bool:
     """检查指定日期是否为交易日（委托给 trading_utils）"""
     return _trading_utils_is_trading_day(db, target_date)
+
+
+def _validate_snapshot_continuity(db: Session, portfolio_code: str, target_date: date):
+    """
+    校验快照连续性（AGENTS.md §2.1）：
+    - 无快照时（首次生成）不限制；
+    - target_date == 最新快照日：允许（重建最新一日，无空洞、无下游依赖）；
+    - target_date == 最新快照日的下一个交易日：允许（正常顺延）；
+    - 其他情况（跳过交易日、或重建其后仍有快照的中间日）拒绝。
+    """
+    latest = db.query(func.max(PortfolioValueSnapshot.snapshot_date)).filter(
+        PortfolioValueSnapshot.portfolio_code == portfolio_code
+    ).scalar()
+    if latest is None or target_date == latest:
+        return
+    expected = get_next_trading_day(db, latest, days=1)
+    if target_date == expected:
+        return
+    if target_date < latest:
+        message = (
+            f"{target_date} 早于最新快照日 {latest}，不允许单独重建中间快照，"
+            f"请使用重算接口（recalculate）"
+        )
+    else:
+        message = (
+            f"快照必须按交易日连续生成：最新快照日为 {latest}，"
+            f"下一个应生成 {expected}，不允许跳过生成 {target_date}"
+        )
+    raise BusinessError(code="SNAPSHOT_NOT_CONTINUOUS", message=message)
 
 
 def _cascade_unconfirm_subscriptions(
