@@ -16,6 +16,7 @@ from app.schemas.snapshot import (
     RecalculationResult,
     SnapshotStatusResponse,
 )
+from app.services.exceptions import BusinessError
 from app.services.snapshot_service import (
     generate_daily_snapshots,
     recalculate_snapshots,
@@ -43,6 +44,9 @@ def generate_snapshot(
             target_date=request.target_date,
         )
         return SnapshotGenerationResult(**result)
+    except BusinessError:
+        # 领域异常（如 SNAPSHOT_NOT_CONTINUOUS）交给全局 handler 映射
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
