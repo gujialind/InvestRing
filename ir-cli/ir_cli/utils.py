@@ -4,7 +4,8 @@
 - build_body / resolve_body: 请求体构造（过滤 None、支持 --json 直传）
 - validate_body: 本地日期/枚举预校验（不发请求即可拦截格式错误）
 - project_fields: 输出字段裁剪（降低 AI agent 上下文消耗）
-- run_list: 列表命令统一执行（--all 全量翻页 + --fields 裁剪）
+- run_list: 列表命令统一执行（--all 全量翻页 + --fields 裁剪 + 默认摘要字段/--full）
+- SUMMARY_FIELDS: 各资源列表默认输出的摘要字段集
 """
 import json
 from datetime import date
@@ -28,6 +29,16 @@ ENUMS = {
 
 # 日期类字段名（后缀匹配）
 DATE_FIELDS = ("_date",)
+
+# 列表默认输出的摘要字段集（对照后端 schemas）；--full 输出全字段，--fields 显式指定优先级最高
+SUMMARY_FIELDS = {
+    "trade": "id,portfolio_code,product_code,market,platform_code,trade_type,trade_date,confirm_date,status,amount,shares,price",
+    "subscription": "id,portfolio_code,investor_code,platform_code,sub_type,apply_date,confirm_date,status,amount,shares,unit_price",
+    "position": "id,portfolio_code,product_code,market,platform_code,shares,amount,market_value,unit_price,snapshot_date",
+    "log_login": "id,investor_code,action,status,ip_address,failure_reason,created_at",
+    "log_audit": "id,investor_code,action,resource_type,resource_id,resource_name,created_at",
+    "log_error": "id,error_type,error_code,error_message,request_path,created_at",
+}
 
 
 def validate_body(body: dict) -> None:
@@ -103,8 +114,14 @@ def run_list(
     page_size: int = 20,
     all_pages: bool = False,
     fields: Optional[str] = None,
+    default_fields: Optional[str] = None,
+    full: bool = False,
 ) -> None:
-    """执行列表查询并输出：--all 时自动翻完所有页，--fields 时裁剪输出字段"""
+    """执行列表查询并输出。
+
+    字段裁剪优先级：显式 --fields > --full（全字段）> default_fields（摘要字段）。
+    --all 时自动翻完所有页。
+    """
     params = dict(params or {})
     if all_pages:
         result = client.get_all(path, params=params)
@@ -112,4 +129,5 @@ def run_list(
         params["page"] = page
         params["page_size"] = page_size
         result = client.get(path, params=params)
-    success(data=project_fields(result["data"], fields), meta=result.get("meta"))
+    effective_fields = fields if fields else (None if full else default_fields)
+    success(data=project_fields(result["data"], effective_fields), meta=result.get("meta"))

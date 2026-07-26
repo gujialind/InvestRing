@@ -122,7 +122,10 @@ def confirm(id: int = typer.Argument(..., help="事件ID")):
     """确认事件"""
     client = APIClient.from_config()
     result = client.post(f"/api/share-change-events/{id}/confirm")
-    success(data=result["data"])
+    success(
+        data=result["data"],
+        hints=["确认后需生成 ex_date 日快照才生效: ir snapshot generate --portfolio-code <code> --target-date <ex_date>"],
+    )
 
 
 @app.command("cancel")

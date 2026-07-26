@@ -98,6 +98,17 @@ ir portfolio create --help   # 查看具体命令的参数帮助
 - **金额/份额**：使用浮点数输入，内部以 Decimal 运算，输出保留 4 位小数
 - **ID 参数**：数值型主键，直接作为位置参数传入
 
+### 3.5 AI Agent 友好特性（仅 ir-cli HTTP 版）
+
+以下特性仅在 `ir-cli`（HTTP 客户端版）提供，用于降低 AI agent 的学习成本与 token 消耗：
+
+- **`ir schema [命令组]`**：一次性输出全 CLI 机读 JSON 结构，含命令树/参数/枚举取值/错误码补救指引/端到端业务配方（workflows）/输出协议，替代逐个 `--help` 探索；传命令组名（如 `ir schema trade`）仅输出单组。
+- **`ir portfolio context <code>`**：操作前侦察聚合命令，一次返回组合详情/快照状态/实时可用现金/pending 申赎交易，替代 4-5 次分步查询。
+- **`hints` 字段**：错误响应按错误码自动附加 `error.hints`（下一步补救命令，如 `SNAPSHOT_DEPENDENCY` → 先 `ir snapshot delete-bulk`）；关键写操作成功后输出顶层 `hints`（如 create 返回 pending 时提示 confirm、confirm 后提示生成快照）。映射表见 `ir_cli/hints.py`。
+- **摘要字段默认输出**：`trade list` / `sub list` / `position list` / `log login|audit|error` 默认仅输出摘要字段（见 `ir_cli/utils.py::SUMMARY_FIELDS`），`--full` 输出全字段；优先级：显式 `--fields` > `--full` > 摘要预设。
+- **`--quiet`**：`trade` / `sub` 的 create/confirm/cancel/unconfirm 仅输出 `{id, status, confirm_date}`。
+- **plain help**：全部 `--help` 为无框线/无 ANSI 的纯文本输出，顶层 `ir --help` 含输出协议与退出码速览。
+
 ## 4. 命令详解
 
 ---

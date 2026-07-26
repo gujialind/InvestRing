@@ -2,8 +2,10 @@
 JSON 输出协议
 
 统一输出格式：
-- 成功: {"ok": true, "data": ..., "meta": ...}
-- 失败: {"ok": false, "error": {"code": ..., "message": ...}}
+- 成功: {"ok": true, "data": ..., "meta": ..., "hints": [...]}
+- 失败: {"ok": false, "error": {"code": ..., "message": ..., "hints": [...]}}
+- hints 为可选字段：错误侧按错误码自动附加补救指引（见 hints.py），
+  成功侧由命令在关键节点主动提供下一步建议。
 
 退出码分层：
 - 0: 成功
@@ -16,6 +18,8 @@ import sys
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, NoReturn, Optional
+
+from ir_cli.hints import ERROR_HINTS
 
 
 class InvestRingEncoder(json.JSONEncoder):
@@ -36,17 +40,20 @@ def _output(data: dict) -> None:
     print(json.dumps(data, cls=InvestRingEncoder, ensure_ascii=False))
 
 
-def success(data: Any, meta: Optional[dict] = None) -> None:
+def success(data: Any, meta: Optional[dict] = None, hints: Optional[list] = None) -> None:
     """
     成功输出并退出（exit code 0）
 
     Args:
         data: 主要数据（dict/list/model dict）
         meta: 分页元数据 {"total", "page", "page_size"}
+        hints: 下一步操作建议（供 AI agent 参考）
     """
     result = {"ok": True, "data": data}
     if meta:
         result["meta"] = meta
+    if hints:
+        result["hints"] = hints
     _output(result)
     sys.exit(0)
 
@@ -57,7 +64,13 @@ EXIT_AUTH = 2
 EXIT_CONNECTION = 3
 
 
-def error(code: str, message: str, details: Optional[dict] = None, exit_code: int = EXIT_BUSINESS) -> NoReturn:
+def error(
+    code: str,
+    message: str,
+    details: Optional[dict] = None,
+    exit_code: int = EXIT_BUSINESS,
+    hints: Optional[list] = None,
+) -> NoReturn:
     """
     错误输出并退出
 
@@ -66,6 +79,7 @@ def error(code: str, message: str, details: Optional[dict] = None, exit_code: in
         message: 人类可读错误描述
         details: 额外详情
         exit_code: 退出码（1=业务 2=认证 3=连接）
+        hints: 补救指引；缺省时按错误码自动查 ERROR_HINTS 附加
     """
     result: dict = {
         "ok": False,
@@ -73,5 +87,10 @@ def error(code: str, message: str, details: Optional[dict] = None, exit_code: in
     }
     if details:
         result["error"]["details"] = details
+    if hints is None:
+        auto_hint = ERROR_HINTS.get(code)
+        hints = [auto_hint] if auto_hint else None
+    if hints:
+        result["error"]["hints"] = hints
     _output(result)
     sys.exit(exit_code)

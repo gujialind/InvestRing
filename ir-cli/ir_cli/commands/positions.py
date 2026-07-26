@@ -3,7 +3,7 @@ import typer
 from typing import Optional
 from ir_cli.client import APIClient
 from ir_cli.output import success
-from ir_cli.utils import build_body, run_list
+from ir_cli.utils import SUMMARY_FIELDS, build_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -16,11 +16,16 @@ def list_positions(
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
     all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
     fields: Optional[str] = typer.Option(None, "--fields", help="仅输出指定字段(逗号分隔)"),
+    full: bool = typer.Option(False, "--full", help="输出全字段（默认仅摘要字段）"),
 ):
-    """获取持仓列表"""
+    """获取持仓列表（默认输出摘要字段，--full 全字段）"""
     client = APIClient.from_config()
     params = build_body(portfolio_code=portfolio_code, snapshot_date=snapshot_date)
-    run_list(client, "/api/positions", params, page=page, page_size=page_size, all_pages=all_pages, fields=fields)
+    run_list(
+        client, "/api/positions", params,
+        page=page, page_size=page_size, all_pages=all_pages,
+        fields=fields, default_fields=SUMMARY_FIELDS["position"], full=full,
+    )
 
 
 @app.command("get")
