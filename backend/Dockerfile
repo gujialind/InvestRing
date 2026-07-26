@@ -71,5 +71,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 
 # 启动命令：使用 uvicorn 运行 FastAPI 应用
 # --host 0.0.0.0 允许外部访问
-# --workers 2 适配 2 核轻量服务器（每个 worker 约 80-120MB）
+# --workers 2：多 worker 下 nav_sync 定时任务经 MySQL GET_LOCK 互斥，不会重复执行
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
