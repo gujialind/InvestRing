@@ -1,20 +1,21 @@
 """
 配置与 token 管理
 
-管理 ~/.ir/ 目录，读写 token.json 和 config 文件。
+管理 ~/.ir/ 目录，读写 token.json、config 和本地缓存。
 """
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 def get_ir_dir() -> Path:
-    """返回 ~/.ir/ 目录，不存在则创建"""
+    """返回 ~/.ir/ 目录（权限 0700），不存在则创建"""
     ir_dir = Path.home() / ".ir"
-    ir_dir.mkdir(parents=True, exist_ok=True)
+    ir_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     return ir_dir
 
 
@@ -38,13 +39,23 @@ def get_base_url() -> str:
 
 
 def save_token(data: dict) -> None:
-    """写入 token.json，设置权限 0o600"""
+    """写入 token.json，创建时即为 0600（无权限窗口）"""
     token_file = get_ir_dir() / "token.json"
-    token_file.write_text(json.dumps(data, ensure_ascii=False))
+    content = json.dumps(data, ensure_ascii=False)
+    # 先创建 0600 的临时文件再原子 rename，避免默认 umask 下短暂可读窗口
+    tmp_file = token_file.with_suffix(".json.tmp")
+    fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(token_file, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp_file, token_file)
     except OSError:
-        pass  # Windows 不支持 chmod
+        # 降级：直接写入后补 chmod（Windows 等不支持的平台）
+        token_file.write_text(content)
+        try:
+            os.chmod(token_file, 0o600)
+        except OSError:
+            pass
 
 
 def load_token() -> Optional[dict]:
@@ -106,3 +117,46 @@ def save_config(key: str, value: str) -> None:
     if not found:
         lines.append(f"{key}={value}")
     config_file.write_text("\n".join(lines) + "\n")
+
+
+# ---------- 本地缓存（目前用于交易日历） ----------
+
+def _cache_dir() -> Path:
+    cache_dir = get_ir_dir() / "cache"
+    cache_dir.mkdir(mode=0o700, exist_ok=True)
+    return cache_dir
+
+
+def load_cache(name: str, ttl_seconds: int) -> Optional[Any]:
+    """读取本地缓存，超过 TTL 或损坏时返回 None"""
+    cache_file = _cache_dir() / f"{name}.json"
+    if not cache_file.exists():
+        return None
+    try:
+        wrapper = json.loads(cache_file.read_text())
+        if time.time() - wrapper["cached_at"] > ttl_seconds:
+            return None
+        return wrapper["data"]
+    except (json.JSONDecodeError, KeyError, TypeError, OSError):
+        return None
+
+
+def save_cache(name: str, data: Any) -> None:
+    """写入本地缓存（失败静默忽略，缓存不影响主流程）"""
+    try:
+        cache_file = _cache_dir() / f"{name}.json"
+        cache_file.write_text(json.dumps({"cached_at": time.time(), "data": data}, ensure_ascii=False))
+    except OSError:
+        pass
+
+
+def clear_cache(prefix: str = "") -> int:
+    """清除缓存文件（可按前缀），返回删除数量"""
+    count = 0
+    for f in _cache_dir().glob(f"{prefix}*.json"):
+        try:
+            f.unlink()
+            count += 1
+        except OSError:
+            pass
+    return count

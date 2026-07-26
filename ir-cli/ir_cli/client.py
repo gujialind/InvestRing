@@ -2,14 +2,31 @@
 HTTP 客户端封装
 
 所有命令通过此模块与后端通信，统一处理认证、错误和响应格式。
+
+环境变量：
+- IR_TOKEN: 直接指定 token（优先于 ~/.ir/token.json，适合 CI/一次性调用）
+- IR_CONNECT_TIMEOUT / IR_HTTP_TIMEOUT: 连接/读取超时
+- IR_RETRY: GET 请求失败重试次数（默认 2，仅幂等 GET 重试连接/超时/5xx）
+- IR_DEBUG: 设为 1 时向 stderr 输出请求耗时与状态码
 """
 import os
+import sys
+import time
 from typing import Any, Optional
 
 import httpx
 
 from ir_cli import config
 from ir_cli.output import EXIT_AUTH, EXIT_CONNECTION, error, success
+
+
+def _debug_enabled() -> bool:
+    return os.environ.get("IR_DEBUG", "") not in ("", "0", "false")
+
+
+def _debug(msg: str) -> None:
+    if _debug_enabled():
+        print(f"[debug] {msg}", file=sys.stderr)
 
 
 class APIClient:
@@ -35,10 +52,12 @@ class APIClient:
 
     @classmethod
     def from_config(cls, require_auth: bool = True) -> "APIClient":
-        """从配置文件读取 base_url 和 token"""
+        """读取 base_url 和 token（IR_TOKEN 环境变量优先于 token 文件）"""
         base_url = config.get_base_url()
-        token_data = config.load_token()
-        token = token_data["token"] if token_data else None
+        token = os.environ.get("IR_TOKEN")
+        if not token:
+            token_data = config.load_token()
+            token = token_data["token"] if token_data else None
         if require_auth and not token:
             error("AUTH_REQUIRED", "未登录或 token 已过期，请执行: ir auth login", exit_code=EXIT_AUTH)
         return cls(base_url, token)
@@ -117,45 +136,60 @@ class APIClient:
             pass
         return default
 
-    def get(self, path: str, params: Optional[dict] = None) -> dict:
-        """GET 请求"""
-        try:
-            resp = self._client.get(path, params=params)
-        except httpx.ConnectError:
-            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
-        except httpx.TimeoutException:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        json_data: Optional[dict] = None,
+        params: Optional[dict] = None,
+        retryable: bool = False,
+    ) -> dict:
+        """统一请求入口：幂等请求（GET）在连接失败/超时/5xx 时按 IR_RETRY 重试"""
+        max_retries = 0
+        if retryable:
+            try:
+                max_retries = max(0, int(os.environ.get("IR_RETRY", "2")))
+            except ValueError:
+                max_retries = 2
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                delay = 0.5 * (2 ** (attempt - 1))
+                _debug(f"retry {attempt}/{max_retries} after {delay:.1f}s: {method} {path}")
+                time.sleep(delay)
+            start = time.monotonic()
+            try:
+                resp = self._client.request(method, path, json=json_data, params=params)
+            except (httpx.ConnectError, httpx.TimeoutException) as e:
+                last_exc = e
+                _debug(f"{method} {path} -> {type(e).__name__} ({time.monotonic() - start:.2f}s)")
+                continue
+            _debug(f"{method} {path} -> {resp.status_code} ({time.monotonic() - start:.2f}s)")
+            # 5xx 视为服务端瞬时故障，幂等请求可重试
+            if retryable and resp.status_code >= 500 and attempt < max_retries:
+                continue
+            return self._handle_response(resp)
+
+        if isinstance(last_exc, httpx.TimeoutException):
             error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
-        return self._handle_response(resp)
+        error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
+
+    def get(self, path: str, params: Optional[dict] = None) -> dict:
+        """GET 请求（幂等，自动重试）"""
+        return self._request("GET", path, params=params, retryable=True)
 
     def post(self, path: str, json_data: Optional[dict] = None, params: Optional[dict] = None) -> dict:
-        """POST 请求"""
-        try:
-            resp = self._client.post(path, json=json_data, params=params)
-        except httpx.ConnectError:
-            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
-        except httpx.TimeoutException:
-            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
-        return self._handle_response(resp)
+        """POST 请求（非幂等，不重试）"""
+        return self._request("POST", path, json_data=json_data, params=params)
 
     def put(self, path: str, json_data: Optional[dict] = None) -> dict:
-        """PUT 请求"""
-        try:
-            resp = self._client.put(path, json=json_data)
-        except httpx.ConnectError:
-            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
-        except httpx.TimeoutException:
-            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
-        return self._handle_response(resp)
+        """PUT 请求（非幂等，不重试）"""
+        return self._request("PUT", path, json_data=json_data)
 
     def delete(self, path: str, params: Optional[dict] = None) -> dict:
-        """DELETE 请求"""
-        try:
-            resp = self._client.delete(path, params=params)
-        except httpx.ConnectError:
-            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
-        except httpx.TimeoutException:
-            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
-        return self._handle_response(resp)
+        """DELETE 请求（非幂等，不重试）"""
+        return self._request("DELETE", path, params=params)
 
     def get_all(self, path: str, params: Optional[dict] = None) -> dict:
         """分页获取所有记录"""
