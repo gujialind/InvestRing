@@ -2,6 +2,11 @@
 定时任务执行体
 
 从 routers/tasks.py 提取的任务执行逻辑，供 CLI 和 router 共用。
+
+事务边界说明（AGENTS.md §4.1 的编排层例外）：
+本模块是长批处理任务的编排层，多日快照回补/逐产品远程同步需保留部分成功，
+故保留有意的 checkpoint 提交（逐日/逐产品 commit）；单次性原子操作
+（如 cleanup_old_logs）则不 commit，交调用方。
 """
 import logging
 from datetime import datetime, timedelta
@@ -28,6 +33,8 @@ def cleanup_old_logs(db: Session) -> dict:
     - 任务执行日志：保留 90 天
     - 净值同步明细：保留 90 天
     - 系统错误日志：保留 30 天
+
+    不 commit（AGENTS.md §4.1），事务边界交调用方（router tasks / cli_context）。
     """
     from app.models.login_log import LoginLog
     from app.models.audit_log import AuditLog
@@ -61,7 +68,6 @@ def cleanup_old_logs(db: Session) -> dict:
         SystemErrorLog.created_at < cutoff_error
     ).delete()
 
-    db.commit()
     return deleted
 
 
@@ -139,8 +145,9 @@ def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
                 status="failed",
                 error_message=str(e)[:500],
             ))
-
-    db.commit()
+        # 逐产品 checkpoint commit（编排层语义）：sync_product_prices 已不自行 commit，
+        # 此处保留增量持久化：中途崩溃不丢已同步产品的价格与同步明细
+        db.commit()
 
     dividends_detected = _detect_dividends(db, products)
 
@@ -159,7 +166,10 @@ def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
 def _generate_snapshots_for_date(db: Session, target_date) -> int:
     """为所有活跃组合逐日补齐快照：从每组合最新快照日之后首个交易日起，
     逐交易日 generate + auto_confirm，直到 target_date（含）。
-    单组合单日失败即停止该组合回补（#35 fail-fast）。"""
+    单组合单日失败即停止该组合回补（#35 fail-fast）。
+
+    逐日 commit/rollback 是编排层有意的 checkpoint 语义（与 recalculate 的
+    整体原子语义相反）：多日回补中已完成的日子须保留，失败日仅回滚当日。"""
     from app.services.snapshot_service import generate_daily_snapshots, auto_confirm_after_snapshot
     from app.services.trading_utils import is_trading_day, get_next_trading_day, get_prev_trading_day
     from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
@@ -194,7 +204,10 @@ def _generate_snapshots_for_date(db: Session, target_date) -> int:
 
 
 def _detect_dividends(db: Session, products: list) -> int:
-    """分红检测：从 tushare fund_div 获取分红数据，自动创建 pending reinvest_dividend 事件。"""
+    """分红检测：从 tushare fund_div 获取分红数据，自动创建 pending reinvest_dividend 事件。
+
+    逐产品 commit/rollback 是编排层有意的 checkpoint 语义：逐只远程 API 调用，
+    部分成功须保留，单产品失败仅回滚该产品。"""
     from app.services.tushare_client import get_fund_div, TushareNotConfiguredError, TushareAPIError
     from app.models.share_change_event import ShareChangeEvent
     from app.models.portfolio_position import PortfolioPosition

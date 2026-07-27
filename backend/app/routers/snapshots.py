@@ -43,16 +43,21 @@ def generate_snapshot(
             portfolio_code=request.portfolio_code,
             target_date=request.target_date,
         )
+        # service 不 commit（AGENTS.md §4.1），事务边界在 router
+        db.commit()
         return SnapshotGenerationResult(**result)
     except BusinessError:
         # 领域异常（如 SNAPSHOT_NOT_CONTINUOUS）交给全局 handler 映射
+        db.rollback()
         raise
     except ValueError as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": "VALIDATION_FAILED", "message": str(e)},
         )
     except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "SNAPSHOT_GENERATION_FAILED", "message": str(e)},
@@ -68,6 +73,9 @@ def recalculate(
     """
     重算指定时间区间的快照
     
+    单一事务（issue #58）：无 errors 时统一 commit；任一日失败则整体 rollback，
+    被删快照与级联回退状态完整复原，对外「要么完整成功，要么无变化」。
+    
     权限：仅admin
     """
     try:
@@ -77,13 +85,20 @@ def recalculate(
             start_date=request.start_date,
             end_date=request.end_date,
         )
+        # errors 非空（中途 break）时回滚半截中间态，仍返回 200 + errors 保持响应契约
+        if any(r["errors"] for r in result["results"]):
+            db.rollback()
+        else:
+            db.commit()
         return RecalculationResult(**result)
     except ValueError as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": "VALIDATION_FAILED", "message": str(e)},
         )
     except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "RECALCULATION_FAILED", "message": str(e)},

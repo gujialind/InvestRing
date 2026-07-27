@@ -146,17 +146,16 @@ def sync_product_prices(
         product.data_source_status = "success"
         product.last_sync_at = datetime.utcnow()
         product.sync_error = None
-        db.commit()
+        db.flush()
         return {"success": True, "message": "无新数据", "synced_count": 0, "source": data_source}
 
     normalized = _normalize_raw(raw_data, market)
     synced_count = _bulk_upsert_prices(db, product_code, market, normalized, data_source)
-    db.commit()
 
     product.data_source_status = "success"
     product.last_sync_at = datetime.utcnow()
     product.sync_error = None
-    db.commit()
+    db.flush()
 
     return {"success": True, "message": f"同步 {synced_count} 条", "synced_count": synced_count, "source": data_source}
 
@@ -173,17 +172,19 @@ def sync_price_data(
 
 
 def _mark_failed(db: Session, product: Product, msg: str):
+    # 不 commit（AGENTS.md §4.1）：sync_product_prices 捕获异常后返回 success=False
+    # 而非上抛，失败标记经调用方正常路径 commit 持久化
     product.data_source_status = "failed"
     product.sync_error = msg[:1000] if msg else msg
     product.last_sync_at = datetime.utcnow()
-    db.commit()
+    db.flush()
 
 
 def _mark_skipped(db: Session, product: Product, reason: str):
     product.data_source_status = "skipped"
     product.sync_error = reason
     product.last_sync_at = datetime.utcnow()
-    db.commit()
+    db.flush()
 
 
 def _normalize_raw(raw_data: List[dict], market: str) -> List[dict]:
@@ -269,6 +270,12 @@ def sync_portfolio_nav(
 
     根据持仓和最新价格重新计算组合净值
 
+    Warning:
+        遗留函数：直接 UPDATE 已有 portfolio_value_snapshot，违反快照只增不改
+        不变量（AGENTS.md §2.1；ORM 兜底 listener 仅挂在 PortfolioPosition，
+        此处拦不住），且绕过快照连续性与三表生成顺序。前端未使用，
+        仅 ir-cli 暴露，是否废弃待单独 issue 决策。不 commit，事务交调用方。
+
     Args:
         db: 数据库会话
         portfolio_code: 组合代码
@@ -343,7 +350,7 @@ def sync_portfolio_nav(
         )
         db.add(new_snapshot)
 
-    db.commit()
+    db.flush()
 
     return {
         "success": True,
