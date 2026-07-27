@@ -149,7 +149,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 - **删除快照**（`_delete_existing_snapshots`）自动级联回退：`confirm_date==D` 的申购退回 pending 并删除关联 CASH trade；`ex_date==D` 或 `entitlement_date==D` 的 confirmed 事件退回 pending；基金级父事件的子记录（`parent_event_id`）被物理删除。批量删除从最新日倒序、逐日 commit。
 - 遵循**快照连续原则**，不能仅删除中间的快照，删除某日的快照其后的快照也一并删除，
-- **重算**（`recalculate_snapshots`）逐交易日重建，`auto_confirm_after_snapshot` 每日后自动重确认 `apply_date==D` 的申购、`confirm_date==D` 的 trade、`ex_date==D` 的事件；单笔失败不影响整批。
+- **重算**（`recalculate_snapshots`）为**单一事务**：删除任何快照前先对整区间做净值完整性预校验，失败直接拒绝、不删任何快照；随后逐交易日「删旧快照 → 级联回退 → 重建 → auto_confirm」全程不 commit，任一日失败记录 error 并停止，由调用方按 errors 统一 rollback/commit——对外表现为「要么完整成功，要么无变化」。`auto_confirm_after_snapshot` 每日后自动重确认 `apply_date==D` 的申购、`confirm_date==D` 的 trade、`ex_date==D` 的事件，单笔失败仅记录为 `auto_confirm_failed`、不阻断当日流程。
 
 ---
 
@@ -167,7 +167,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 | `app/config.py` / `database.py` / `dependencies.py` | 配置、DB 会话、鉴权依赖 |
 
 **分层约定（router / CLI 均为 service 薄适配器）**：业务逻辑单一实现于 service，REST 与两个 CLI 共用，杜绝并行实现漂移。
-- **事务边界交调用方**：service 不 `commit`/`rollback`（可 `flush`）；REST 在 router `db.commit()`，`backend/cli` 由 `cli_context()` 统一 commit。
+- **事务边界属于 session 拥有者**：service 收到的是调用方注入的 session，不 `commit`/`rollback`（可 `flush`）；REST 在 router `db.commit()`（部分失败语义的端点如 recalculate 按 errors 决定 rollback/commit），`backend/cli` 由 `cli_context()` 统一 commit。**合理例外**（自己就是 session 拥有者/调用方）：自持 `SessionLocal` 的后台执行体（sync job 线程、scheduler 触发体）与 `task_runner` 编排层的 checkpoint 提交（逐日快照回补、逐产品远程同步，需保留部分成功）可自行 commit。
 - **领域异常统一**：service 抛 `app/services/exceptions.py::BusinessError`（携 `code`/`message`/`http_status`/`details`）；`main.py` 全局 handler 映射为 `JSONResponse{"detail": {"error": code, "message": message}}`（保持前端契约；默认 422、重复创建类 400、NOT_FOUND 404）；`cli_context` 捕获后转 `{"error": {"code", "message"}}`。service 内**禁止** import/抛 `HTTPException`。
 
 ### 4.2 路由与 API 前缀总表
