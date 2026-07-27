@@ -285,7 +285,7 @@ Nginx --> Spec
     - 示例路径：[重新激活组合示例:134-156](file://backend/app/routers/portfolios.py#L134-L156)
   - GET /api/portfolios/{code}/nav-history
     - 查询参数：start_date、end_date
-    - 响应体：包含日期、单位净值、总值、总份额的历史数组
+    - 响应体：单层数组，元素字段 snapshot_date（YYYY-MM-DD）、unit_price、total_value、total_shares
     - 示例路径：[净值历史示例:159-191](file://backend/app/routers/portfolios.py#L159-L191)
   - GET /api/portfolios/{code}/returns
     - 响应体：累计收益、年化收益、初始/当前净值、持有天数

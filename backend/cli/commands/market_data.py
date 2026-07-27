@@ -17,7 +17,7 @@ def get_price(
     market: str = typer.Argument(...),
     start_date: Optional[str] = typer.Option(None, "--start-date", help="YYYY-MM-DD"),
     end_date: Optional[str] = typer.Option(None, "--end-date", help="YYYY-MM-DD"),
-    limit: int = typer.Option(50, "--limit"),
+    limit: int = typer.Option(50, "--limit", help="返回条数（默认50，按日期降序）"),
 ):
     """查询产品价格数据"""
     with cli_context() as db:
@@ -29,6 +29,24 @@ def get_price(
             db, product_code, market, sd, ed, limit
         )
         success(data=[serialize_model(r) for r in records])
+
+
+@app.command("nav-coverage")
+def nav_coverage(
+    product_code: str = typer.Argument(...),
+    market: str = typer.Argument(...),
+    start_date: str = typer.Option(..., "--start-date", help="YYYY-MM-DD"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="YYYY-MM-DD，默认今天"),
+):
+    """校验区间内净值同步覆盖情况"""
+    with cli_context() as db:
+        from datetime import date
+        from app.services.market_data_service import get_nav_coverage
+
+        sd = parse_date(start_date)
+        ed = parse_date(end_date) if end_date else date.today()
+        result = get_nav_coverage(db, product_code, market, sd, ed)
+        success(data=result)
 
 
 @app.command("sync")

@@ -183,7 +183,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 | `platforms` | `/api/platforms` | 5 | user/admin | CRUD |
 | `trading_calendar` | `/api/trading-calendar` | 2 | user/admin | GET、POST /sync |
 | `data_sources` | `/api/system/data-sources` | 2 | user/admin | GET、PUT /{name} |
-| `market_data` | `/api/market-data` | 3 | 公开 | price-data、sync-price-data、sync-history |
+| `market_data` | `/api/market-data` | 4 | 公开 | price-data、nav-coverage、sync-price-data、sync-history |
 | `subscriptions` | `/api/subscriptions` | 8 | user/admin | CRUD + confirm/cancel/unconfirm |
 | `trades` | `/api/trades` | 8 | user/admin | CRUD + confirm/cancel/unconfirm |
 | `share_change_events` | `/api/share-change-events` | 8 | user/admin | CRUD + confirm/cancel/unconfirm |
@@ -209,7 +209,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 - **`product_service.py`**：`calculate_confirm_days`（单一实现：CN_EXCHANGE=0 / CN_OTC 非 QDII=1 / CN_OTC QDII=2 / 其他=1）、`create_product` / `update_product`。
 - **`investor_service.py`**：`create_investor`（`role` 默认 viewer，CLI 可显式传入以建管理员）、`update_investor`（`password`→`password_hash`）、`delete_investor`（`INVESTOR_HAS_SHARES` 保护）。
 - **`exceptions.py`**：`BusinessError` / `NotFoundError`——领域异常基类（见 §4.1），REST 全局 handler 与 `cli_context` 共同消费。
-- **`market_data_service.py`**：价格/净值查询与同步、`submit_price_sync_job`、`recover_orphan_jobs`。
+- **`market_data_service.py`**：价格/净值查询与同步、`get_nav_coverage`（区间净值覆盖校验：trading_calendar 与 price_record 集合差）、`submit_price_sync_job`、`recover_orphan_jobs`。
 - **`trading_calendar_service.py`** / **`trading_utils.py`**：交易日判断、下一/前一交易日、最新快照日查询。
 - **`task_runner.py`** / **`scheduler_service.py`**：`run_nav_sync` / `run_calendar_sync` / `run_log_cleanup`；APScheduler 调度。
 

@@ -272,7 +272,17 @@ ir portfolio reactivate <CODE>
 ir portfolio nav-history <CODE> [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD]
 ```
 
-返回数据包含：`date`、`unit_price`（单位净值）、`total_value`（总资产）、`total_shares`（总份额）。
+返回单层数组，每行包含：`snapshot_date`、`unit_price`（单位净值）、`total_value`（总资产）、`total_shares`（总份额），按日期升序。
+
+```json
+{
+  "ok": true,
+  "data": [
+    {"snapshot_date": "2025-01-06", "unit_price": 1.0, "total_value": 100000.0, "total_shares": 100000.0},
+    {"snapshot_date": "2025-01-07", "unit_price": 1.01, "total_value": 101000.0, "total_shares": 100000.0}
+  ]
+}
+```
 
 #### `ir portfolio returns`
 
@@ -637,7 +647,40 @@ ir market price <PRODUCT_CODE> <MARKET> [--start-date YYYY-MM-DD] [--end-date YY
 |------|:------:|------|
 | `--start-date` | — | 起始日期 |
 | `--end-date` | — | 截止日期 |
-| `--limit` | 50 | 最大返回条数 |
+| `--limit` | 50 | 最大返回条数（按日期降序） |
+
+#### `ir market nav-coverage`
+
+校验区间内净值同步覆盖情况（以交易日历为基准，列出缺失日期）。
+
+```bash
+ir market nav-coverage <PRODUCT_CODE> <MARKET> --start-date YYYY-MM-DD [--end-date YYYY-MM-DD]
+```
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `--start-date` | 是 | 开始日期 |
+| `--end-date` | 否 | 结束日期，默认今天 |
+
+返回示例：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "product_code": "000300.OF",
+    "market": "CN_OTC",
+    "start_date": "2025-01-06",
+    "end_date": "2025-01-10",
+    "total_trading_days": 5,
+    "synced_days": 4,
+    "coverage": 0.8,
+    "missing_dates": ["2025-01-08"]
+  }
+}
+```
+
+> `coverage` = `synced_days / total_trading_days`；区间内无交易日时为 `null`。
 
 #### `ir market sync`
 

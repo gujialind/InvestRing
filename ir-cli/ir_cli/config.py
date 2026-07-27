@@ -30,7 +30,7 @@ def get_base_url() -> str:
 
     config_file = get_ir_dir() / "config"
     if config_file.exists():
-        for line in config_file.read_text().splitlines():
+        for line in config_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line.startswith("base_url="):
                 return line.split("=", 1)[1].strip().rstrip("/")
@@ -46,12 +46,12 @@ def save_token(data: dict) -> None:
     tmp_file = token_file.with_suffix(".json.tmp")
     fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         os.replace(tmp_file, token_file)
     except OSError:
         # 降级：直接写入后补 chmod（Windows 等不支持的平台）
-        token_file.write_text(content)
+        token_file.write_text(content, encoding="utf-8")
         try:
             os.chmod(token_file, 0o600)
         except OSError:
@@ -68,8 +68,8 @@ def load_token() -> Optional[dict]:
         return None
 
     try:
-        data = json.loads(token_file.read_text())
-    except (json.JSONDecodeError, OSError):
+        data = json.loads(token_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         return None
 
     expires_at = data.get("expires_at")
@@ -107,7 +107,7 @@ def load_config() -> dict:
     config_file = get_ir_dir() / "config"
     result = {}
     if config_file.exists():
-        for line in config_file.read_text().splitlines():
+        for line in config_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
@@ -122,7 +122,7 @@ def save_config(key: str, value: str) -> None:
     lines = []
     found = False
     if config_file.exists():
-        for line in config_file.read_text().splitlines():
+        for line in config_file.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith(f"{key}="):
                 lines.append(f"{key}={value}")
                 found = True
@@ -130,7 +130,7 @@ def save_config(key: str, value: str) -> None:
                 lines.append(line)
     if not found:
         lines.append(f"{key}={value}")
-    config_file.write_text("\n".join(lines) + "\n")
+    config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 # ---------- 本地缓存（目前用于交易日历） ----------
@@ -147,11 +147,11 @@ def load_cache(name: str, ttl_seconds: int) -> Optional[Any]:
     if not cache_file.exists():
         return None
     try:
-        wrapper = json.loads(cache_file.read_text())
+        wrapper = json.loads(cache_file.read_text(encoding="utf-8"))
         if time.time() - wrapper["cached_at"] > ttl_seconds:
             return None
         return wrapper["data"]
-    except (json.JSONDecodeError, KeyError, TypeError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError, OSError):
         return None
 
 
@@ -159,7 +159,7 @@ def save_cache(name: str, data: Any) -> None:
     """写入本地缓存（失败静默忽略，缓存不影响主流程）"""
     try:
         cache_file = _cache_dir() / f"{name}.json"
-        cache_file.write_text(json.dumps({"cached_at": time.time(), "data": data}, ensure_ascii=False))
+        cache_file.write_text(json.dumps({"cached_at": time.time(), "data": data}, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
 

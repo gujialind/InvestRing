@@ -1793,18 +1793,18 @@
               "anyOf": [
                 {
                   "type": "integer",
-                  "maximum": 365,
+                  "maximum": 1000,
                   "minimum": 1
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "限制返回数量",
+              "description": "限制返回数量（默认30，最大1000，按日期降序）",
               "default": 30,
               "title": "Limit"
             },
-            "description": "限制返回数量"
+            "description": "限制返回数量（默认30，最大1000，按日期降序）"
           }
         ],
         "responses": {
@@ -1819,6 +1819,87 @@
                   },
                   "title": "Response Get Price Data Api Market Data Products  Code   Market  Price Data Get"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market-data/products/{code}/{market}/nav-coverage": {
+      "get": {
+        "tags": [
+          "市场数据"
+        ],
+        "summary": "Get Nav Coverage Endpoint",
+        "description": "校验区间内净值同步覆盖情况",
+        "operationId": "get_nav_coverage_endpoint_api_market_data_products__code___market__nav_coverage_get",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          },
+          {
+            "name": "market",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Market"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "开始日期",
+              "title": "Start Date"
+            },
+            "description": "开始日期"
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束日期（默认今天）",
+              "title": "End Date"
+            },
+            "description": "结束日期（默认今天）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
