@@ -261,6 +261,34 @@ class TestValidateSnapshotDependencies:
             if r["check_type"] in ("trading_day", "pending_transactions"):
                 assert r["status"] == "passed"
 
+    def test_static_only_is_exact_static_subset(self, test_db):
+        """防漂移（issue #58 预校验单一口径）：static_only=True 的检查项
+        必须恰为全量检查的静态子集，动态项恰为 auto_confirm 可消化的两项。
+
+        新增检查项时本测试会失败，强制开发者在 validate_snapshot_dependencies
+        中显式归类并同步更新此处断言。
+        """
+        create_portfolio(test_db, code="DEP_ST", status="active")
+        ensure_trading_day(test_db, date(2025, 4, 7), is_open=True)
+
+        full_types = {
+            r["check_type"]
+            for r in validate_snapshot_dependencies(test_db, "DEP_ST", date(2025, 4, 7))
+        }
+        static_types = {
+            r["check_type"]
+            for r in validate_snapshot_dependencies(
+                test_db, "DEP_ST", date(2025, 4, 7), static_only=True
+            )
+        }
+
+        assert static_types == {"trading_day", "price_data"}
+        assert static_types < full_types
+        # 动态项 = 重算循环内 auto_confirm 会逐日消化的 pending 申赎/事件
+        assert full_types - static_types == {
+            "pending_transactions", "share_change_events"
+        }
+
 
 class TestGeneratePortfolioValueSnapshot:
     """组合市值快照 total_shares 增量计算测试（issue #12 修复）

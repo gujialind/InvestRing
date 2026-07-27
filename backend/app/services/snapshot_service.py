@@ -189,17 +189,22 @@ def recalculate_snapshots(
             result["end_date_extended_to"] = effective_end_date.isoformat()
 
         # 整区间预校验（issue #58 增强）：在删除任何快照前一次性校验全部交易日的
-        # 净值完整性，NAV 缺失在任何写操作前被拦住，降低回滚压力。
-        # 仅做静态检查（price_data）：pending 申赎/事件会被循环内 auto_confirm
-        # 逐日消化，预校验若包含这两项会误杀合法重算；循环内逐日全量校验保留。
+        # 静态依赖，NAV 缺失在任何写操作前被拦住，降低回滚压力。
+        # 静态/动态检查项的归类统一由 validate_snapshot_dependencies 的
+        # static_only 参数定义（单一口径）；循环内逐日全量校验保留。
         precheck_failures = []
         precheck_date = start_date
         while precheck_date <= effective_end_date:
             if _is_trading_day(db, precheck_date):
-                price_check = _check_price_data_completeness(db, portfolio.code, precheck_date)
-                if price_check["status"] == "failed":
+                static_failed = [
+                    v for v in validate_snapshot_dependencies(
+                        db, portfolio.code, precheck_date, static_only=True
+                    )
+                    if v["status"] == "failed"
+                ]
+                for v in static_failed:
                     precheck_failures.append(
-                        f"{precheck_date.isoformat()}: {price_check['message']}"
+                        f"{precheck_date.isoformat()}: {v['message']}"
                     )
             precheck_date += timedelta(days=1)
         if precheck_failures:
@@ -281,7 +286,8 @@ def recalculate_snapshots(
 def validate_snapshot_dependencies(
     db: Session,
     portfolio_code: str,
-    target_date: date
+    target_date: date,
+    static_only: bool = False
 ) -> List[Dict[str, Any]]:
     """
     校验生成快照所需的依赖数据
@@ -290,23 +296,30 @@ def validate_snapshot_dependencies(
         db: 数据库会话
         portfolio_code: 组合代码
         target_date: 目标日期
+        static_only: 仅执行静态检查项（交易日、净值完整性），用于 recalculate
+            的整区间预校验（issue #58）。pending 申赎/事件会被重算循环内的
+            auto_confirm 逐日消化，属于重算的正常输入，纳入预校验会误杀
+            合法重算，故归为动态项排除。检查项的静态/动态归类以本函数为
+            单一事实来源，新增检查项时须在此处显式归类。
         
     Returns:
         校验结果列表
     """
     checks = []
     
-    # 1. 检查交易日
+    # 1. 检查交易日（静态）
     checks.append(_check_trading_day(db, target_date))
     
-    # 2. 检查pending交易
-    checks.append(_check_pending_transactions(db, portfolio_code, target_date))
+    # 2. 检查pending交易（动态：会被重算循环内 auto_confirm 消化）
+    if not static_only:
+        checks.append(_check_pending_transactions(db, portfolio_code, target_date))
     
-    # 3. 检查净值数据完整性
+    # 3. 检查净值数据完整性（静态）
     checks.append(_check_price_data_completeness(db, portfolio_code, target_date))
     
-    # 4. 检查分红事件状态
-    checks.append(_check_share_change_events(db, portfolio_code, target_date))
+    # 4. 检查分红事件状态（动态：会被重算循环内 auto_confirm 消化）
+    if not static_only:
+        checks.append(_check_share_change_events(db, portfolio_code, target_date))
     
     return checks
 
