@@ -1,0 +1,186 @@
+# ============================================================================
+# 单元测试：service 层不 commit（issue #58，AGENTS.md §4.1）
+# ============================================================================
+# 断言以下 service 函数全程不调用 db.commit()（事务边界交调用方）：
+# - snapshot_service.generate_daily_snapshots / recalculate_snapshots
+# - trading_calendar_service.sync_trading_calendar
+# - market_data_service.sync_product_prices（含 _mark_failed 失败路径）
+# - task_runner.cleanup_old_logs
+# 方式：monkeypatch 会话的 commit 为直接抛 AssertionError，
+# 函数若能正常完成即证明无 commit 调用（flush 允许）。
+# ============================================================================
+
+import pytest
+from datetime import date
+from unittest.mock import patch
+
+from app.models import PortfolioValueSnapshot, PriceRecord, TradingCalendar
+from tests.factories import (
+    create_portfolio,
+    create_position_snapshot,
+    create_value_snapshot,
+    create_product,
+)
+
+
+D0 = date(2025, 6, 6)       # 周五（conftest 日历工作日为交易日）
+NEXT_DAY = date(2025, 6, 9)  # 下一交易日（周一）
+
+
+def _forbid_commit(monkeypatch, db):
+    """将会话 commit 替换为断言失败，捕捉 service 层的违规提交"""
+    def _fail(*args, **kwargs):
+        raise AssertionError("service 层不得调用 db.commit()（AGENTS.md §4.1）")
+    monkeypatch.setattr(db, "commit", _fail)
+
+
+def _setup_cash_snapshot(db, portfolio_code: str, snapshot_date: date, amount: float = 10000.0):
+    """制造指定日的持仓+市值快照（仅 CASH，无需行情）"""
+    create_position_snapshot(
+        db, portfolio_code, "CASH", "",
+        snapshot_date=snapshot_date,
+        amount=amount, unit_price=None, cost_price=None,
+        market_value=amount, platform_code="MYCF", asset_type="cash",
+    )
+    create_value_snapshot(
+        db, portfolio_code, snapshot_date,
+        total_value=amount, total_shares=amount, unit_price=1.0,
+    )
+
+
+class TestSnapshotServiceNoCommit:
+    """快照 service 全程无 commit（issue #58 核心 + 遗漏缺口）"""
+
+    def test_generate_daily_snapshots_no_commit(self, test_db, monkeypatch):
+        """generate_daily_snapshots 正常生成路径不 commit"""
+        from app.services.snapshot_service import generate_daily_snapshots
+
+        create_portfolio(test_db, code="NC_GEN", status="active")
+        _setup_cash_snapshot(test_db, "NC_GEN", D0)
+
+        _forbid_commit(monkeypatch, test_db)
+        result = generate_daily_snapshots(test_db, "NC_GEN", NEXT_DAY)
+
+        assert result["success"] is True
+        # flush 后同事务内可见
+        assert test_db.query(PortfolioValueSnapshot).filter(
+            PortfolioValueSnapshot.portfolio_code == "NC_GEN",
+            PortfolioValueSnapshot.snapshot_date == NEXT_DAY,
+        ).first() is not None
+
+    def test_generate_daily_snapshots_skip_path_no_commit(self, test_db, monkeypatch):
+        """无持仓跳过路径也不 commit"""
+        from app.services.snapshot_service import generate_daily_snapshots
+
+        create_portfolio(test_db, code="NC_SKIP", status="active")
+
+        _forbid_commit(monkeypatch, test_db)
+        result = generate_daily_snapshots(test_db, "NC_SKIP", D0)
+        assert result["success"] is True
+        assert "跳过" in result["message"]
+
+    def test_recalculate_snapshots_no_commit(self, test_db, monkeypatch):
+        """recalculate_snapshots 全区间重算不 commit（issue #58 本体）"""
+        from app.services.snapshot_service import recalculate_snapshots
+
+        create_portfolio(test_db, code="NC_RECALC", status="active")
+        _setup_cash_snapshot(test_db, "NC_RECALC", D0)
+        _setup_cash_snapshot(test_db, "NC_RECALC", NEXT_DAY)
+
+        _forbid_commit(monkeypatch, test_db)
+        result = recalculate_snapshots(test_db, "NC_RECALC", D0, NEXT_DAY)
+
+        assert result["success"] is True
+        assert result["results"][0]["errors"] == []
+        assert result["results"][0]["total_processed"] == 2
+
+    def test_recalculate_precheck_failure_no_deletion(self, test_db, monkeypatch):
+        """预校验失败（NAV 缺失）→ 抛 ValueError，不删除任何快照"""
+        from app.services.snapshot_service import recalculate_snapshots
+
+        create_portfolio(test_db, code="NC_PRE", status="active")
+        create_product(test_db, code="NAVX.OF", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        _setup_cash_snapshot(test_db, "NC_PRE", D0)
+        # 最新持仓含无任何价格记录的基金 → price_data 预校验必失败
+        create_position_snapshot(
+            test_db, "NC_PRE", "NAVX.OF", "CN_OTC",
+            snapshot_date=D0, shares=100.0, market_value=100.0,
+            platform_code="MYCF", asset_type="stock",
+        )
+
+        _forbid_commit(monkeypatch, test_db)
+        with pytest.raises(ValueError, match="预校验失败"):
+            recalculate_snapshots(test_db, "NC_PRE", D0, D0)
+
+        # 未进入删除/重建流程，原快照仍在
+        assert test_db.query(PortfolioValueSnapshot).filter(
+            PortfolioValueSnapshot.portfolio_code == "NC_PRE",
+            PortfolioValueSnapshot.snapshot_date == D0,
+        ).first() is not None
+
+
+class TestTradingCalendarServiceNoCommit:
+    """sync_trading_calendar 不 commit"""
+
+    @patch("app.services.trading_calendar_service.get_trade_calendar")
+    def test_sync_trading_calendar_no_commit(self, mock_cal, test_db, monkeypatch):
+        mock_cal.return_value = [
+            {"date": "2030-01-02", "is_open": True},
+            {"date": "2030-01-03", "is_open": True},
+        ]
+        _forbid_commit(monkeypatch, test_db)
+        from app.services.trading_calendar_service import sync_trading_calendar
+        result = sync_trading_calendar(test_db, 2030)
+
+        assert result["synced_count"] == 2
+        # flush 后同事务内可见
+        assert test_db.query(TradingCalendar).filter(
+            TradingCalendar.date == date(2030, 1, 2)
+        ).first() is not None
+
+
+class TestMarketDataServiceNoCommit:
+    """sync_product_prices 及失败标记路径不 commit"""
+
+    @patch("app.services.market_data_service.get_fund_daily")
+    def test_sync_product_prices_no_commit(self, mock_daily, test_db, monkeypatch, sample_etf_product):
+        mock_daily.return_value = [
+            {"trade_date": "20250606", "close": 4.0, "pre_close": 3.9, "pct_chg": 2.56},
+        ]
+        _forbid_commit(monkeypatch, test_db)
+        from app.services.market_data_service import sync_product_prices
+        result = sync_product_prices(
+            test_db, sample_etf_product.code, sample_etf_product.market,
+            start_date=D0, end_date=D0,
+        )
+        assert result["success"] is True
+        assert test_db.query(PriceRecord).filter(
+            PriceRecord.product_code == sample_etf_product.code,
+            PriceRecord.date == D0,
+        ).first() is not None
+
+    @patch("app.services.market_data_service.get_fund_daily")
+    def test_mark_failed_path_no_commit(self, mock_daily, test_db, monkeypatch, sample_etf_product):
+        """数据源异常 → _mark_failed 不 commit，失败标记停留在事务内待调用方提交"""
+        mock_daily.side_effect = Exception("tushare boom")
+        _forbid_commit(monkeypatch, test_db)
+        from app.services.market_data_service import sync_product_prices
+        result = sync_product_prices(
+            test_db, sample_etf_product.code, sample_etf_product.market,
+            start_date=D0, end_date=D0,
+        )
+        assert result["success"] is False
+        # 同事务内失败状态已写入（flush）
+        assert sample_etf_product.data_source_status == "failed"
+
+
+class TestTaskRunnerCleanupNoCommit:
+    """cleanup_old_logs 不 commit（单次性原子操作，事务交调用方）"""
+
+    def test_cleanup_old_logs_no_commit(self, test_db, monkeypatch):
+        from app.services.task_runner import cleanup_old_logs
+
+        _forbid_commit(monkeypatch, test_db)
+        result = cleanup_old_logs(test_db)
+        assert set(result.keys()) == {"login_logs", "audit_logs", "task_logs", "error_logs"}

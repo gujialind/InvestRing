@@ -3,6 +3,7 @@
 # ============================================================================
 # 覆盖批量删除端点的 CONFIRM_REQUIRED 守卫与基本分支。
 # 覆盖单日生成的快照连续性校验（#55 SNAPSHOT_NOT_CONTINUOUS）。
+# 覆盖重算单事务原子性（#58：预校验拦截、中途失败整体回滚）。
 # ============================================================================
 
 from datetime import date
@@ -15,6 +16,8 @@ from tests.factories import (
     create_position_snapshot,
     create_value_snapshot,
     create_investor_holding,
+    create_product,
+    create_trade,
 )
 
 
@@ -202,3 +205,126 @@ class TestSnapshotBulkDeleteGuard:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+
+class TestRecalculateAtomicity:
+    """重算单事务原子性（issue #58）
+
+    - 预校验失败（NAV 缺失）→ 422 VALIDATION_FAILED，不删任何快照
+    - 循环中途失败 → 200 + errors，整体回滚，快照与重算前完全一致
+    - 正常重算 → 统一 commit，快照重建落库
+    """
+
+    D0 = date(2025, 6, 6)
+    NEXT_DAY = date(2025, 6, 9)
+
+    def _snapshot_ids(self, db, portfolio_code):
+        return sorted(
+            row[0] for row in db.query(PortfolioValueSnapshot.id).filter(
+                PortfolioValueSnapshot.portfolio_code == portfolio_code
+            ).all()
+        )
+
+    def test_precheck_failure_keeps_snapshots(self, client, admin_headers, test_db):
+        """NAV 缺失 → 预校验 422，三张快照表与重算前完全一致"""
+        port = create_portfolio(test_db, code="ATOM_PRE", status="active")
+        create_product(test_db, code="ATOMX.OF", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        _setup_cash_snapshot(test_db, port.code, self.D0)
+        # 最新持仓含无任何价格记录的基金 → price_data 预校验必失败
+        create_position_snapshot(
+            test_db, port.code, "ATOMX.OF", "CN_OTC",
+            snapshot_date=self.D0, shares=100.0, market_value=100.0,
+            platform_code="MYCF", asset_type="stock",
+        )
+        ids_before = self._snapshot_ids(test_db, port.code)
+
+        resp = client.post(
+            "/api/v1/snapshots/recalculate",
+            json={
+                "portfolio_code": port.code,
+                "start_date": self.D0.isoformat(),
+                "end_date": self.D0.isoformat(),
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "VALIDATION_FAILED"
+        assert "预校验失败" in resp.json()["detail"]["message"]
+
+        # 未删除任何快照（原行 id 不变）
+        assert self._snapshot_ids(test_db, port.code) == ids_before
+
+    def test_midloop_failure_rolls_back_all(self, client, admin_headers, test_db):
+        """预校验通过但循环中途失败 → 200 + errors，整体回滚，原快照完整复原
+
+        构造：pending 基金买入 confirm_date=NEXT_DAY，产品无 NAV →
+        auto_confirm(D0) 确认失败仍 pending → NEXT_DAY 逐日校验
+        pending_transactions 失败 → break，router 统一 rollback。
+        基金不在持仓快照中，故 price_data 预校验不拦。
+        """
+        port = create_portfolio(test_db, code="ATOM_MID", status="active")
+        create_product(test_db, code="ATOMY.OF", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        _setup_cash_snapshot(test_db, port.code, self.D0)
+        _setup_cash_snapshot(test_db, port.code, self.NEXT_DAY)
+        create_trade(
+            test_db, port.code, "ATOMY.OF", "CN_OTC",
+            trade_type="buy", amount=1000.0, price=None,
+            trade_date=self.D0, confirm_date=self.NEXT_DAY,
+            status="pending",
+        )
+        ids_before = self._snapshot_ids(test_db, port.code)
+        assert len(ids_before) == 2
+
+        resp = client.post(
+            "/api/v1/snapshots/recalculate",
+            json={
+                "portfolio_code": port.code,
+                "start_date": self.D0.isoformat(),
+                "end_date": self.NEXT_DAY.isoformat(),
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["errors"], "NEXT_DAY 应因 pending 交易校验失败"
+
+        # 整体回滚：D0 的重建也被撤销，原快照行（同 id）完整复原
+        test_db.expire_all()
+        assert self._snapshot_ids(test_db, port.code) == ids_before
+
+    def test_success_recalculate_commits(self, client, admin_headers, test_db):
+        """无失败的重算 → 统一 commit，快照重建落库（新行 id）
+
+        需提供 start_date 前一日基线快照，否则重建时 CASH 增量基线为 0，
+        重建结果为无持仓跳过（合法但非本用例目标）。
+        """
+        prev_day = date(2025, 6, 5)  # D0 前一交易日（周四）
+        port = create_portfolio(test_db, code="ATOM_OK", status="active")
+        _setup_cash_snapshot(test_db, port.code, prev_day)
+        _setup_cash_snapshot(test_db, port.code, self.D0)
+        _setup_cash_snapshot(test_db, port.code, self.NEXT_DAY)
+        ids_before = self._snapshot_ids(test_db, port.code)
+        baseline_id = ids_before[0]
+
+        resp = client.post(
+            "/api/v1/snapshots/recalculate",
+            json={
+                "portfolio_code": port.code,
+                "start_date": self.D0.isoformat(),
+                "end_date": self.NEXT_DAY.isoformat(),
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["results"][0]["errors"] == []
+        assert data["results"][0]["total_processed"] == 2
+
+        test_db.expire_all()
+        ids_after = self._snapshot_ids(test_db, port.code)
+        assert len(ids_after) == 3
+        assert baseline_id in ids_after, "区间外基线快照不受影响"
+        assert set(ids_after) != set(ids_before), "重建应产生新快照行并已提交"

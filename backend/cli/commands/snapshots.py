@@ -31,11 +31,14 @@ def recalculate_snapshots(
     start_date: str = typer.Option(..., "--start-date", help="YYYY-MM-DD"),
     end_date: str = typer.Option(..., "--end-date", help="YYYY-MM-DD"),
 ):
-    """区间重算快照"""
+    """区间重算快照（单一事务：任一日失败整体回滚，不落库半截中间态）"""
     with cli_context() as db:
         from app.services.snapshot_service import recalculate_snapshots as recalc
 
         result = recalc(db, portfolio_code, parse_date(start_date), parse_date(end_date))
+        # errors 非空时先回滚，防 cli_context 成功路径统一 commit 落库半截状态
+        if any(r["errors"] for r in result["results"]):
+            db.rollback()
         success(data=result)
 
 

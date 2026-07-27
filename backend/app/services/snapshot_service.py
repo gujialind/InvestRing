@@ -46,6 +46,10 @@ def generate_daily_snapshots(
     Raises:
         ValueError: 当依赖数据不完整或校验失败时
         BusinessError: SNAPSHOT_NOT_CONTINUOUS——目标日与已有快照不连续
+
+    Note:
+        本函数不 commit/rollback（AGENTS.md §4.1，事务边界交调用方），
+        仅 flush 保证同一事务内后续读取（如重算次日循环、auto_confirm）可见。
     """
     # 1. 前置校验
     _validate_portfolio(db, portfolio_code)
@@ -60,65 +64,59 @@ def generate_daily_snapshots(
         error_messages = "; ".join([v["message"] for v in failed_checks])
         raise ValueError(f"依赖数据校验失败: {error_messages}")
     
-    try:
-        # 2. 删除已有快照（如果存在）
-        _delete_existing_snapshots(db, portfolio_code, target_date)
-        
-        # 3. 生成持仓快照
-        positions = _generate_portfolio_position(db, portfolio_code, target_date)
-        
-        # 无持仓时跳过快照生成（组合尚无资产，如首次申购确认前）
-        if not positions:
-            db.commit()
-            logger.info(
-                f"快照跳过: portfolio={portfolio_code}, date={target_date}, "
-                f"原因=无持仓"
-            )
-            return {
-                "success": True,
-                "message": "跳过：组合无持仓",
-                "portfolio_code": portfolio_code,
-                "snapshot_date": target_date,
-                "total_value": 0,
-                "total_shares": 0,
-                "unit_price": 0,
-            }
-        
-        db.add_all(positions)
-        
-        # 4. 生成市值快照
-        value_snapshot = _generate_portfolio_value_snapshot(
-            db, portfolio_code, target_date, positions
-        )
-        db.add(value_snapshot)
-        
-        # 5. 生成投资人快照
-        holdings = _generate_investor_holding(
-            db, portfolio_code, target_date, value_snapshot
-        )
-        db.add_all(holdings)
-        
-        db.commit()
-        
+    # 2. 删除已有快照（如果存在）
+    _delete_existing_snapshots(db, portfolio_code, target_date)
+    
+    # 3. 生成持仓快照
+    positions = _generate_portfolio_position(db, portfolio_code, target_date)
+    
+    # 无持仓时跳过快照生成（组合尚无资产，如首次申购确认前）
+    if not positions:
+        db.flush()
         logger.info(
-            f"快照生成成功: portfolio={portfolio_code}, date={target_date}, "
-            f"positions={len(positions)}, investors={len(holdings)}"
+            f"快照跳过: portfolio={portfolio_code}, date={target_date}, "
+            f"原因=无持仓"
         )
-        
         return {
             "success": True,
-            "message": "快照生成成功",
+            "message": "跳过：组合无持仓",
             "portfolio_code": portfolio_code,
             "snapshot_date": target_date,
-            "total_value": float(value_snapshot.total_value),
-            "total_shares": float(value_snapshot.total_shares),
-            "unit_price": float(value_snapshot.unit_price),
+            "total_value": 0,
+            "total_shares": 0,
+            "unit_price": 0,
         }
-        
-    except Exception as e:
-        db.rollback()
-        logger.error(f"快照生成失败: portfolio={portfolio_code}, date={target_date}, error={str(e)}")
-        raise
+    
+    db.add_all(positions)
+    
+    # 4. 生成市值快照
+    value_snapshot = _generate_portfolio_value_snapshot(
+        db, portfolio_code, target_date, positions
+    )
+    db.add(value_snapshot)
+    
+    # 5. 生成投资人快照
+    holdings = _generate_investor_holding(
+        db, portfolio_code, target_date, value_snapshot
+    )
+    db.add_all(holdings)
+    
+    db.flush()
+    
+    logger.info(
+        f"快照生成成功: portfolio={portfolio_code}, date={target_date}, "
+        f"positions={len(positions)}, investors={len(holdings)}"
+    )
+    
+    return {
+        "success": True,
+        "message": "快照生成成功",
+        "portfolio_code": portfolio_code,
+        "snapshot_date": target_date,
+        "total_value": float(value_snapshot.total_value),
+        "total_shares": float(value_snapshot.total_shares),
+        "unit_price": float(value_snapshot.unit_price),
+    }
 
 
 def recalculate_snapshots(
@@ -147,6 +145,12 @@ def recalculate_snapshots(
 
     Returns:
         重算结果
+
+    Note:
+        本函数全程不 commit/rollback（issue #58，AGENTS.md §4.1）：
+        删旧快照、级联回退、重建、auto_confirm 全部停留在同一事务内，
+        由调用方在无 errors 时统一 commit、有 errors 时统一 rollback，
+        对外表现为「要么完整成功，要么无变化」。
     """
     # 获取需要处理的组合列表
     if portfolio_code:
@@ -183,6 +187,26 @@ def recalculate_snapshots(
 
         if effective_end_date > end_date:
             result["end_date_extended_to"] = effective_end_date.isoformat()
+
+        # 整区间预校验（issue #58 增强）：在删除任何快照前一次性校验全部交易日的
+        # 净值完整性，NAV 缺失在任何写操作前被拦住，降低回滚压力。
+        # 仅做静态检查（price_data）：pending 申赎/事件会被循环内 auto_confirm
+        # 逐日消化，预校验若包含这两项会误杀合法重算；循环内逐日全量校验保留。
+        precheck_failures = []
+        precheck_date = start_date
+        while precheck_date <= effective_end_date:
+            if _is_trading_day(db, precheck_date):
+                price_check = _check_price_data_completeness(db, portfolio.code, precheck_date)
+                if price_check["status"] == "failed":
+                    precheck_failures.append(
+                        f"{precheck_date.isoformat()}: {price_check['message']}"
+                    )
+            precheck_date += timedelta(days=1)
+        if precheck_failures:
+            raise ValueError(
+                f"组合 {portfolio.code} 预校验失败，未删除任何快照: "
+                + " | ".join(precheck_failures)
+            )
 
         current_date = start_date
         while current_date <= effective_end_date:
@@ -224,7 +248,6 @@ def recalculate_snapshots(
                     db, portfolio.code, current_date
                 )
                 if auto_results:
-                    db.commit()
                     result["auto_confirmed"].extend(auto_results)
                     # 申赎统一 T+1 确认，刚确认的申赎 confirm_date = D+1 > D
                     # 不会被 D 日的 investor_holding 包含，无需局部刷新
@@ -233,7 +256,7 @@ def recalculate_snapshots(
                 result["total_processed"] += 1
 
             except Exception as e:
-                db.rollback()
+                # 不在此 rollback：回滚交调用方（errors 非空时统一回滚整个事务）
                 result["errors"].append({
                     "date": current_date.isoformat(),
                     "error": str(e)

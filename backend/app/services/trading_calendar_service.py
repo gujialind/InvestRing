@@ -27,6 +27,9 @@ def sync_trading_calendar(db: Session, year: int) -> Dict[str, Any]:
     Raises:
         TushareNotConfiguredError: Tushare token 未配置
         TushareAPIError: API 调用失败
+
+    Note:
+        本函数不 commit（AGENTS.md §4.1），事务边界交调用方。
     """
     # 从 Tushare 获取交易日历数据
     calendar_data = get_trade_calendar(year)
@@ -55,10 +58,10 @@ def sync_trading_calendar(db: Session, year: int) -> Dict[str, Any]:
                 "is_open": item["is_open"],
             })
 
-    # 批量插入新记录
+    # 批量插入新记录（commit 交调用方）
     if new_records:
         db.bulk_insert_mappings(TradingCalendar, new_records)
-        db.commit()
+        db.flush()
 
     return {
         "synced_count": len(new_records),
