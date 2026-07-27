@@ -102,6 +102,20 @@ def clear_token() -> None:
         token_file.unlink()
 
 
+def load_config() -> dict:
+    """读取 ~/.ir/config 全部配置项（key=value 格式）"""
+    config_file = get_ir_dir() / "config"
+    result = {}
+    if config_file.exists():
+        for line in config_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            result[key.strip()] = value.strip()
+    return result
+
+
 def save_config(key: str, value: str) -> None:
     """写入配置项到 ~/.ir/config"""
     config_file = get_ir_dir() / "config"
