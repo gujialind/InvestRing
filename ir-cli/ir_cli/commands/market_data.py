@@ -13,7 +13,7 @@ def price(
     market: str = typer.Argument(..., help="市场类型(CN_EXCHANGE/CN_OTC)"),
     start_date: Optional[str] = typer.Option(None, "--start-date", help="开始日期(YYYY-MM-DD)"),
     end_date: Optional[str] = typer.Option(None, "--end-date", help="结束日期(YYYY-MM-DD)"),
-    limit: int = typer.Option(30, "--limit", help="返回条数"),
+    limit: int = typer.Option(30, "--limit", help="返回条数（默认30，最大1000，按日期降序）"),
 ):
     """查询产品价格数据"""
     client = APIClient.from_config()
@@ -23,6 +23,26 @@ def price(
     if end_date is not None:
         params["end_date"] = end_date
     result = client.get(f"/api/market-data/products/{code}/{market}/price-data", params=params)
+    data = result["data"]
+    hints = None
+    if isinstance(data, list) and len(data) == limit:
+        hints = [f"返回条数已达 limit={limit}，可能被截断，可加大 --limit（最大1000）或收窄日期区间"]
+    success(data=data, hints=hints)
+
+
+@app.command("nav-coverage")
+def nav_coverage(
+    code: str = typer.Argument(..., help="产品代码"),
+    market: str = typer.Argument(..., help="市场类型(CN_EXCHANGE/CN_OTC)"),
+    start_date: str = typer.Option(..., "--start-date", help="开始日期(YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="结束日期(YYYY-MM-DD)，默认今天"),
+):
+    """校验区间内净值同步覆盖情况"""
+    client = APIClient.from_config()
+    params = {"start_date": start_date}
+    if end_date is not None:
+        params["end_date"] = end_date
+    result = client.get(f"/api/market-data/products/{code}/{market}/nav-coverage", params=params)
     success(data=result["data"])
 
 

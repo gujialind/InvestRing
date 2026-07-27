@@ -96,8 +96,8 @@ def get_nav_history(
     code: str,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-) -> dict:
-    """查看组合净值历史。"""
+) -> list:
+    """查看组合净值历史（单层列表，按日期升序）。"""
     _get_portfolio_or_404(db, code)
     query = db.query(PortfolioValueSnapshot).filter(
         PortfolioValueSnapshot.portfolio_code == code
@@ -107,18 +107,15 @@ def get_nav_history(
     if end_date:
         query = query.filter(PortfolioValueSnapshot.snapshot_date <= end_date)
     snapshots = query.order_by(PortfolioValueSnapshot.snapshot_date.asc()).all()
-    return {
-        "portfolio_code": code,
-        "data": [
-            {
-                "date": s.snapshot_date.isoformat(),
-                "unit_price": float(s.unit_price) if s.unit_price is not None else None,
-                "total_value": float(s.total_value) if s.total_value is not None else None,
-                "total_shares": float(s.total_shares) if s.total_shares is not None else None,
-            }
-            for s in snapshots
-        ],
-    }
+    return [
+        {
+            "snapshot_date": s.snapshot_date.isoformat(),
+            "unit_price": float(s.unit_price) if s.unit_price is not None else None,
+            "total_value": float(s.total_value) if s.total_value is not None else None,
+            "total_shares": float(s.total_shares) if s.total_shares is not None else None,
+        }
+        for s in snapshots
+    ]
 
 
 def get_returns(db: Session, code: str) -> dict:

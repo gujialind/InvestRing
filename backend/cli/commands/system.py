@@ -88,7 +88,7 @@ def update_datasource(
             lines = []
             found = False
             if os.path.exists(env_file):
-                with open(env_file, "r") as f:
+                with open(env_file, "r", encoding="utf-8") as f:
                     lines = f.readlines()
                 for i, line in enumerate(lines):
                     if line.startswith("TUSHARE_TOKEN="):
@@ -97,7 +97,7 @@ def update_datasource(
                         break
             if not found:
                 lines.append(f"\nTUSHARE_TOKEN={api_key}\n")
-            with open(env_file, "w") as f:
+            with open(env_file, "w", encoding="utf-8") as f:
                 f.writelines(lines)
 
             get_settings.cache_clear()

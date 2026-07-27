@@ -5,6 +5,8 @@ from sqlalchemy import and_
 
 from app.models.price_record import PriceRecord
 from app.models.product import Product
+from app.models.trading_calendar import TradingCalendar
+from app.services.exceptions import BusinessError, NotFoundError
 from app.services.tushare_client import get_fund_daily, get_fund_nav, TushareAPIError
 
 
@@ -79,6 +81,64 @@ def get_latest_price(
         query = query.filter(PriceRecord.date <= target_date)
 
     return query.order_by(PriceRecord.date.desc()).first()
+
+
+def get_nav_coverage(
+    db: Session,
+    product_code: str,
+    market: str,
+    start_date: date,
+    end_date: date,
+) -> Dict[str, Any]:
+    """
+    校验区间内净值同步覆盖情况
+
+    以交易日历（is_open=true）为基准，与 price_record 已有日期做集合差，
+    单次聚合查询，不逐日循环。coverage 在区间无交易日时为 None。
+    """
+    product = db.query(Product).filter(
+        and_(Product.code == product_code, Product.market == market)
+    ).first()
+    if not product:
+        raise NotFoundError("NOT_FOUND", f"产品 {product_code} ({market}) 不存在")
+    if start_date > end_date:
+        raise BusinessError(
+            "INVALID_DATE_RANGE",
+            f"start_date ({start_date}) 不能晚于 end_date ({end_date})",
+            http_status=422,
+        )
+
+    trading_days = {
+        row[0]
+        for row in db.query(TradingCalendar.date).filter(
+            TradingCalendar.date >= start_date,
+            TradingCalendar.date <= end_date,
+            TradingCalendar.is_open.is_(True),
+        ).all()
+    }
+    synced_dates = {
+        row[0]
+        for row in db.query(PriceRecord.date).filter(
+            PriceRecord.product_code == product_code,
+            PriceRecord.market == market,
+            PriceRecord.date >= start_date,
+            PriceRecord.date <= end_date,
+        ).all()
+    }
+
+    missing = sorted(trading_days - synced_dates)
+    total = len(trading_days)
+    synced = total - len(missing)
+    return {
+        "product_code": product_code,
+        "market": market,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "total_trading_days": total,
+        "synced_days": synced,
+        "coverage": round(synced / total, 4) if total > 0 else None,
+        "missing_dates": [d.isoformat() for d in missing],
+    }
 
 
 def sync_product_prices(

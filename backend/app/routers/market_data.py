@@ -7,6 +7,7 @@ from app.schemas.market_data import PriceDataResponse, PriceDataSyncRequest
 from app.services.market_data_service import (
     get_price_records,
     get_latest_price,
+    get_nav_coverage,
     sync_price_data,
 )
 
@@ -19,7 +20,7 @@ def get_price_data(
     market: str,
     start_date: Optional[date] = Query(None, description="开始日期"),
     end_date: Optional[date] = Query(None, description="结束日期"),
-    limit: Optional[int] = Query(30, ge=1, le=365, description="限制返回数量"),
+    limit: Optional[int] = Query(30, ge=1, le=1000, description="限制返回数量（默认30，最大1000，按日期降序）"),
     db: Session = Depends(get_db),
 ):
     try:
@@ -37,6 +38,18 @@ def get_price_data(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询价格数据失败: {str(e)}")
+
+
+@router.get("/products/{code}/{market}/nav-coverage")
+def get_nav_coverage_endpoint(
+    code: str,
+    market: str,
+    start_date: date = Query(..., description="开始日期"),
+    end_date: Optional[date] = Query(None, description="结束日期（默认今天）"),
+    db: Session = Depends(get_db),
+):
+    """校验区间内净值同步覆盖情况"""
+    return get_nav_coverage(db, code, market, start_date, end_date or date.today())
 
 
 @router.post("/products/{code}/{market}/sync-price-data")
