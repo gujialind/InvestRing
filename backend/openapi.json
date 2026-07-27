@@ -1950,46 +1950,6 @@
         }
       }
     },
-    "/api/market-data/portfolios/{portfolio_code}/sync-nav": {
-      "post": {
-        "tags": [
-          "市场数据"
-        ],
-        "summary": "Sync Portfolio Nav Endpoint",
-        "operationId": "sync_portfolio_nav_endpoint_api_market_data_portfolios__portfolio_code__sync_nav_post",
-        "parameters": [
-          {
-            "name": "portfolio_code",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Portfolio Code"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/subscriptions": {
       "get": {
         "tags": [
@@ -4473,7 +4433,7 @@
           "snapshots"
         ],
         "summary": "Recalculate",
-        "description": "重算指定时间区间的快照\n\n权限：仅admin",
+        "description": "重算指定时间区间的快照\n\n单一事务（issue #58）：无 errors 时统一 commit；任一日失败则整体 rollback，\n被删快照与级联回退状态完整复原，对外「要么完整成功，要么无变化」。\n\n权限：仅admin",
         "operationId": "recalculate_api_v1_snapshots_recalculate_post",
         "requestBody": {
           "content": {

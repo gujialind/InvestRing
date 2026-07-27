@@ -55,16 +55,6 @@ def sync_history(
     success(data=result["data"])
 
 
-@app.command("sync-nav")
-def sync_nav(
-    portfolio_code: str = typer.Argument(..., help="组合代码"),
-):
-    """同步组合净值"""
-    client = APIClient.from_config()
-    result = client.post(f"/api/market-data/portfolios/{portfolio_code}/sync-nav")
-    success(data=result["data"])
-
-
 @app.command("sync-all")
 def sync_all(
     start_date: Optional[str] = typer.Option(None, "--start-date", help="开始日期(YYYY-MM-DD)，不传则增量同步"),

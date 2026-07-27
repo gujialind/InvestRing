@@ -69,18 +69,6 @@ def sync_history(
             error("DATA_SOURCE_ERROR", result.get("message", "同步失败"))
 
 
-@app.command("sync-nav")
-def sync_nav(
-    portfolio_code: str = typer.Argument(...),
-):
-    """同步组合净值"""
-    with cli_context() as db:
-        from app.services.market_data_service import sync_portfolio_nav
-
-        result = sync_portfolio_nav(db, portfolio_code)
-        success(data=result)
-
-
 @app.command("sync-all")
 def sync_all(
     start_date: Optional[str] = typer.Option(None, "--start-date", help="YYYY-MM-DD 历史回填起点"),

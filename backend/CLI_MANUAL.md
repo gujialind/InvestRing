@@ -655,14 +655,6 @@ ir market sync <PRODUCT_CODE> <MARKET> [--start-date YYYY-MM-DD] [--end-date YYY
 ir market sync-history <PRODUCT_CODE> <MARKET>
 ```
 
-#### `ir market sync-nav`
-
-同步组合净值（同步组合内所有产品的最新净值）。
-
-```bash
-ir market sync-nav <PORTFOLIO_CODE>
-```
-
 ---
 
 ### 4.9 `ir product` — 产品管理
@@ -1035,9 +1027,6 @@ ir share-event confirm 1
 ```bash
 # 同步交易日历
 ir system calendar-sync --year 2025
-
-# 同步所有产品净值
-ir market sync-nav PORT001
 
 # 手动执行净值同步任务
 ir task run nav_sync

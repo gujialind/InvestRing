@@ -183,7 +183,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 | `platforms` | `/api/platforms` | 5 | user/admin | CRUD |
 | `trading_calendar` | `/api/trading-calendar` | 2 | user/admin | GET、POST /sync |
 | `data_sources` | `/api/system/data-sources` | 2 | user/admin | GET、PUT /{name} |
-| `market_data` | `/api/market-data` | 4 | 公开 | price-data、sync-price-data、sync-history、sync-nav |
+| `market_data` | `/api/market-data` | 3 | 公开 | price-data、sync-price-data、sync-history |
 | `subscriptions` | `/api/subscriptions` | 8 | user/admin | CRUD + confirm/cancel/unconfirm |
 | `trades` | `/api/trades` | 8 | user/admin | CRUD + confirm/cancel/unconfirm |
 | `share_change_events` | `/api/share-change-events` | 8 | user/admin | CRUD + confirm/cancel/unconfirm |
