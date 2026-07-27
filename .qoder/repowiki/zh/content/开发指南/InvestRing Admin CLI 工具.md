@@ -11,6 +11,7 @@
 - [ir-cli/ir_cli/config.py](file://ir-cli/ir_cli/config.py)
 - [ir-cli/ir_cli/client.py](file://ir-cli/ir_cli/client.py)
 - [ir-cli/pyproject.toml](file://ir-cli/pyproject.toml)
+- [ir-cli/install.sh](file://ir-cli/install.sh)
 - [ir-cli/ir_cli/commands/auth.py](file://ir-cli/ir_cli/commands/auth.py)
 - [ir-cli/ir_cli/commands/investors.py](file://ir-cli/ir_cli/commands/investors.py)
 - [ir-cli/ir_cli/commands/portfolios.py](file://ir-cli/ir_cli/commands/portfolios.py)
@@ -28,17 +29,14 @@
 - [ir-cli/ir_cli/commands/system.py](file://ir-cli/ir_cli/commands/system.py)
 - [ir-cli/ir_cli/commands/tasks.py](file://ir-cli/ir_cli/commands/tasks.py)
 - [ir-cli/ir_cli/commands/platforms.py](file://ir-cli/ir_cli/commands/platforms.py)
+- [ir-cli/ir_cli/commands/config_cmd.py](file://ir-cli/ir_cli/commands/config_cmd.py)
 </cite>
 
 ## 更新摘要
 **变更内容**   
-- **新增schema自描述系统**：完整的OpenAPI schema支持，提供程序化接口文档和验证能力
-- **增强错误hints提示**：智能错误提示和建议，提升用户体验和问题排查效率
-- **新增--quiet模式**：精简输出模式，适合自动化处理和脚本集成
-- **portfolio上下文聚合**：智能投资组合上下文管理，简化批量操作
-- **workflows配方功能**：预定义工作流模板，支持复杂业务场景的自动化编排
-- **AI代理友好性增强**：结构化输出、参数验证、自动补全等特性
-- **CLI工具架构重构**：独立的ir-cli包，更好的模块化和可维护性
+- **增强安装脚本（install.sh）**：新增 --ref 参数支持，允许用户安装特定分支、标签或提交的版本
+- **开发版本支持**：支持安装开发分支、测试版本和特定提交进行调试
+- **版本控制集成**：改进的版本管理机制，提供更灵活的部署选项
 
 ## 目录
 1. [简介](#简介)
@@ -55,7 +53,7 @@
 ## 简介
 InvestRing Admin CLI 是一个专为 AI Agent 设计的现代化命令行工具，基于 Typer 构建，采用独立的 ir-cli 包架构。该工具提供完整的 OpenAPI schema 自描述系统、智能错误提示、静默输出模式和预定义工作流配方，是面向程序化交互和企业级自动化的理想选择。
 
-**最新更新**：全新的 ir-cli 包架构，包含 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。这些改进使 CLI 成为更智能的自文档化接口，支持程序化交互和更好的自动化处理。
+**最新更新**：全新的 ir-cli 包架构，包含 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。最新的配置命令模块和增强的安装脚本进一步提升了工具的易用性和可维护性。**新增的 --ref 参数支持使开发者能够灵活安装特定版本的 CLI 工具，便于开发和调试工作。**
 
 ## 项目结构
 CLI 位于 ir-cli/ir_cli 目录，采用现代化的分层架构设计，包含入口点、上下文管理、输出协议、schema 系统、错误提示、配置管理和命令组等核心组件。
@@ -71,7 +69,12 @@ Sch["ir_cli/schema.py<br/>OpenAPI Schema系统"]
 Hnt["ir_cli/hints.py<br/>智能错误提示"]
 Cfg["ir_cli/config.py<br/>配置管理"]
 Cli["ir_cli/client.py<br/>HTTP客户端封装"]
-Cmds["ir_cli/commands/*<br/>20个命令组"]
+Cmds["ir_cli/commands/*<br/>21个命令组"]
+end
+subgraph "配置管理"
+ConfigCmd["ir_cli/commands/config_cmd.py<br/>配置命令模块"]
+InstallScript["install.sh<br/>安装脚本<br/>支持 --ref 参数"]
+PyProj["pyproject.toml<br/>包配置"]
 end
 subgraph "后端服务层"
 Svc["backend/app/services/*<br/>业务逻辑服务"]
@@ -80,7 +83,6 @@ Rou["backend/app/routers/*<br/>REST API路由"]
 DB["backend/app/database.py<br/>数据库连接"]
 end
 subgraph "基础设施"
-PY["ir-cli/pyproject.toml<br/>包配置和入口点"]
 API["backend/openapi.json<br/>OpenAPI规范"]
 end
 M --> Cmds
@@ -91,8 +93,10 @@ Cmds --> Sch
 Cmds --> Hnt
 Cmds --> Cfg
 Cmds --> Cli
+ConfigCmd --> Cfg
+InstallScript --> PyProj
 Cli --> API
-Cfg --> PY
+Cfg --> PyProj
 ```
 
 **图表来源**
@@ -102,21 +106,25 @@ Cfg --> PY
 - [ir-cli/ir_cli/hints.py:1-120](file://ir-cli/ir_cli/hints.py#L1-L120)
 - [ir-cli/ir_cli/config.py:1-90](file://ir-cli/ir_cli/config.py#L1-L90)
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
+- [ir-cli/ir_cli/commands/config_cmd.py:1-100](file://ir-cli/ir_cli/commands/config_cmd.py#L1-L100)
+- [ir-cli/install.sh:1-50](file://ir-cli/install.sh#L1-L50)
 
 章节来源
 - [ir-cli/ir_cli/main.py:1-100](file://ir-cli/ir_cli/main.py#L1-L100)
 - [ir-cli/pyproject.toml:1-50](file://ir-cli/pyproject.toml#L1-L50)
 
 ## 核心组件
-- **入口与命令注册**：Typer 应用实例集中注册 20 个命令组，统一命名空间（ir），支持动态命令发现。
+- **入口与命令注册**：Typer 应用实例集中注册 21 个命令组，统一命名空间（ir），支持动态命令发现。
 - **执行上下文**：为每个命令创建请求上下文，自动处理认证、会话管理和异常映射。
 - **输出协议**：所有命令输出标准 JSON，支持多种格式（JSON、表格、文本），--quiet 模式裁剪冗余输出。
 - **Schema 系统**：完整的 OpenAPI schema 生成和验证，支持程序化接口文档和参数校验。
 - **智能错误提示**：基于上下文的错误分析和建议，提供问题定位和解决方案。
 - **配置管理**：集中式配置管理，支持环境变量、配置文件和命令行参数优先级。
 - **HTTP 客户端**：封装的后端 API 调用，支持重试、超时和错误处理。
+- **配置命令模块**：专门的配置管理命令，支持配置的查看、设置和验证操作。
+- **安装脚本**：自动化的安装和配置脚本，简化部署流程，**新增 --ref 参数支持**。
 
-**更新**：全新的 ir-cli 包架构，包含 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能，显著提升 AI 代理友好性和自动化处理能力。
+**更新**：全新的 ir-cli 包架构，包含 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。新增的配置命令模块和增强的安装脚本进一步提升了工具的完整性和易用性。**安装脚本现在支持通过 --ref 参数指定特定的分支、标签或提交版本进行安装。**
 
 章节来源
 - [ir-cli/ir_cli/main.py:1-100](file://ir-cli/ir_cli/main.py#L1-L100)
@@ -128,29 +136,31 @@ Cfg --> PY
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
 
 ## 架构总览
-CLI 通过 Typer 暴露命令，命令内部使用 context 获取请求上下文，调用 client 进行 HTTP 请求，最终通过 output 输出结构化 JSON。新增的 schema 系统提供完整的接口文档，hints 系统提供智能错误提示，--quiet 模式优化自动化输出。
+CLI 通过 Typer 暴露命令，命令内部使用 context 获取请求上下文，调用 client 进行 HTTP 请求，最终通过 output 输出结构化 JSON。新增的 schema 系统提供完整的接口文档，hints 系统提供智能错误提示，--quiet 模式优化自动化输出。配置命令模块提供专门的配置管理功能，安装脚本简化部署流程。
 
 ```mermaid
 sequenceDiagram
 participant User as "用户/AI Agent"
 participant CLI as "ir_cli/main.py"
+participant CfgCmd as "config_cmd.py"
 participant Ctx as "ir_cli/context.py"
 participant Sch as "ir_cli/schema.py"
 participant Hnt as "ir_cli/hints.py"
 participant Cli as "ir_cli/client.py"
 participant API as "后端API"
-User->>CLI : 运行 ir portfolio list --quiet
-CLI->>Ctx : 进入 cli_context()
+User->>CLI : 运行 ir config list
+CLI->>CfgCmd : 调用配置命令
+CfgCmd->>Ctx : 进入 cli_context()
 Ctx->>Sch : 加载并验证schema
 Sch-->>Ctx : schema验证结果
 Ctx->>Hnt : 初始化错误提示系统
 Hnt-->>Ctx : hints配置
 CLI->>Cli : 发送HTTP请求
-Cli->>API : GET /portfolios?format=json
-API-->>Cli : 返回结构化数据
+Cli->>API : GET /config?format=json
+API-->>Cli : 返回配置数据
 Cli-->>CLI : 解析响应数据
-CLI->>Out : success(data=结果, quiet=true)
-Out-->>User : 精简JSON输出
+CLI->>Out : success(data=配置信息)
+Out-->>User : 输出配置信息
 Ctx->>API : 清理资源
 ```
 
@@ -160,11 +170,89 @@ Ctx->>API : 清理资源
 - [ir-cli/ir_cli/schema.py:1-150](file://ir-cli/ir_cli/schema.py#L1-L150)
 - [ir-cli/ir_cli/hints.py:1-120](file://ir-cli/ir_cli/hints.py#L1-L120)
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
+- [ir-cli/ir_cli/commands/config_cmd.py:1-100](file://ir-cli/ir_cli/commands/config_cmd.py#L1-L100)
 
 ## 详细组件分析
 
-### Schema 自描述系统（schema）**全新**
-**全新功能**：完整的 OpenAPI schema 生成和验证系统，提供程序化接口文档和参数校验能力。
+### 配置命令模块（config_cmd）
+**功能**：专门的配置管理命令模块，提供完整的配置操作功能。
+
+- `list`：列出当前配置项
+- `get`：获取特定配置项的值
+- `set`：设置配置项的值
+- `validate`：验证配置的有效性
+- `export`：导出当前配置
+- `import`：导入配置
+
+```mermaid
+flowchart TD
+Start(["开始配置操作"]) --> ParseCmd["解析配置命令"]
+ParseCmd --> |list| ListCmd["执行列表操作"]
+ParseCmd --> |get| GetCmd["执行获取操作"]
+ParseCmd --> |set| SetCmd["执行设置操作"]
+ParseCmd --> |validate| ValidateCmd["执行验证操作"]
+ListCmd --> LoadConfig["加载配置文件"]
+GetCmd --> LoadConfig
+SetCmd --> UpdateConfig["更新配置"]
+ValidateCmd --> CheckValidity["检查配置有效性"]
+LoadConfig --> Output["输出配置信息"]
+UpdateConfig --> SaveConfig["保存配置"]
+CheckValidity --> Result["返回验证结果"]
+SaveConfig --> Success["success(data=操作结果)"]
+Output --> End(["结束"])
+Result --> End
+Success --> End
+```
+
+**图表来源**
+- [ir-cli/ir_cli/commands/config_cmd.py:1-100](file://ir-cli/ir_cli/commands/config_cmd.py#L1-L100)
+
+章节来源
+- [ir-cli/ir_cli/commands/config_cmd.py:1-100](file://ir-cli/ir_cli/commands/config_cmd.py#L1-L100)
+
+### 安装脚本（install.sh）**增强**
+**增强功能**：改进的安装脚本，支持自动依赖检查和环境配置，**新增 --ref 参数支持**。
+
+- 自动检测 Python 版本和环境
+- 安装必要的依赖包
+- 创建配置文件模板
+- 设置环境变量
+- 验证安装结果
+- **新增** --ref 参数：支持指定分支、标签或提交版本进行安装
+
+```mermaid
+flowchart TD
+Start(["开始安装"]) --> CheckArgs["检查参数"]
+CheckArgs --> |--ref 参数| RefParam["解析引用参数"]
+CheckArgs --> |无参数| DefaultInstall["默认安装"]
+RefParam --> CheckRefType["检查引用类型"]
+CheckRefType --> |分支| InstallBranch["安装指定分支"]
+CheckRefType --> |标签| InstallTag["安装指定标签"]
+CheckRefType --> |提交| InstallCommit["安装指定提交"]
+InstallBranch --> CheckEnv["检查Python环境"]
+InstallTag --> CheckEnv
+InstallCommit --> CheckEnv
+DefaultInstall --> CheckEnv
+CheckEnv --> |满足要求| InstallDeps["安装依赖包"]
+CheckEnv --> |不满足| Error["显示错误信息"]
+InstallDeps --> CreateConfig["创建配置文件"]
+CreateConfig --> SetEnvVars["设置环境变量"]
+SetEnvVars --> VerifyInstall["验证安装"]
+VerifyInstall --> |成功| Success["安装完成"]
+VerifyInstall --> |失败| Retry["重试安装"]
+Retry --> VerifyInstall
+Error --> End(["结束"])
+Success --> End
+```
+
+**图表来源**
+- [ir-cli/install.sh:1-50](file://ir-cli/install.sh#L1-L50)
+
+章节来源
+- [ir-cli/install.sh:1-50](file://ir-cli/install.sh#L1-L50)
+
+### Schema 自描述系统（schema）
+**功能**：完整的 OpenAPI schema 生成和验证系统，提供程序化接口文档和参数校验能力。
 
 - `generate_schema`：从 Typer 命令自动生成 OpenAPI schema
 - `validate_parameters`：基于 schema 验证命令行参数
@@ -190,8 +278,8 @@ Success --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/schema.py:1-150](file://ir-cli/ir_cli/schema.py#L1-L150)
 
-### 智能错误提示（hints）**全新**
-**全新功能**：基于上下文的智能错误提示系统，提供问题定位和解决方案建议。
+### 智能错误提示（hints）
+**功能**：基于上下文的智能错误提示系统，提供问题定位和解决方案建议。
 
 - `analyze_error`：分析错误类型和上下文
 - `suggest_solution`：根据错误类型提供解决建议
@@ -220,8 +308,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/hints.py:1-120](file://ir-cli/ir_cli/hints.py#L1-L120)
 
-### 配置管理（config）**增强**
-**增强功能**：集中式配置管理系统，支持多种配置源和优先级。
+### 配置管理（config）
+**功能**：集中式配置管理系统，支持多种配置源和优先级。
 
 - `load_config`：加载配置文件和环境变量
 - `get_setting`：获取配置项值
@@ -233,8 +321,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/config.py:1-90](file://ir-cli/ir_cli/config.py#L1-L90)
 
-### HTTP 客户端（client）**增强**
-**增强功能**：封装的后端 API 调用客户端，支持重试、超时和错误处理。
+### HTTP 客户端（client）
+**功能**：封装的后端 API 调用客户端，支持重试、超时和错误处理。
 
 - `request`：发送 HTTP 请求
 - `retry_on_failure`：失败重试机制
@@ -260,8 +348,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/investors.py:1-150](file://ir-cli/ir_cli/commands/investors.py#L1-L150)
 
-### 组合管理（portfolio）**增强**
-**增强功能**：新增 portfolio 上下文聚合，支持批量操作和智能上下文管理。
+### 组合管理（portfolio）
+**功能**：投资组合管理命令组，支持完整的CRUD操作和上下文管理。
 
 - list/create/get/update/close/reactivate/nav-history/returns/cash-flow
 - **新增** context：设置和管理投资组合上下文
@@ -273,8 +361,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/portfolios.py:1-300](file://ir-cli/ir_cli/commands/portfolios.py#L1-L300)
 
-### 申购赎回（sub）**增强**
-**增强功能**：增强的申购赎回确认逻辑和错误处理。
+### 申购赎回（sub）
+**功能**：增强的申购赎回确认逻辑和错误处理。
 
 - list/create/get/confirm/cancel/unconfirm
 - **更新**：确认逻辑现在通过专门的 subscription_service 模块处理，提供更完善的错误处理和日志记录。
@@ -282,8 +370,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/subscriptions.py:1-250](file://ir-cli/ir_cli/commands/subscriptions.py#L1-L250)
 
-### 调仓交易（trade）**增强**
-**增强功能**：CASH交易自动配对腿生成、转账组创建和确认日期计算。
+### 调仓交易（trade）
+**功能**：CASH交易自动配对腿生成、转账组创建和确认日期计算。
 
 - list/create/get/confirm/cancel/unconfirm
 - **重大更新**：CASH交易现在自动处理配对腿生成、转账组创建和确认日期计算，确保与REST API行为完全一致。
@@ -291,8 +379,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/trades.py:1-300](file://ir-cli/ir_cli/commands/trades.py#L1-L300)
 
-### 持仓服务（position）**增强**
-**增强功能**：增强的持仓查询和管理功能。
+### 持仓服务（position）
+**功能**：增强的持仓查询和管理功能。
 
 - calculate_available_cash：以最新快照现金为基础，叠加未入快照的已确认申赎与 pending/已确认调仓影响。
 - calculate_available_shares：以最新快照份额为基础，扣减 pending/未入快照的已确认卖出份额。
@@ -310,8 +398,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/tasks.py:1-180](file://ir-cli/ir_cli/commands/tasks.py#L1-L180)
 
-### 快照管理（snapshot）**增强**
-**增强功能**：优化的快照生成和验证流程。
+### 快照管理（snapshot）
+**功能**：优化的快照生成和验证流程。
 
 - generate/recalculate/validate/status/delete
 - 生成顺序：portfolio_position → portfolio_value_snapshot → investor_holding
@@ -322,8 +410,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/snapshots.py:1-220](file://ir-cli/ir_cli/commands/snapshots.py#L1-L220)
 
-### 通知管理（notification）**全新**
-**全新功能**：专门的通知管理命令组，提供完整的CRUD操作。
+### 通知管理（notification）
+**功能**：专门的通知管理命令组，提供完整的CRUD操作。
 
 - list：查询通知列表，支持分页和过滤
 - create：创建新通知，支持多种通知类型和优先级
@@ -334,8 +422,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/notifications.py:1-120](file://ir-cli/ir_cli/commands/notifications.py#L1-L120)
 
-### 同步作业管理（sync-job）**新增**
-**全新功能**：专门的价格同步任务管理命令组，支持后台异步执行和进度跟踪。
+### 同步作业管理（sync-job）
+**功能**：专门的价格同步任务管理命令组，支持后台异步执行和进度跟踪。
 
 - status：查询同步任务状态与进度
 - details：查询同步任务逐产品明细
@@ -343,8 +431,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/sync_jobs.py:1-50](file://ir-cli/ir_cli/commands/sync_jobs.py#L1-L50)
 
-### 市场数据管理（market）**增强**
-**增强功能**：批量价格同步后台任务和异步执行。
+### 市场数据管理（market）
+**功能**：批量价格同步后台任务和异步执行。
 
 - price/sync/sync-history/sync-nav：基础市场数据操作
 - **新增** sync-all：批量价格同步后台任务，支持全量或按产品范围同步
@@ -352,8 +440,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/market_data.py:1-150](file://ir-cli/ir_cli/commands/market_data.py#L1-L150)
 
-### 产品管理（product）**增强**
-**增强功能**：增强的产品列表过滤功能。
+### 产品管理（product）
+**功能**：增强的产品列表过滤功能。
 
 - list/create/get/update/delete：产品CRUD操作
 - **增强** list 命令：新增更多过滤参数支持，支持按产品类型过滤、分页查询和全部数据导出
@@ -361,8 +449,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/products.py:1-180](file://ir-cli/ir_cli/commands/products.py#L1-L180)
 
-### 份额变动事件（share-event）**改进**
-**改进功能**：增强的参数支持和数据处理。
+### 份额变动事件（share-event）
+**功能**：增强的参数支持和数据处理。
 
 - list/create/get/update/delete/confirm/cancel：份额变动事件管理
 - **改进**：增强的参数支持，提供更灵活的配置选项
@@ -370,8 +458,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/share_events.py:1-250](file://ir-cli/ir_cli/commands/share_events.py#L1-L250)
 
-### 资金转账（cash-transfer）**新增**
-**全新功能**：资金转账管理命令组。
+### 资金转账（cash-transfer）
+**功能**：资金转账管理命令组。
 
 - list：查询转账记录
 - create：创建新的资金转账
@@ -381,8 +469,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/cash_transfers.py:1-150](file://ir-cli/ir_cli/commands/cash_transfers.py#L1-L150)
 
-### 日志管理（logs）**新增**
-**全新功能**：系统日志查询和管理命令组。
+### 日志管理（logs）
+**功能**：系统日志查询和管理命令组。
 
 - list：查询系统日志
 - search：搜索特定日志
@@ -391,8 +479,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/logs.py:1-100](file://ir-cli/ir_cli/commands/logs.py#L1-L100)
 
-### 系统管理（system）**新增**
-**全新功能**：系统运维管理命令组。
+### 系统管理（system）
+**功能**：系统运维管理命令组。
 
 - health：检查系统健康状态
 - info：获取系统信息
@@ -401,8 +489,8 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/system.py:1-120](file://ir-cli/ir_cli/commands/system.py#L1-L120)
 
-### 平台管理（platform）**新增**
-**全新功能**：交易平台管理命令组。
+### 平台管理（platform）
+**功能**：交易平台管理命令组。
 
 - list：查询交易平台列表
 - create：创建新的交易平台
@@ -420,8 +508,10 @@ Output --> End(["结束"])
 - schema 层提供完整的接口文档和参数验证。
 - hints 层提供智能错误提示和解决方案建议。
 - pyproject.toml 定义包配置和 entry point，使安装后可直接使用 ir 命令。
+- **新增** config_cmd 模块专门处理配置管理相关操作。
+- **新增** install.sh 脚本提供自动化的安装和配置流程，**支持 --ref 参数**。
 
-**更新**：新增的 ir-cli 包架构包含完整的 schema 系统、错误提示系统、配置管理系统和 HTTP 客户端封装，提供更好的模块化设计和可维护性。
+**更新**：新增的 ir-cli 包架构包含完整的 schema 系统、错误提示系统、配置管理系统和 HTTP 客户端封装，提供更好的模块化设计和可维护性。新增的配置命令模块和安装脚本进一步完善了工具的功能完整性。**安装脚本的 --ref 参数支持为开发和调试提供了更大的灵活性。**
 
 ```mermaid
 graph LR
@@ -433,9 +523,12 @@ Main --> Hints["ir_cli/hints.py"]
 Main --> Config["ir_cli/config.py"]
 Main --> Client["ir_cli/client.py"]
 Main --> Cmds["ir_cli/commands/*"]
+Main --> ConfigCmd["config_cmd.py"]
 Cmds --> Services["后端API服务"]
 Client --> API["OpenAPI规范"]
 Config --> PyProj["pyproject.toml"]
+ConfigCmd --> Config
+InstallScript --> PyProj
 Schema --> API
 ```
 
@@ -447,6 +540,8 @@ Schema --> API
 - [ir-cli/ir_cli/hints.py:1-120](file://ir-cli/ir_cli/hints.py#L1-L120)
 - [ir-cli/ir_cli/config.py:1-90](file://ir-cli/ir_cli/config.py#L1-L90)
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
+- [ir-cli/ir_cli/commands/config_cmd.py:1-100](file://ir-cli/ir_cli/commands/config_cmd.py#L1-L100)
+- [ir-cli/install.sh:1-50](file://ir-cli/install.sh#L1-L50)
 - [ir-cli/pyproject.toml:1-50](file://ir-cli/pyproject.toml#L1-L50)
 
 章节来源
@@ -460,8 +555,10 @@ Schema --> API
 - **可扩展点**：新增命令只需在 main.py 注册对应命令组，并在 commands 下新建模块即可。
 - **插件架构**：支持自定义命令组和中间件扩展。
 - **批处理优化**：支持批量操作和并行处理，提升大规模数据处理效率。
+- **配置缓存**：配置信息本地缓存，减少重复加载开销。
+- **安装优化**：安装脚本支持断点续传和错误恢复，**新增版本控制支持**。
 
-**更新**：全新的 ir-cli 包架构提供更好的性能优化和扩展性，包括连接池管理、schema 缓存、批处理优化和插件架构支持。
+**更新**：全新的 ir-cli 包架构提供更好的性能优化和扩展性，包括连接池管理、schema 缓存、批处理优化和插件架构支持。新增的配置缓存和安装优化进一步提升了工具的性能和用户体验。**安装脚本的版本控制支持为开发和测试提供了更好的灵活性。**
 
 章节来源
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
@@ -486,9 +583,12 @@ Schema --> API
   - INVALID_CASH_TRADE：无效的CASH交易结构（缺少配对腿或转账组）。
   - NOTIFICATION_NOT_FOUND：通知记录不存在。
   - INVALID_NOTIFICATION_TYPE：不支持的通知类型。
-  - **新增** SCHEMA_VALIDATION_ERROR：OpenAPI schema 验证失败。
-  - **新增** HINT_GENERATION_ERROR：错误提示生成失败。
-  - **新增** CONFIG_LOAD_ERROR：配置加载失败。
+  - SCHEMA_VALIDATION_ERROR：OpenAPI schema 验证失败。
+  - HINT_GENERATION_ERROR：错误提示生成失败。
+  - CONFIG_LOAD_ERROR：配置加载失败。
+  - **新增** CONFIG_INVALID_ERROR：配置项无效或格式错误。
+  - **新增** INSTALL_ENV_ERROR：安装环境检查失败。
+  - **新增** REFERENCE_NOT_FOUND_ERROR：指定的分支、标签或提交不存在。
 
 **更新**：增强的错误处理包括：
 - **智能错误提示**：基于 hints 系统的自动错误分析和解决方案建议
@@ -496,15 +596,22 @@ Schema --> API
 - **详细错误消息**：包含上下文信息和调试建议
 - **静默模式支持**：--quiet 模式下输出精简的错误信息
 - **自动化友好**：结构化错误输出，便于程序化处理
+- **配置错误诊断**：专门的配置错误检测和修复建议
+- **安装问题诊断**：安装脚本的错误检测和自动修复
+- **版本控制错误诊断**：针对 --ref 参数的错误处理和修复建议
 
 - **调试建议**
   - 查看 stderr 堆栈：context 在非 SystemExit 异常时会打印完整堆栈到 stderr。
   - 使用 jq 解析 JSON 输出，快速定位 data/error 字段。
   - 对于 QDII 净值缺失，先执行市场数据同步再重试确认。
-  - **新增** 使用 `ir schema validate` 检查 OpenAPI schema 有效性。
-  - **新增** 使用 `ir hints analyze <error>` 获取智能错误提示。
-  - **新增** 启用 --verbose 模式查看详细调试信息。
-  - **新增** 检查配置文件和权限设置。
+  - 使用 `ir schema validate` 检查 OpenAPI schema 有效性。
+  - 使用 `ir hints analyze <error>` 获取智能错误提示。
+  - 启用 --verbose 模式查看详细调试信息。
+  - 检查配置文件和权限设置。
+  - **新增** 使用 `ir config validate` 验证配置有效性。
+  - **新增** 使用 `ir config export` 导出当前配置进行备份。
+  - **新增** 检查安装脚本的执行日志和错误输出。
+  - **新增** 验证 --ref 参数指定的版本是否存在：`git ls-remote --heads --tags origin <ref>`
 
 章节来源
 - [ir-cli/ir_cli/context.py:1-80](file://ir-cli/ir_cli/context.py#L1-L80)
@@ -516,7 +623,7 @@ Schema --> API
 ## 结论
 InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑下沉至后端服务层，并通过 Typer 暴露稳定、可解析的 JSON 接口，特别适合 AI Agent 自动化编排。其分层清晰、错误处理规范、输出格式统一，具备良好的可维护性与扩展性。
 
-**更新总结**：最新的 ir-cli 包架构引入了 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能，显著提升了 AI 代理友好性和自动化处理能力。这些改进使 CLI 成为更智能的自文档化接口，支持程序化交互和更好的自动化处理，为企业级应用提供了强大的命令行工具支持。
+**更新总结**：最新的 ir-cli 包架构引入了 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。新增的配置命令模块和增强的安装脚本进一步完善了工具的功能完整性，显著提升了 AI 代理友好性和自动化处理能力。**安装脚本的 --ref 参数支持为开发和调试工作提供了更大的灵活性，允许用户安装特定版本的 CLI 工具进行测试和问题排查。**这些改进使 CLI 成为更智能的自文档化接口，支持程序化交互和更好的自动化处理，为企业级应用提供了强大的命令行工具支持。
 
 ## 附录：命令清单与用法要点
 - **auth**
@@ -560,10 +667,25 @@ InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑
   - status/details：同步任务管理，支持状态查询和明细查看。
 - **notification**
   - list/create/get/update/delete：通知管理，支持通知的完整生命周期管理。
+- **config**
+  - **新增** list：列出当前配置项
+  - **新增** get：获取特定配置项的值
+  - **新增** set：设置配置项的值
+  - **新增** validate：验证配置的有效性
+  - **新增** export：导出当前配置
+  - **新增** import：导入配置
 
-**更新**：全新的 ir-cli 包架构包含 20 个命令组，约 100+ 条命令，提供完整的投资管理功能覆盖。新增的 schema 自描述系统、智能错误提示、--quiet 模式等功能，使 CLI 更适合 AI 代理和自动化场景使用。
+**更新**：全新的 ir-cli 包架构包含 21 个命令组，约 100+ 条命令，提供完整的投资管理功能覆盖。新增的配置命令模块进一步完善了工具的功能完整性。新增的 schema 自描述系统、智能错误提示、--quiet 模式等功能，使 CLI 更适合 AI 代理和自动化场景使用。
 
 **新增**：workflows 配方功能支持预定义的工作流模板，简化复杂业务场景的自动化编排。
+
+**安装脚本增强**：
+- **新增** --ref 参数：支持指定分支、标签或提交版本进行安装
+- **用法示例**：
+  - `./install.sh --ref main`：安装 main 分支
+  - `./install.sh --ref v1.0.0`：安装 v1.0.0 标签
+  - `./install.sh --ref abc123`：安装特定提交
+- **版本控制优势**：便于开发、测试和调试特定版本的 CLI 工具
 
 章节来源
 - [ir-cli/ir_cli/main.py:1-100](file://ir-cli/ir_cli/main.py#L1-L100)
@@ -584,3 +706,4 @@ InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑
 - [ir-cli/ir_cli/commands/platforms.py:1-150](file://ir-cli/ir_cli/commands/platforms.py#L1-L150)
 - [ir-cli/ir_cli/commands/sync_jobs.py:1-50](file://ir-cli/ir_cli/commands/sync_jobs.py#L1-L50)
 - [ir-cli/ir_cli/commands/notifications.py:1-120](file://ir-cli/ir_cli/commands/notifications.py#L1-L120)
+- [ir-cli/ir_cli/commands/config_cmd.py:1-100](file://ir-cli/ir_cli/commands/config_cmd.py#L1-L100)
