@@ -478,15 +478,19 @@ def _delete_existing_snapshots(
         )
     ).rowcount
     
-    nav_deleted = db.query(PortfolioValueSnapshot).filter(
-        PortfolioValueSnapshot.portfolio_code == portfolio_code,
-        PortfolioValueSnapshot.snapshot_date == target_date
-    ).delete()
-    
-    ih_deleted = db.query(InvestorHolding).filter(
-        InvestorHolding.portfolio_code == portfolio_code,
-        InvestorHolding.snapshot_date == target_date
-    ).delete()
+    nav_deleted = db.execute(
+        delete(PortfolioValueSnapshot).where(
+            PortfolioValueSnapshot.portfolio_code == portfolio_code,
+            PortfolioValueSnapshot.snapshot_date == target_date,
+        )
+    ).rowcount
+
+    ih_deleted = db.execute(
+        delete(InvestorHolding).where(
+            InvestorHolding.portfolio_code == portfolio_code,
+            InvestorHolding.snapshot_date == target_date,
+        )
+    ).rowcount
 
     return {
         "cascaded_subscriptions": cascaded,

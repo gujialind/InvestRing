@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Numeric, Date, DateTime, Integer, ForeignKey, func, UniqueConstraint
+from sqlalchemy import Column, String, Numeric, Date, DateTime, Integer, ForeignKey, func, UniqueConstraint, event
 from app.database import Base
 
 
@@ -20,4 +20,21 @@ class InvestorHolding(Base):
 
     __table_args__ = (
         UniqueConstraint('portfolio_code', 'investor_code', 'snapshot_date', name='uix_holding_snapshot'),
+    )
+
+
+# #59 加固：ORM 层兜底，禁止 instance-level update/delete（快照只增不改，与 PortfolioPosition 对齐）
+# bulk delete（db.execute(delete(...))）不触发 instance event，
+# _delete_existing_snapshots 经此绕过（明确表达内部删除意图）。
+@event.listens_for(InvestorHolding, "before_update")
+def _prevent_holding_update(mapper, connection, target):
+    raise RuntimeError(
+        "investor_holding 快照不可更新，请使用 recalculate_snapshots 重算"
+    )
+
+
+@event.listens_for(InvestorHolding, "before_delete")
+def _prevent_holding_delete(mapper, connection, target):
+    raise RuntimeError(
+        "investor_holding 快照不可直接删除，请使用 DELETE /snapshots/{portfolio}/{date}"
     )

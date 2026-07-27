@@ -10,7 +10,7 @@ ERROR_HINTS: dict = {
     "DATE_BEFORE_SNAPSHOT": "日期须晚于最新快照日，用 ir snapshot status <portfolio_code> 查询最新快照日",
     "SNAPSHOT_DEPENDENCY": "记录已被快照纳入，先删除确认日及之后快照: ir snapshot delete-bulk <portfolio_code> <date> --yes，操作完成后需重新生成/重算快照",
     "SNAPSHOT_NOT_CONTINUOUS": "目标日须为最新快照日或其下一交易日，用 ir snapshot status <portfolio_code> 查询后按交易日顺序逐日生成",
-    "NAV_NOT_AVAILABLE": "申请日组合净值缺失: ir market sync-nav 同步组合净值后重试",
+    "NAV_NOT_AVAILABLE": "申请日组合净值快照缺失: ir snapshot status <portfolio_code> 查询最新快照日后，用 ir snapshot generate 按交易日顺序逐日生成至申请日",
     "NON_TRADING_DAY": "仅交易日可操作: ir system calendar 查询交易日历",
     "INSUFFICIENT_CASH": "ir position available-cash <portfolio_code> 查询实时可用现金；pending 卖出不增加可用现金，须先卖出确认后再买入",
     "INSUFFICIENT_SHARES": "ir position available-shares <portfolio_code> <product_code> 查询实时可用份额",

@@ -563,6 +563,56 @@ class TestPositionListener:
             test_db.commit()
 
 
+class TestValueSnapshotListener:
+    """#59 加固：portfolio_value_snapshot ORM 层禁止 instance-level update/delete"""
+
+    def test_update_blocked(self, test_db):
+        create_portfolio(test_db, code="LSTV1", status="active")
+        snap = create_value_snapshot(
+            test_db, "LSTV1", date(2025, 1, 6),
+            total_value=100, total_shares=100, unit_price=1.0,
+        )
+        snap.total_value = Decimal("200")
+        with pytest.raises(RuntimeError):
+            test_db.commit()
+
+    def test_delete_blocked(self, test_db):
+        create_portfolio(test_db, code="LSTV2", status="active")
+        snap = create_value_snapshot(
+            test_db, "LSTV2", date(2025, 1, 6),
+            total_value=100, total_shares=100, unit_price=1.0,
+        )
+        test_db.delete(snap)
+        with pytest.raises(RuntimeError):
+            test_db.commit()
+
+
+class TestInvestorHoldingListener:
+    """#59 加固：investor_holding ORM 层禁止 instance-level update/delete"""
+
+    def test_update_blocked(self, test_db):
+        create_portfolio(test_db, code="LSTH1", status="active")
+        create_investor(test_db, code="INV_L1")
+        holding = create_investor_holding(
+            test_db, portfolio_code="LSTH1", investor_code="INV_L1",
+            snapshot_date=date(2025, 1, 6), shares=100.0,
+        )
+        holding.shares = Decimal("200")
+        with pytest.raises(RuntimeError):
+            test_db.commit()
+
+    def test_delete_blocked(self, test_db):
+        create_portfolio(test_db, code="LSTH2", status="active")
+        create_investor(test_db, code="INV_L2")
+        holding = create_investor_holding(
+            test_db, portfolio_code="LSTH2", investor_code="INV_L2",
+            snapshot_date=date(2025, 1, 6), shares=100.0,
+        )
+        test_db.delete(holding)
+        with pytest.raises(RuntimeError):
+            test_db.commit()
+
+
 class TestCashIncrementalWithManual:
     """快照 CASH 增量累加 + manual_market_value 绝对覆盖"""
 

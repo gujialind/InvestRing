@@ -5,10 +5,6 @@ from sqlalchemy import and_
 
 from app.models.price_record import PriceRecord
 from app.models.product import Product
-from app.models.portfolio import Portfolio
-from app.models.portfolio_position import PortfolioPosition
-from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
-from app.models.investor_holding import InvestorHolding
 from app.services.tushare_client import get_fund_daily, get_fund_nav, TushareAPIError
 
 
@@ -259,106 +255,6 @@ def _bulk_upsert_prices(
                 db.add(PriceRecord(**v))
 
     return len(values)
-
-
-def sync_portfolio_nav(
-    db: Session,
-    portfolio_code: str,
-) -> Dict[str, Any]:
-    """
-    同步组合净值
-
-    根据持仓和最新价格重新计算组合净值
-
-    Warning:
-        遗留函数：直接 UPDATE 已有 portfolio_value_snapshot，违反快照只增不改
-        不变量（AGENTS.md §2.1；ORM 兜底 listener 仅挂在 PortfolioPosition，
-        此处拦不住），且绕过快照连续性与三表生成顺序。前端未使用，
-        仅 ir-cli 暴露，是否废弃待单独 issue 决策。不 commit，事务交调用方。
-
-    Args:
-        db: 数据库会话
-        portfolio_code: 组合代码
-
-    Returns:
-        同步结果
-    """
-    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
-    if not portfolio:
-        raise ValueError(f"组合 {portfolio_code} 不存在")
-
-    if portfolio.status != "active":
-        return {"success": False, "message": "组合未激活，无法同步净值"}
-
-    positions = db.query(PortfolioPosition).filter(
-        PortfolioPosition.portfolio_code == portfolio_code
-    ).all()
-
-    if not positions:
-        return {"success": False, "message": "组合无持仓，无法计算净值"}
-
-    total_value = 0.0
-    total_shares = 0.0
-
-    for position in positions:
-        if position.asset_type == "cash":
-            total_value += float(position.amount or 0)
-            continue
-
-        latest_price = get_latest_price(
-            db, position.product_code, position.market
-        )
-
-        if latest_price:
-            position_value = float(position.shares or 0) * float(latest_price.unit_price)
-            total_value += position_value
-
-    latest_snapshot = db.query(PortfolioValueSnapshot).filter(
-        PortfolioValueSnapshot.portfolio_code == portfolio_code
-    ).order_by(PortfolioValueSnapshot.snapshot_date.desc()).first()
-
-    if latest_snapshot:
-        total_shares = float(latest_snapshot.total_shares)
-    else:
-        total_shares = total_value
-
-    if total_shares == 0:
-        return {"success": False, "message": "组合份额为0，无法计算净值"}
-
-    unit_price = total_value / total_shares
-
-    today = date.today()
-
-    existing_snapshot = db.query(PortfolioValueSnapshot).filter(
-        and_(
-            PortfolioValueSnapshot.portfolio_code == portfolio_code,
-            PortfolioValueSnapshot.snapshot_date == today,
-        )
-    ).first()
-
-    if existing_snapshot:
-        existing_snapshot.total_value = total_value
-        existing_snapshot.total_shares = total_shares
-        existing_snapshot.unit_price = unit_price
-    else:
-        new_snapshot = PortfolioValueSnapshot(
-            portfolio_code=portfolio_code,
-            snapshot_date=today,
-            total_value=total_value,
-            total_shares=total_shares,
-            unit_price=unit_price,
-        )
-        db.add(new_snapshot)
-
-    db.flush()
-
-    return {
-        "success": True,
-        "message": "组合净值已更新",
-        "total_value": total_value,
-        "total_shares": total_shares,
-        "unit_price": unit_price,
-    }
 
 
 # ==================== 后台任务编排（P3.1） ====================

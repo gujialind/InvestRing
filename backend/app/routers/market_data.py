@@ -8,7 +8,6 @@ from app.services.market_data_service import (
     get_price_records,
     get_latest_price,
     sync_price_data,
-    sync_portfolio_nav,
 )
 
 router = APIRouter()
@@ -96,27 +95,3 @@ def sync_history(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"同步历史数据失败: {str(e)}")
-
-
-@router.post("/portfolios/{portfolio_code}/sync-nav")
-def sync_portfolio_nav_endpoint(
-    portfolio_code: str,
-    db: Session = Depends(get_db),
-):
-    try:
-        result = sync_portfolio_nav(db, portfolio_code)
-        if result["success"]:
-            # service 不 commit（AGENTS.md §4.1），事务边界在 router
-            db.commit()
-            return result
-        else:
-            db.rollback()
-            raise HTTPException(status_code=400, detail=result["message"])
-    except ValueError as e:
-        db.rollback()
-        raise HTTPException(status_code=404, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"同步组合净值失败: {str(e)}")
