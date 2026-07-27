@@ -29,13 +29,10 @@
 
 ## 更新摘要
 **变更内容**
-- 新增同步作业管理API：支持批量价格同步任务提交、状态查询和进度监控
-- 增强错误追踪机制：详细的任务执行日志和失败原因记录
-- 改进进度监控：实时跟踪批量同步任务的执行进度和成功率
-- 新增并发控制：单运行锁机制防止重复任务提交
-- 完善数据模型：新增sync_job表和nav_sync_detail表的job_id关联
-- **产品管理API增强**：GET /api/products 端点新增 market、data_source、data_source_status 过滤参数
-- **交易验证增强**：POST /api/trades 端点对 CN_EXCHANGE 市场交易强制正数价格验证
+- **移除组合净值同步API**：POST /api/market-data/portfolios/{code}/sync-nav 端点已完全移除，因数据完整性问题
+- **更新净值计算方式**：引导用户使用 ir snapshot generate 进行正确的净值计算
+- **简化市场数据同步流程**：移除可能导致数据不一致的组合净值同步功能
+- **增强文档准确性**：移除对已弃用功能的引用，提供替代方案指导
 
 ## 目录
 1. [简介](#简介)
@@ -54,12 +51,13 @@
 - **市场数据同步**：支持手动触发、历史回补、批量导入策略
 - **同步作业管理**：新增批量价格同步任务管理、状态查询和进度监控
 - **交易日历同步**：按年份同步与查询
-- **组合净值同步**：基于持仓与最新价格计算
 - **数据质量检查**：通过返回统计与状态字段进行质量核验
 - **同步状态与历史**：通过任务日志、明细表与作业系统追踪
 - **并发控制与错误恢复**：基于数据库事务、幂等、重试策略与单运行锁
 - **产品筛选增强**：支持按市场类型、数据源和数据源状态过滤产品
 - **交易验证增强**：场内交易强制正数价格验证，确保数据完整性
+
+**重要更新**：组合净值同步API（POST /api/market-data/portfolios/{code}/sync-nav）已完全移除。用户应使用 `ir snapshot generate` 命令进行正确的净值计算，以确保数据完整性。
 
 本 API 基于 FastAPI 提供，采用 Bearer Token 认证，部分管理类接口要求管理员权限。
 
@@ -81,9 +79,9 @@ R5["/api/products<br/>产品管理路由"]
 R6["/api/trades<br/>交易管理路由"]
 end
 subgraph "服务层"
-S1["市场数据服务<br/>sync_price_data / sync_portfolio_nav"]
+S1["市场数据服务<br/>sync_price_data"]
 S2["交易日历服务<br/>sync_trading_calendar / get_calendar_query"]
-S3["Tushare 客户端<br/>get_fund_daily / get_fund_nav / get_trade_calendar"]
+S3["Tushare 客户端<br/>get_fund_daily / get_trade_calendar"]
 S4["同步作业服务<br/>submit_price_sync_job / recover_orphan_jobs"]
 end
 subgraph "模型层"
@@ -138,7 +136,8 @@ R4 --> M5
 
 ## 核心组件
 - 市场数据路由与服务
-  - 提供价格数据查询、手动同步、历史回补、组合净值同步
+  - 提供价格数据查询、手动同步、历史回补
+  - **已移除**：组合净值同步功能（POST /api/market-data/portfolios/{code}/sync-nav）
 - **同步作业管理路由与服务**（新增）
   - 提供批量价格同步任务提交、状态查询、进度监控和错误追踪
 - 交易日历路由与服务
@@ -477,14 +476,10 @@ Commit --> Done(["返回交易对象"])
   - 示例请求：POST /api/market-data/products/123456/CN_EXCHANGE/sync-history
   - 示例响应：见"附录-请求/响应示例"
 
-- 组合净值同步
-  - 方法与路径：POST /api/market-data/portfolios/{portfolio_code}/sync-nav
-  - 权限：需登录（Bearer Token）
-  - 行为：根据组合持仓与最新价格计算净值，并写入快照
-  - 响应：包含 success、message、total_value、total_shares、unit_price
-  - 错误：404 组合不存在或未激活；500 内部错误
-  - 示例请求：POST /api/market-data/portfolios/P001/sync-nav
-  - 示例响应：见"附录-请求/响应示例"
+**已移除**：组合净值同步API（POST /api/market-data/portfolios/{code}/sync-nav）
+- **移除原因**：数据完整性问题
+- **替代方案**：使用 `ir snapshot generate` 命令进行净值计算
+- **影响**：所有相关文档和示例需要更新
 
 ```mermaid
 flowchart TD
@@ -554,9 +549,9 @@ API-->>C : "200 OK / 503 / 500"
 
 **图表来源**
 - [backend/app/routers/trading_calendar.py:48-81](file://backend/app/routers/trading_calendar.py#L48-L81)
-- [backend/app/services/trading_calendar_service.py:15-66](file://backend/app/services/trading_calendar_service.py#L15-L66)
-- [backend/app/services/tushare_client.py:48-102](file://backend/app/services/tushare_client.py#L48-L102)
-- [backend/app/models/trading_calendar.py:5-13](file://backend/app/models/trading_calendar.py#L5-L13)
+- [backend/app/services/trading_calendar_service.py:15-66](file://backend/app/services/trading_calendar_service.py#L15-66)
+- [backend/app/services/tushare_client.py:48-102](file://backend/app/services/tushare_client.py#L48-102)
+- [backend/app/models/trading_calendar.py:5-13](file://backend/app/models/trading_calendar.py#L5-13)
 
 **章节来源**
 - [backend/app/routers/trading_calendar.py:24-81](file://backend/app/routers/trading_calendar.py#L24-L81)
@@ -695,6 +690,10 @@ M2 --> DS["data_source_status字段"]
   - **NON_TRADING_DAY：非交易日交易**
   - **PORTFOLIO_NOT_ACTIVE：组合未激活**
   - **DATE_BEFORE_SNAPSHOT：交易日早于最新快照日**
+- **已移除功能说明**
+  - **组合净值同步API（POST /api/market-data/portfolios/{code}/sync-nav）已完全移除**
+  - **数据完整性问题导致该功能被移除**
+  - **用户应使用 `ir snapshot generate` 命令进行净值计算**
 - 错误恢复机制
   - 服务层捕获异常并回滚事务，必要时更新产品状态为 failed
   - 任务执行日志记录错误堆栈与消息，便于定位问题
@@ -706,6 +705,7 @@ M2 --> DS["data_source_status字段"]
   - 查看任务执行日志与净值同步明细表
   - **使用GET /api/sync-jobs/{job_id}/details获取详细的执行明细**
   - **验证场内交易是否提供了有效的正数价格**
+  - **对于净值计算需求，使用 `ir snapshot generate` 命令**
   - 确认 .env 中 TUSHARE_TOKEN 已正确配置
 
 **章节来源**
@@ -723,6 +723,8 @@ M2 --> DS["data_source_status字段"]
 
 ## 结论
 本数据同步 API 提供了从交易日历、价格数据到组合净值的全链路同步能力，具备完善的权限控制、错误处理与可观测性。**新增的同步作业管理系统大幅增强了批量数据处理能力，支持任务提交、进度监控、错误追踪和并发控制**。通过任务调度、作业系统和明细记录，可实现对批量同步过程的可视化、审计和故障诊断。**产品管理API的多维度过滤功能和交易管理的严格价格验证进一步提升了系统的灵活性和数据完整性**。
+
+**重要更新**：组合净值同步API已完全移除，用户应使用 `ir snapshot generate` 命令进行净值计算，以确保数据完整性。这一变更解决了数据一致性问题，提高了系统的可靠性。
 
 ## 附录
 
@@ -772,9 +774,10 @@ M2 --> DS["data_source_status字段"]
   - 请求：POST /api/market-data/products/123456/CN_EXCHANGE/sync-history
   - 响应：{"success":true,"message":"无新数据需要同步...","synced_count":0}
 
-- 组合净值同步
-  - 请求：POST /api/market-data/portfolios/P001/sync-nav
-  - 响应：{"success":true,"message":"组合净值已更新","total_value":XXX,"total_shares":XXX,"unit_price":XXX}
+**已移除**：组合净值同步API
+- 原请求：POST /api/market-data/portfolios/P001/sync-nav
+- 原响应：{"success":true,"message":"组合净值已更新","total_value":XXX,"total_shares":XXX,"unit_price":XXX}
+- **替代方案**：使用 `ir snapshot generate` 命令进行净值计算
 
 - **新增：提交批量同步任务**
   - 请求：POST /api/sync-jobs/price

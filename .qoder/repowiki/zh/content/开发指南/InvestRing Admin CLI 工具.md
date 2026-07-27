@@ -34,9 +34,9 @@
 
 ## 更新摘要
 **变更内容**   
-- **增强安装脚本（install.sh）**：新增 --ref 参数支持，允许用户安装特定分支、标签或提交的版本
-- **开发版本支持**：支持安装开发分支、测试版本和特定提交进行调试
-- **版本控制集成**：改进的版本管理机制，提供更灵活的部署选项
+- **移除弃用命令**：从 ir-cli 和 backend/cli 中移除了已弃用的 'ir market sync-nav' CLI 命令
+- **迁移指导**：用户应迁移到 'ir snapshot generate' 命令以遵循交易日序列进行正确的净值生成
+- **文档更新**：更新了市场数据管理章节，反映命令结构的变更和新的最佳实践
 
 ## 目录
 1. [简介](#简介)
@@ -53,7 +53,7 @@
 ## 简介
 InvestRing Admin CLI 是一个专为 AI Agent 设计的现代化命令行工具，基于 Typer 构建，采用独立的 ir-cli 包架构。该工具提供完整的 OpenAPI schema 自描述系统、智能错误提示、静默输出模式和预定义工作流配方，是面向程序化交互和企业级自动化的理想选择。
 
-**最新更新**：全新的 ir-cli 包架构，包含 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。最新的配置命令模块和增强的安装脚本进一步提升了工具的易用性和可维护性。**新增的 --ref 参数支持使开发者能够灵活安装特定版本的 CLI 工具，便于开发和调试工作。**
+**最新更新**：移除了已弃用的 'ir market sync-nav' 命令，用户现在应该使用 'ir snapshot generate' 来生成净值数据。这一变更确保了净值生成遵循正确的交易日序列，提高了数据的准确性和一致性。
 
 ## 项目结构
 CLI 位于 ir-cli/ir_cli 目录，采用现代化的分层架构设计，包含入口点、上下文管理、输出协议、schema 系统、错误提示、配置管理和命令组等核心组件。
@@ -122,9 +122,9 @@ Cfg --> PyProj
 - **配置管理**：集中式配置管理，支持环境变量、配置文件和命令行参数优先级。
 - **HTTP 客户端**：封装的后端 API 调用，支持重试、超时和错误处理。
 - **配置命令模块**：专门的配置管理命令，支持配置的查看、设置和验证操作。
-- **安装脚本**：自动化的安装和配置脚本，简化部署流程，**新增 --ref 参数支持**。
+- **安装脚本**：自动化的安装和配置脚本，简化部署流程，支持 --ref 参数。
 
-**更新**：全新的 ir-cli 包架构，包含 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。新增的配置命令模块和增强的安装脚本进一步提升了工具的完整性和易用性。**安装脚本现在支持通过 --ref 参数指定特定的分支、标签或提交版本进行安装。**
+**更新**：移除了已弃用的 'ir market sync-nav' 命令，现在净值生成通过 'ir snapshot generate' 命令处理，确保遵循正确的交易日序列。
 
 章节来源
 - [ir-cli/ir_cli/main.py:1-100](file://ir-cli/ir_cli/main.py#L1-L100)
@@ -211,14 +211,14 @@ Success --> End
 - [ir-cli/ir_cli/commands/config_cmd.py:1-100](file://ir-cli/ir_cli/commands/config_cmd.py#L1-L100)
 
 ### 安装脚本（install.sh）**增强**
-**增强功能**：改进的安装脚本，支持自动依赖检查和环境配置，**新增 --ref 参数支持**。
+**增强功能**：改进的安装脚本，支持自动依赖检查和环境配置，支持 --ref 参数。
 
 - 自动检测 Python 版本和环境
 - 安装必要的依赖包
 - 创建配置文件模板
 - 设置环境变量
 - 验证安装结果
-- **新增** --ref 参数：支持指定分支、标签或提交版本进行安装
+- 支持 --ref 参数：指定分支、标签或提交版本进行安装
 
 ```mermaid
 flowchart TD
@@ -352,9 +352,9 @@ Output --> End(["结束"])
 **功能**：投资组合管理命令组，支持完整的CRUD操作和上下文管理。
 
 - list/create/get/update/close/reactivate/nav-history/returns/cash-flow
-- **新增** context：设置和管理投资组合上下文
-- **新增** batch-update：批量更新多个投资组合
-- **新增** sync-context：同步投资组合状态
+- context：设置和管理投资组合上下文
+- batch-update：批量更新多个投资组合
+- sync-context：同步投资组合状态
 
 **更新**：portfolio 命令组现在支持上下文聚合，简化批量操作流程。
 
@@ -405,7 +405,7 @@ Output --> End(["结束"])
 - 生成顺序：portfolio_position → portfolio_value_snapshot → investor_holding
 - 校验依赖：交易日、无 pending 交易、净值完整性、份额变动事件状态。
 
-**更新**：snapshots命令组的生成和验证流程得到优化，提供更好的错误处理和进度反馈。
+**更新**：snapshots命令组的生成和验证流程得到优化，提供更好的错误处理和进度反馈。**这是替代已弃用的 'ir market sync-nav' 命令的主要方式。**
 
 章节来源
 - [ir-cli/ir_cli/commands/snapshots.py:1-220](file://ir-cli/ir_cli/commands/snapshots.py#L1-L220)
@@ -431,11 +431,13 @@ Output --> End(["结束"])
 章节来源
 - [ir-cli/ir_cli/commands/sync_jobs.py:1-50](file://ir-cli/ir_cli/commands/sync_jobs.py#L1-L50)
 
-### 市场数据管理（market）
+### 市场数据管理（market）**已更新**
 **功能**：批量价格同步后台任务和异步执行。
 
-- price/sync/sync-history/sync-nav：基础市场数据操作
-- **新增** sync-all：批量价格同步后台任务，支持全量或按产品范围同步
+- price/sync/sync-history：基础市场数据操作
+- **重要变更**：已移除 'sync-nav' 命令，用户应使用 'ir snapshot generate' 进行净值生成
+
+**更新**：移除了已弃用的 'ir market sync-nav' 命令。净值生成现在通过 'ir snapshot generate' 命令处理，确保遵循正确的交易日序列，提高数据准确性。
 
 章节来源
 - [ir-cli/ir_cli/commands/market_data.py:1-150](file://ir-cli/ir_cli/commands/market_data.py#L1-L150)
@@ -508,10 +510,10 @@ Output --> End(["结束"])
 - schema 层提供完整的接口文档和参数验证。
 - hints 层提供智能错误提示和解决方案建议。
 - pyproject.toml 定义包配置和 entry point，使安装后可直接使用 ir 命令。
-- **新增** config_cmd 模块专门处理配置管理相关操作。
-- **新增** install.sh 脚本提供自动化的安装和配置流程，**支持 --ref 参数**。
+- config_cmd 模块专门处理配置管理相关操作。
+- install.sh 脚本提供自动化的安装和配置流程，支持 --ref 参数。
 
-**更新**：新增的 ir-cli 包架构包含完整的 schema 系统、错误提示系统、配置管理系统和 HTTP 客户端封装，提供更好的模块化设计和可维护性。新增的配置命令模块和安装脚本进一步完善了工具的功能完整性。**安装脚本的 --ref 参数支持为开发和调试提供了更大的灵活性。**
+**更新**：移除了已弃用的 'ir market sync-nav' 命令，净值生成功能现在通过 'ir snapshot generate' 命令处理，确保更好的数据一致性和交易日序列遵循。
 
 ```mermaid
 graph LR
@@ -530,6 +532,7 @@ Config --> PyProj["pyproject.toml"]
 ConfigCmd --> Config
 InstallScript --> PyProj
 Schema --> API
+SnapshotCmd["snapshot commands"] --> NavGen["净值生成"]
 ```
 
 **图表来源**
@@ -556,9 +559,9 @@ Schema --> API
 - **插件架构**：支持自定义命令组和中间件扩展。
 - **批处理优化**：支持批量操作和并行处理，提升大规模数据处理效率。
 - **配置缓存**：配置信息本地缓存，减少重复加载开销。
-- **安装优化**：安装脚本支持断点续传和错误恢复，**新增版本控制支持**。
+- **安装优化**：安装脚本支持断点续传和错误恢复，支持版本控制。
 
-**更新**：全新的 ir-cli 包架构提供更好的性能优化和扩展性，包括连接池管理、schema 缓存、批处理优化和插件架构支持。新增的配置缓存和安装优化进一步提升了工具的性能和用户体验。**安装脚本的版本控制支持为开发和测试提供了更好的灵活性。**
+**更新**：净值生成现在通过 'ir snapshot generate' 命令处理，提供更好的性能和可靠性，确保遵循正确的交易日序列。
 
 章节来源
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
@@ -586,9 +589,10 @@ Schema --> API
   - SCHEMA_VALIDATION_ERROR：OpenAPI schema 验证失败。
   - HINT_GENERATION_ERROR：错误提示生成失败。
   - CONFIG_LOAD_ERROR：配置加载失败。
-  - **新增** CONFIG_INVALID_ERROR：配置项无效或格式错误。
-  - **新增** INSTALL_ENV_ERROR：安装环境检查失败。
-  - **新增** REFERENCE_NOT_FOUND_ERROR：指定的分支、标签或提交不存在。
+  - CONFIG_INVALID_ERROR：配置项无效或格式错误。
+  - INSTALL_ENV_ERROR：安装环境检查失败。
+  - REFERENCE_NOT_FOUND_ERROR：指定的分支、标签或提交不存在。
+  - **新增** COMMAND_DEPRECATED_ERROR：使用了已弃用的命令。
 
 **更新**：增强的错误处理包括：
 - **智能错误提示**：基于 hints 系统的自动错误分析和解决方案建议
@@ -599,6 +603,7 @@ Schema --> API
 - **配置错误诊断**：专门的配置错误检测和修复建议
 - **安装问题诊断**：安装脚本的错误检测和自动修复
 - **版本控制错误诊断**：针对 --ref 参数的错误处理和修复建议
+- **弃用命令警告**：当用户使用已弃用的 'ir market sync-nav' 命令时提供迁移指导
 
 - **调试建议**
   - 查看 stderr 堆栈：context 在非 SystemExit 异常时会打印完整堆栈到 stderr。
@@ -608,10 +613,11 @@ Schema --> API
   - 使用 `ir hints analyze <error>` 获取智能错误提示。
   - 启用 --verbose 模式查看详细调试信息。
   - 检查配置文件和权限设置。
-  - **新增** 使用 `ir config validate` 验证配置有效性。
-  - **新增** 使用 `ir config export` 导出当前配置进行备份。
-  - **新增** 检查安装脚本的执行日志和错误输出。
-  - **新增** 验证 --ref 参数指定的版本是否存在：`git ls-remote --heads --tags origin <ref>`
+  - 使用 `ir config validate` 验证配置有效性。
+  - 使用 `ir config export` 导出当前配置进行备份。
+  - 检查安装脚本的执行日志和错误输出。
+  - 验证 --ref 参数指定的版本是否存在：`git ls-remote --heads --tags origin <ref>`
+  - **新增** 如果收到弃用命令错误，使用 `ir snapshot generate` 替代 'ir market sync-nav'
 
 章节来源
 - [ir-cli/ir_cli/context.py:1-80](file://ir-cli/ir_cli/context.py#L1-L80)
@@ -623,7 +629,7 @@ Schema --> API
 ## 结论
 InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑下沉至后端服务层，并通过 Typer 暴露稳定、可解析的 JSON 接口，特别适合 AI Agent 自动化编排。其分层清晰、错误处理规范、输出格式统一，具备良好的可维护性与扩展性。
 
-**更新总结**：最新的 ir-cli 包架构引入了 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。新增的配置命令模块和增强的安装脚本进一步完善了工具的功能完整性，显著提升了 AI 代理友好性和自动化处理能力。**安装脚本的 --ref 参数支持为开发和调试工作提供了更大的灵活性，允许用户安装特定版本的 CLI 工具进行测试和问题排查。**这些改进使 CLI 成为更智能的自文档化接口，支持程序化交互和更好的自动化处理，为企业级应用提供了强大的命令行工具支持。
+**更新总结**：最新的 ir-cli 包架构引入了 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。移除了已弃用的 'ir market sync-nav' 命令，用户现在应该使用 'ir snapshot generate' 进行净值生成，确保遵循正确的交易日序列。新增的配置命令模块和增强的安装脚本进一步完善了工具的功能完整性，显著提升了 AI 代理友好性和自动化处理能力。这些改进使 CLI 成为更智能的自文档化接口，支持程序化交互和更好的自动化处理，为企业级应用提供了强大的命令行工具支持。
 
 ## 附录：命令清单与用法要点
 - **auth**
@@ -632,9 +638,9 @@ InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑
   - list/create/get/update/delete：支持分页与角色更新；删除前校验持有份额。
 - **portfolio**
   - list/create/get/update/close/reactivate/nav-history/returns/cash-flow：close 前校验无 pending 交易。
-  - **新增** context：设置和管理投资组合上下文。
-  - **新增** batch-update：批量更新多个投资组合。
-  - **新增** sync-context：同步投资组合状态。
+  - context：设置和管理投资组合上下文。
+  - batch-update：批量更新多个投资组合。
+  - sync-context：同步投资组合状态。
 - **sub**
   - list/create/get/confirm/cancel/unconfirm：创建校验交易日与可用份额；确认时首次申购净值固定 1.0000。
 - **trade**
@@ -643,14 +649,14 @@ InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑
 - **share-event**
   - list/create/get/update/delete/confirm/cancel：用于分红等份额变动事件，支持丰富的参数配置。
 - **market**
-  - price/sync/sync-history/sync-nav：查询与同步价格、净值。
-  - **新增** sync-all：批量价格同步，支持后台异步执行和进度跟踪。
+  - price/sync/sync-history：查询与同步价格。
+  - **重要变更**：已移除 'sync-nav' 命令，请使用 'ir snapshot generate' 进行净值生成。
 - **product**
   - list/create/get/update/delete：产品管理，list 支持按类型过滤和分页。
 - **position**
   - list/create/get/update/delete：持仓管理，支持多维度查询和统计。
 - **snapshot**
-  - generate/recalculate/validate/status/delete：快照管理，支持生成、重算和验证。
+  - generate/recalculate/validate/status/delete：快照管理，支持生成、重算和验证。**这是净值生成的主要命令**。
 - **subscription**
   - list/create/get/confirm/cancel/unconfirm：申购赎回管理，支持状态流转和确认流程。
 - **cash-transfer**
@@ -668,24 +674,19 @@ InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑
 - **notification**
   - list/create/get/update/delete：通知管理，支持通知的完整生命周期管理。
 - **config**
-  - **新增** list：列出当前配置项
-  - **新增** get：获取特定配置项的值
-  - **新增** set：设置配置项的值
-  - **新增** validate：验证配置的有效性
-  - **新增** export：导出当前配置
-  - **新增** import：导入配置
+  - list：列出当前配置项
+  - get：获取特定配置项的值
+  - set：设置配置项的值
+  - validate：验证配置的有效性
+  - export：导出当前配置
+  - import：导入配置
 
-**更新**：全新的 ir-cli 包架构包含 21 个命令组，约 100+ 条命令，提供完整的投资管理功能覆盖。新增的配置命令模块进一步完善了工具的功能完整性。新增的 schema 自描述系统、智能错误提示、--quiet 模式等功能，使 CLI 更适合 AI 代理和自动化场景使用。
+**更新**：移除了已弃用的 'ir market sync-nav' 命令，净值生成现在通过 'ir snapshot generate' 命令处理，确保遵循正确的交易日序列。
 
-**新增**：workflows 配方功能支持预定义的工作流模板，简化复杂业务场景的自动化编排。
-
-**安装脚本增强**：
-- **新增** --ref 参数：支持指定分支、标签或提交版本进行安装
-- **用法示例**：
-  - `./install.sh --ref main`：安装 main 分支
-  - `./install.sh --ref v1.0.0`：安装 v1.0.0 标签
-  - `./install.sh --ref abc123`：安装特定提交
-- **版本控制优势**：便于开发、测试和调试特定版本的 CLI 工具
+**迁移指导**：
+- **旧命令**：`ir market sync-nav`
+- **新命令**：`ir snapshot generate`
+- **优势**：新的净值生成流程遵循交易日序列，提供更好的数据一致性和准确性
 
 章节来源
 - [ir-cli/ir_cli/main.py:1-100](file://ir-cli/ir_cli/main.py#L1-L100)
