@@ -26,9 +26,34 @@ app = typer.Typer(
     rich_markup_mode=None,  # plain help 输出（无框线/ANSI），降低 AI agent token 消耗；子命令组继承此设置
 )
 
-# 注册 17 个命令组
+
+def _version_callback(value: bool):
+    if value:
+        from importlib.metadata import PackageNotFoundError, version
+
+        from ir_cli.output import success
+
+        try:
+            ver = version("investring-cli")
+        except PackageNotFoundError:
+            ver = "unknown"  # 未安装包直接源码运行时
+        success(data={"name": "investring-cli", "version": ver})
+
+
+@app.callback()
+def main(
+    version: Optional[bool] = typer.Option(
+        None, "--version", callback=_version_callback, is_eager=True,
+        help="显示版本号并退出",
+    ),
+):
+    pass
+
+
+# 注册 18 个命令组
 from ir_cli.commands import (
     auth,
+    config_cmd,
     investors,
     portfolios,
     positions,
@@ -48,6 +73,7 @@ from ir_cli.commands import (
 )
 
 app.add_typer(auth.app, name="auth", help="认证管理")
+app.add_typer(config_cmd.app, name="config", help="本地配置管理")
 app.add_typer(investors.app, name="investor", help="投资人管理")
 app.add_typer(portfolios.app, name="portfolio", help="组合管理")
 app.add_typer(positions.app, name="position", help="持仓管理")
