@@ -3,7 +3,9 @@
 # ============================================================================
 # 范围：仅后端测试（前端未部署，暂不纳入 CI 门禁）
 # 触发条件：push 或 pull request 到 main/dev 分支
-# 测试数据库：SQLite（conftest.py 默认模式，本地与 CI 行为一致）
+# 测试数据库：
+#   - SQLite（conftest.py 默认模式，快速反馈）
+#   - MySQL 8.4 service 容器（对齐生产 RDS，覆盖方言差异 + 迁移链验证）
 # ============================================================================
 
 name: CI
@@ -49,6 +51,72 @@ jobs:
         env:
           SECRET_KEY: test-secret-key-for-ci
           SCHEDULER_ENABLED: "false"
+        run: |
+          pytest tests/ -q --tb=short --strict-markers
+
+  # MySQL 门禁：覆盖 SQLite 测不出的方言差异（VARCHAR 长度、DECIMAL 截断、
+  # 隐式排序、排序规则等），并验证生产启动顺序（create_all → alembic upgrade head）
+  backend-test-mysql:
+    name: "Backend Tests (MySQL)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 库级排序规则对齐生产 RDS（utf8mb3_general_ci，建表默认继承库级设置）
+      - name: Create databases
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot -e "
+            CREATE DATABASE ir_test CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci;
+            CREATE DATABASE ir_migration CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci;"
+
+      # 复刻生产启动顺序：main.py import 期 create_all 建全表，lifespan 内 upgrade head 增量修补
+      - name: Verify migration chain (create_all + alembic upgrade head)
+        env:
+          DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/ir_migration?charset=utf8mb4
+          SECRET_KEY: test-secret-key-for-ci
+          SCHEDULER_ENABLED: "false"
+          DEBUG: "false"
+        run: |
+          python -c "from app.database import engine, Base; import app.models; Base.metadata.create_all(bind=engine)"
+          alembic upgrade head
+          alembic current | grep "(head)"
+
+      - name: Run tests with pytest (MySQL)
+        env:
+          TEST_DB_URL: mysql+pymysql://root:root@127.0.0.1:3306/ir_test?charset=utf8mb4
+          SECRET_KEY: test-secret-key-for-ci
+          SCHEDULER_ENABLED: "false"
+          DEBUG: "false"
         run: |
           pytest tests/ -q --tb=short --strict-markers
 

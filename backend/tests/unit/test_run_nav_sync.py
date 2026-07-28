@@ -59,8 +59,12 @@ class TestIncrementalStart:
 
         run_nav_sync(test_db, log_id=None)
 
-        call_args = mock_sync.call_args_list[0]
-        passed_start_date = call_args.kwargs.get("start_date")
+        # 不依赖产品遍历顺序（SQLite 按插入序、MySQL 按主键序），按 product_code 定位调用
+        target_call = next(
+            c for c in mock_sync.call_args_list
+            if c.kwargs.get("product_code") == "510300.SH"
+        )
+        passed_start_date = target_call.kwargs.get("start_date")
         assert passed_start_date == day_before + timedelta(days=1)
 
 
