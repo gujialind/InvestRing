@@ -93,14 +93,22 @@ app.add_typer(notifications.app, name="notification", help="通知管理")
 
 
 @app.command("schema")
-def schema(group: Optional[str] = typer.Argument(None, help="仅输出指定命令组（如 trade）")):
-    """输出全 CLI 机读结构（命令/参数/枚举/错误码/输出协议），供 AI agent 一次性了解全部指令"""
+def schema(
+    group: Optional[str] = typer.Argument(None, help="仅输出指定命令组（如 trade）"),
+    index: bool = typer.Option(
+        False, "--index",
+        help="仅输出极简命令索引（<1KB）；与命令组参数互斥，同时传报 VALIDATION_ERROR",
+    ),
+):
+    """输出全 CLI 机读结构（命令/参数/枚举/错误码/输出协议/响应字段契约），供 AI agent 一次性了解全部指令"""
     from ir_cli.output import error, success
     from ir_cli.schema import build_schema, is_group
 
+    if index and group:
+        error("VALIDATION_ERROR", "--index 与命令组参数互斥：先 ir schema --index 拿索引，再 ir schema <group> 按组加载")
     root = typer.main.get_command(app)
     try:
-        result = build_schema(root, group)
+        result = build_schema(root, group, index_only=index)
     except KeyError:
         groups = sorted(name for name, cmd in root.commands.items() if is_group(cmd))
         error("VALIDATION_ERROR", f"命令组 '{group}' 不存在，可用命令组: {', '.join(groups)}")

@@ -760,7 +760,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NavHistoryRecord"
+                  },
+                  "title": "Response Get Nav History Api Portfolios  Code  Nav History Get"
+                }
               }
             }
           },
@@ -5591,6 +5597,53 @@
           "user"
         ],
         "title": "LoginResponse"
+      },
+      "NavHistoryRecord": {
+        "properties": {
+          "snapshot_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Snapshot Date"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "total_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Value"
+          },
+          "total_shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Shares"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_date"
+        ],
+        "title": "NavHistoryRecord"
       },
       "PlatformCreate": {
         "properties": {

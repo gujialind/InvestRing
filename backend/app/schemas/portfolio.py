@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import date, datetime
 
 
 class PortfolioBase(BaseModel):
@@ -27,3 +27,10 @@ class PortfolioResponse(PortfolioBase):
 
     class Config:
         from_attributes = True
+
+
+class NavHistoryRecord(BaseModel):
+    snapshot_date: date
+    unit_price: Optional[float] = None
+    total_value: Optional[float] = None
+    total_shares: Optional[float] = None

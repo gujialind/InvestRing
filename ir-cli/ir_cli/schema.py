@@ -10,6 +10,7 @@ CLI 自描述结构生成
 from typing import Any, Optional
 
 from ir_cli.hints import ERROR_HINTS
+from ir_cli.response_fields import RESPONSE_FIELDS
 from ir_cli.utils import ENUMS
 
 # 输出协议与通用约定（与 output.py / client.py / utils.py 保持一致）
@@ -29,6 +30,8 @@ CONVENTIONS = {
     "--all": "list 类命令自动翻页获取全部记录",
     "--full": "list 类命令输出全字段（默认仅摘要字段）",
     "--quiet": "trade/sub 写操作仅输出 {id,status,confirm_date}",
+    "output.fields": "命令条目 output.fields 为响应字段契约：`*`前缀=默认摘要字段，`?`后缀=可空；notes 含字段级警示（如恒为null的字段）",
+    "--index": "ir schema --index 输出极简命令索引（<1KB），再按 ir schema <group> 精确加载，较全量省约59% token",
     "env": ["IR_BASE_URL", "IR_TOKEN", "IR_CONNECT_TIMEOUT", "IR_HTTP_TIMEOUT", "IR_RETRY", "IR_DEBUG"],
 }
 
@@ -127,8 +130,8 @@ def _param_entry(param: Any) -> Optional[dict]:
     return entry
 
 
-def _command_entry(cmd: Any) -> dict:
-    """单个命令 → {"help", "params"}"""
+def _command_entry(cmd: Any, group_name: Optional[str] = None, sub_name: Optional[str] = None) -> dict:
+    """单个命令 → {"help", "params", "output"?}；output 为响应字段契约（命中 RESPONSE_FIELDS 时附加）"""
     entry: dict = {}
     if cmd.help:
         # 只取 docstring 首段，保持紧凑
@@ -136,6 +139,10 @@ def _command_entry(cmd: Any) -> dict:
     params = [e for p in cmd.params if (e := _param_entry(p))]
     if params:
         entry["params"] = params
+    if group_name and sub_name:
+        output = RESPONSE_FIELDS.get(group_name, {}).get(sub_name)
+        if output:
+            entry["output"] = output
     return entry
 
 
@@ -144,13 +151,15 @@ def is_group(cmd: Any) -> bool:
     return hasattr(cmd, "commands")
 
 
-def build_schema(root: Any, group_name: Optional[str] = None) -> dict:
+def build_schema(root: Any, group_name: Optional[str] = None, index_only: bool = False) -> dict:
     """
     构建 CLI 自描述结构。
 
     Args:
         root: typer.main.get_command(app) 得到的顶层命令组
         group_name: 仅输出指定命令组；None 输出全量（含协议/枚举/hints）
+        index_only: 仅输出极简命令索引（协议退出码 + 命令组索引字符串，<1KB），
+                    供 agent 先拿索引再按组加载，节省 token
 
     Raises:
         KeyError: group_name 不存在（由调用方转 VALIDATION_ERROR）
@@ -159,17 +168,28 @@ def build_schema(root: Any, group_name: Optional[str] = None) -> dict:
         name: cmd for name, cmd in root.commands.items()
         if is_group(cmd)
     }
+    if index_only:
+        # 紧凑编码 "组名:子命令1 子命令2;..."：dict-of-lists 约 1.3KB，此编码 <1KB
+        return {
+            "protocol": {"exit_codes": "0=成功 1=业务错误 2=认证(ir auth login) 3=连接/超时"},
+            "groups": ";".join(
+                f"{name}:{' '.join(grp.commands.keys())}" for name, grp in groups.items()
+            ),
+        }
     if group_name is not None:
         if group_name not in groups:
             raise KeyError(group_name)
         target = groups[group_name]
         return {
             "commands": {
-                group_name: {sub: _command_entry(c) for sub, c in target.commands.items()}
+                group_name: {
+                    sub: _command_entry(c, group_name, sub)
+                    for sub, c in target.commands.items()
+                }
             }
         }
     commands = {
-        name: {sub: _command_entry(c) for sub, c in grp.commands.items()}
+        name: {sub: _command_entry(c, name, sub) for sub, c in grp.commands.items()}
         for name, grp in groups.items()
     }
     return {
