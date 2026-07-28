@@ -4,7 +4,12 @@ from typing import Optional
 from datetime import date
 from app.database import get_db
 from app.models.portfolio import Portfolio
-from app.schemas.portfolio import PortfolioCreate, PortfolioUpdate, PortfolioResponse
+from app.schemas.portfolio import (
+    NavHistoryRecord,
+    PortfolioCreate,
+    PortfolioUpdate,
+    PortfolioResponse,
+)
 from app.dependencies import get_current_user, get_current_admin
 from app.services import portfolio_service
 
@@ -96,7 +101,7 @@ def reactivate_portfolio(
     return {"message": "Portfolio reactivated successfully"}
 
 
-@router.get("/{code}/nav-history")
+@router.get("/{code}/nav-history", response_model=list[NavHistoryRecord])
 def get_nav_history(
     code: str,
     start_date: Optional[date] = None,

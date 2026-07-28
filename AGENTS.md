@@ -299,6 +299,8 @@ Next.js `^15.1` + React `^19` + TypeScript `~5.6` + TailwindCSS `^4`（CSS-first
 
 > 详见 `backend/CLI_MANUAL.md`。
 
+ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output.fields`，`*`前缀=默认摘要字段、`?`后缀=可空）与 `--index` 索引模式（极简命令索引，再按 `ir schema <group>` 按需加载）；契约由 `ir-cli/scripts/gen_response_fields.py` 从 `backend/openapi.json` 生成，CI 做一致性校验。
+
 ---
 
 ## 7. 约束与边界速查
