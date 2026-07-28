@@ -29,7 +29,7 @@ def get_price_data(
             PriceDataResponse(
                 product_code=r.product_code,
                 market=r.market,
-                date=r.date,
+                price_date=r.price_date,
                 unit_price=float(r.unit_price),
             )
             for r in records

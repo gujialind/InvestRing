@@ -10,7 +10,7 @@ export interface Position {
   cost_price?: number;
   unit_price?: number;
   market_value?: number;
-  amount?: number;
+  cash_amount?: number;
   frozen_amount?: number;
   profit_loss?: number;
   profit_loss_percent?: number;
@@ -28,7 +28,7 @@ export interface PositionCreate {
   cost_price?: number;
   unit_price?: number;
   market_value?: number;
-  amount?: number;
+  cash_amount?: number;
   frozen_amount?: number;
   snapshot_date: string;
 }
@@ -40,7 +40,7 @@ export interface PositionUpdate {
   cost_price?: number;
   unit_price?: number;
   market_value?: number;
-  amount?: number;
+  cash_amount?: number;
   frozen_amount?: number;
   snapshot_date?: string;
 }

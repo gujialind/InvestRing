@@ -1,5 +1,5 @@
 export interface TradingCalendarDay {
-  date: string;
+  calendar_date: string;
   is_open: boolean;
   week_day: number;
   notes?: string;

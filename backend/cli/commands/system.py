@@ -22,14 +22,14 @@ def get_calendar(
     with cli_context() as db:
         from app.models.trading_calendar import TradingCalendar
 
-        query = db.query(TradingCalendar).order_by(TradingCalendar.date)
+        query = db.query(TradingCalendar).order_by(TradingCalendar.calendar_date)
         if year:
-            query = query.filter(TradingCalendar.date >= f"{year}-01-01",
-                                 TradingCalendar.date <= f"{year}-12-31")
+            query = query.filter(TradingCalendar.calendar_date >= f"{year}-01-01",
+                                 TradingCalendar.calendar_date <= f"{year}-12-31")
         if start_date:
-            query = query.filter(TradingCalendar.date >= parse_date(start_date))
+            query = query.filter(TradingCalendar.calendar_date >= parse_date(start_date))
         if end_date:
-            query = query.filter(TradingCalendar.date <= parse_date(end_date))
+            query = query.filter(TradingCalendar.calendar_date <= parse_date(end_date))
         if is_open is not None:
             query = query.filter(TradingCalendar.is_open == is_open)
 

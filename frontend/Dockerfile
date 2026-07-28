@@ -1,8 +1,9 @@
 # ============================================================================
 # InvestRing 前端 Dockerfile
 # ============================================================================
-# 基于 Node.js 多阶段构建，最终使用 Nginx 或直接运行 Next.js
-# 上下文：项目根目录（docker build -f frontend/Dockerfile .）
+# 基于 Node.js 多阶段构建，最终以 Next.js standalone 模式运行
+# 上下文：frontend 目录（docker build -f frontend/Dockerfile frontend/）
+# 注：根目录 .dockerignore 为后端镜像排除了 frontend/，故不能用根目录作上下文
 # ============================================================================
 
 # ------------------------------------------------------------------
@@ -10,13 +11,16 @@
 # ------------------------------------------------------------------
 FROM node:20-alpine AS deps
 
+# npm 镜像源（可选）：国内环境构建可传 --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
 WORKDIR /app
 
 # 先复制包文件，利用 Docker 层缓存
-COPY frontend/package.json frontend/package-lock.json ./
+COPY package.json package-lock.json ./
 
-# 使用 ci 确保依赖与锁文件完全一致（CI/CD 推荐）
-RUN npm ci --only=production=false
+# 使用 ci 确保依赖与锁文件完全一致（CI/CD 推荐；默认含 devDependencies，构建需要）
+RUN npm ci --registry=$NPM_REGISTRY
 
 # ------------------------------------------------------------------
 # 阶段 2：构建 Next.js 应用
@@ -27,7 +31,7 @@ WORKDIR /app
 
 # 复制依赖和源码
 COPY --from=deps /app/node_modules ./node_modules
-COPY frontend/ .
+COPY . .
 
 # 构建时注入环境变量
 ENV NEXT_TELEMETRY_DISABLED=1 \
@@ -47,25 +51,18 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# 复制构建产物
-COPY --from=builder /app/public ./public
-
-# 启用 Next.js Standalone 输出模式需要下面的复制方式
-# 如果 next.config.js 中配置了 output: 'standalone'，则使用 standalone 目录
-# 否则复制完整构建产物
-
-# 标准模式：复制 .next 和 node_modules
-COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/next.config.js ./next.config.js
-COPY --from=builder /app/tailwind.config.ts ./tailwind.config.ts
-COPY --from=builder /app/postcss.config.js ./postcss.config.js
+# Standalone 模式（next.config.js 中 output: 'standalone'）：
+# 只拷贝运行所需的最小产物，无需完整 node_modules
+# 注意：standalone 不包含 public/ 和 .next/static/，需单独拷贝
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 # 环境变量
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    HOSTNAME="0.0.0.0"
+    HOSTNAME="0.0.0.0" \
+    PORT=3000
 
 # 切换到非 root 用户
 USER nextjs
@@ -73,9 +70,9 @@ USER nextjs
 # 暴露 Next.js 端口
 EXPOSE 3000
 
-# 健康检查
+# 健康检查（用 127.0.0.1：alpine 下 localhost 解析到 IPv6，而 Next 仅监听 IPv4）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/login || exit 1
 
-# 启动 Next.js 生产服务器
-CMD ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]
+# 启动 standalone 服务器（next build 生成的自包含 server.js）
+CMD ["node", "server.js"]

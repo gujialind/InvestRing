@@ -40,11 +40,11 @@ def get_price_records(
     )
 
     if start_date:
-        query = query.filter(PriceRecord.date >= start_date)
+        query = query.filter(PriceRecord.price_date >= start_date)
     if end_date:
-        query = query.filter(PriceRecord.date <= end_date)
+        query = query.filter(PriceRecord.price_date <= end_date)
 
-    query = query.order_by(PriceRecord.date.desc())
+    query = query.order_by(PriceRecord.price_date.desc())
 
     if limit:
         query = query.limit(limit)
@@ -78,9 +78,9 @@ def get_latest_price(
     )
 
     if target_date:
-        query = query.filter(PriceRecord.date <= target_date)
+        query = query.filter(PriceRecord.price_date <= target_date)
 
-    return query.order_by(PriceRecord.date.desc()).first()
+    return query.order_by(PriceRecord.price_date.desc()).first()
 
 
 def get_nav_coverage(
@@ -110,19 +110,19 @@ def get_nav_coverage(
 
     trading_days = {
         row[0]
-        for row in db.query(TradingCalendar.date).filter(
-            TradingCalendar.date >= start_date,
-            TradingCalendar.date <= end_date,
+        for row in db.query(TradingCalendar.calendar_date).filter(
+            TradingCalendar.calendar_date >= start_date,
+            TradingCalendar.calendar_date <= end_date,
             TradingCalendar.is_open.is_(True),
         ).all()
     }
     synced_dates = {
         row[0]
-        for row in db.query(PriceRecord.date).filter(
+        for row in db.query(PriceRecord.price_date).filter(
             PriceRecord.product_code == product_code,
             PriceRecord.market == market,
-            PriceRecord.date >= start_date,
-            PriceRecord.date <= end_date,
+            PriceRecord.price_date >= start_date,
+            PriceRecord.price_date <= end_date,
         ).all()
     }
 
@@ -286,7 +286,7 @@ def _bulk_upsert_prices(
         values.append({
             "product_code": product_code,
             "market": market,
-            "date": d,
+            "price_date": d,
             "unit_price": r.get("unit_price"),
             "accumulated_nav": r.get("accumulated_nav"),
             "pre_close": r.get("pre_close"),
@@ -296,8 +296,8 @@ def _bulk_upsert_prices(
 
     if db.bind.dialect.name == "mysql":
         sql = text("""
-            INSERT INTO price_record (product_code, market, date, unit_price, accumulated_nav, pre_close, pct_change, source)
-            VALUES (:product_code, :market, :date, :unit_price, :accumulated_nav, :pre_close, :pct_change, :source)
+            INSERT INTO price_record (product_code, market, price_date, unit_price, accumulated_nav, pre_close, pct_change, source)
+            VALUES (:product_code, :market, :price_date, :unit_price, :accumulated_nav, :pre_close, :pct_change, :source)
             ON DUPLICATE KEY UPDATE
               unit_price=VALUES(unit_price), accumulated_nav=VALUES(accumulated_nav),
               pre_close=VALUES(pre_close), pct_change=VALUES(pct_change), source=VALUES(source)
@@ -306,7 +306,7 @@ def _bulk_upsert_prices(
     else:
         for v in values:
             existing = db.query(PriceRecord).filter_by(
-                product_code=v["product_code"], market=v["market"], date=v["date"]
+                product_code=v["product_code"], market=v["market"], price_date=v["price_date"]
             ).first()
             if existing:
                 for k in ("unit_price", "accumulated_nav", "pre_close", "pct_change", "source"):
@@ -421,7 +421,7 @@ def _run_price_sync_job_impl(job_id: int):
             try:
                 start_date = None
                 if params.get("job_type") == "price_incremental_sync":
-                    latest = db.query(sa_func.max(PriceRecord.date)).filter(
+                    latest = db.query(sa_func.max(PriceRecord.price_date)).filter(
                         PriceRecord.product_code == product.code,
                         PriceRecord.market == product.market,
                     ).scalar()

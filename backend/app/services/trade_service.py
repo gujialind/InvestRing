@@ -47,7 +47,7 @@ def get_nav_for_trade_confirmation(
     price_record = db.query(PriceRecord).filter(
         PriceRecord.product_code == product_code,
         PriceRecord.market == market,
-        PriceRecord.date == trade_date
+        PriceRecord.price_date == trade_date
     ).first()
 
     if price_record and price_record.unit_price:

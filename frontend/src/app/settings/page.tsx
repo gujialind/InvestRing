@@ -323,9 +323,9 @@ export default function SettingsPage() {
                         </TableHeader>
                         <TableBody>
                           {calendarData.map((day) => (
-                            <TableRow key={day.date}>
-                              <TableCell>{day.date}</TableCell>
-                              <TableCell>{getWeekDay(day.date)}</TableCell>
+                            <TableRow key={day.calendar_date}>
+                              <TableCell>{day.calendar_date}</TableCell>
+                              <TableCell>{getWeekDay(day.calendar_date)}</TableCell>
                               <TableCell>
                                 {day.is_open ? (
                                   <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700">

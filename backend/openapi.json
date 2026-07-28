@@ -2593,6 +2593,87 @@
         }
       }
     },
+    "/api/trades/{id}/preview": {
+      "get": {
+        "tags": [
+          "调仓交易"
+        ],
+        "summary": "Preview Trade Confirm",
+        "description": "确认前预览：返回真实确认将写入的净值/份额/金额，不落库（与 confirm 共用计算实现）",
+        "operationId": "preview_trade_confirm_api_trades__id__preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Id"
+            }
+          },
+          {
+            "name": "confirm_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Confirm Date"
+            }
+          },
+          {
+            "name": "price",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Price"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradePreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/trades/{id}": {
       "get": {
         "tags": [
@@ -5166,9 +5247,9 @@
     "schemas": {
       "CashPositionUpdate": {
         "properties": {
-          "amount": {
+          "cash_amount": {
             "type": "number",
-            "title": "Amount"
+            "title": "Cash Amount"
           },
           "platform_code": {
             "type": "string",
@@ -5189,7 +5270,7 @@
         },
         "type": "object",
         "required": [
-          "amount",
+          "cash_amount",
           "platform_code"
         ],
         "title": "CashPositionUpdate",
@@ -5969,7 +6050,7 @@
             ],
             "title": "Market Value"
           },
-          "amount": {
+          "cash_amount": {
             "anyOf": [
               {
                 "type": "number"
@@ -5978,7 +6059,7 @@
                 "type": "null"
               }
             ],
-            "title": "Amount"
+            "title": "Cash Amount"
           },
           "frozen_amount": {
             "anyOf": [
@@ -6092,7 +6173,7 @@
             ],
             "title": "Market Value"
           },
-          "amount": {
+          "cash_amount": {
             "anyOf": [
               {
                 "type": "number"
@@ -6101,7 +6182,7 @@
                 "type": "null"
               }
             ],
-            "title": "Amount"
+            "title": "Cash Amount"
           },
           "frozen_amount": {
             "anyOf": [
@@ -6213,7 +6294,7 @@
             ],
             "title": "Market Value"
           },
-          "amount": {
+          "cash_amount": {
             "anyOf": [
               {
                 "type": "number"
@@ -6222,7 +6303,7 @@
                 "type": "null"
               }
             ],
-            "title": "Amount"
+            "title": "Cash Amount"
           },
           "frozen_amount": {
             "anyOf": [
@@ -6261,10 +6342,10 @@
             "type": "string",
             "title": "Market"
           },
-          "date": {
+          "price_date": {
             "type": "string",
             "format": "date",
-            "title": "Date"
+            "title": "Price Date"
           },
           "unit_price": {
             "type": "number",
@@ -6275,7 +6356,7 @@
         "required": [
           "product_code",
           "market",
-          "date",
+          "price_date",
           "unit_price"
         ],
         "title": "PriceDataResponse"
@@ -8103,6 +8184,118 @@
         ],
         "title": "TradeCreate"
       },
+      "TradePreviewResponse": {
+        "properties": {
+          "trade": {
+            "$ref": "#/components/schemas/TradeResponse"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/TradePreviewResult"
+          },
+          "paired_cash_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paired Cash Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trade",
+          "preview"
+        ],
+        "title": "TradePreviewResponse"
+      },
+      "TradePreviewResult": {
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "actual_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Amount"
+          },
+          "fee": {
+            "type": "number",
+            "title": "Fee",
+            "default": 0
+          },
+          "confirm_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Date"
+          },
+          "nav_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Date"
+          },
+          "is_otc_nav_fund": {
+            "type": "boolean",
+            "title": "Is Otc Nav Fund",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "TradePreviewResult",
+        "description": "确认前预览的计算结果（与真实确认共用同一计算实现）"
+      },
       "TradeResponse": {
         "properties": {
           "portfolio_code": {
@@ -8380,10 +8573,10 @@
       },
       "TradingCalendarResponse": {
         "properties": {
-          "date": {
+          "calendar_date": {
             "type": "string",
             "format": "date",
-            "title": "Date"
+            "title": "Calendar Date"
           },
           "is_open": {
             "type": "boolean",
@@ -8404,7 +8597,7 @@
         },
         "type": "object",
         "required": [
-          "date"
+          "calendar_date"
         ],
         "title": "TradingCalendarResponse"
       },

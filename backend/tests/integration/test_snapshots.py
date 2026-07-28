@@ -26,7 +26,7 @@ def _setup_cash_snapshot(db, portfolio_code: str, snapshot_date: date, amount: f
     create_position_snapshot(
         db, portfolio_code, "CASH", "",
         snapshot_date=snapshot_date,
-        amount=amount, unit_price=None, cost_price=None,
+        cash_amount=amount, unit_price=None, cost_price=None,
         market_value=amount, platform_code="MYCF", asset_type="cash",
     )
     create_value_snapshot(

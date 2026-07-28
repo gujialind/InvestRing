@@ -280,7 +280,7 @@ export default function PortfolioDetailPage() {
                         <div className="text-right">
                           <p className="font-medium">{formatNumber(position.shares || 0, 2)} 份</p>
                           <p className="text-sm text-muted-foreground">
-                            金额: {formatCurrency(position.amount || 0)}
+                            金额: {formatCurrency(position.cash_amount || 0)}
                           </p>
                         </div>
                       </div>

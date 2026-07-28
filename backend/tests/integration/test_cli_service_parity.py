@@ -63,7 +63,7 @@ class TestCashPositionParity:
 
         resp = client.post(
             "/api/positions/portfolio/PAR_MMV_R/cash-position",
-            json={"amount": 12345.67, "platform_code": "MYCF",
+            json={"cash_amount": 12345.67, "platform_code": "MYCF",
                   "update_date": TRADING_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -75,7 +75,7 @@ class TestCashPositionParity:
             ManualMarketValue.portfolio_code == "PAR_MMV_R",
             ManualMarketValue.platform_code == "MYCF",
             ManualMarketValue.product_code == "CASH",
-            ManualMarketValue.date == TRADING_DAY,
+            ManualMarketValue.value_date == TRADING_DAY,
         ).first()
         assert mmv is not None
         assert float(mmv.market_value) == pytest.approx(12345.67)
@@ -95,7 +95,7 @@ class TestCashPositionParity:
         result = runner.invoke(positions_app, [
             "update-cash", "PAR_MMV_C",
             "--platform-code", "MYCF",
-            "--amount", "12345.67",
+            "--cash-amount", "12345.67",
             "--update-date", TRADING_DAY.isoformat(),
         ])
         assert result.exit_code == 0, result.output
@@ -107,7 +107,7 @@ class TestCashPositionParity:
             ManualMarketValue.portfolio_code == "PAR_MMV_C",
             ManualMarketValue.platform_code == "MYCF",
             ManualMarketValue.product_code == "CASH",
-            ManualMarketValue.date == TRADING_DAY,
+            ManualMarketValue.value_date == TRADING_DAY,
         ).first()
         assert mmv is not None
         assert float(mmv.market_value) == pytest.approx(12345.67)
@@ -126,7 +126,7 @@ class TestCashPositionParity:
         result = runner.invoke(positions_app, [
             "update-cash", "PAR_MMV_N",
             "--platform-code", "MYCF",
-            "--amount", "1000",
+            "--cash-amount", "1000",
             "--update-date", "2025-06-01",
         ])
         assert result.exit_code == 1, result.output

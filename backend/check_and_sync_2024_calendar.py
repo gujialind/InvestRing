@@ -42,12 +42,12 @@ def main():
         # 1. 检查 2024-12-17 是否在数据库中
         print("\n[1] 检查 2024-12-17 是否在数据库中...")
         trading_day = db.query(TradingCalendar).filter(
-            TradingCalendar.date == date(2024, 12, 17)
+            TradingCalendar.calendar_date == date(2024, 12, 17)
         ).first()
 
         if trading_day:
             print(f"✓ 找到记录:")
-            print(f"  日期: {trading_day.date}")
+            print(f"  日期: {trading_day.calendar_date}")
             print(f"  是否交易日: {'是' if trading_day.is_open else '否'}")
             print(f"  创建时间: {trading_day.created_at}")
         else:
@@ -56,8 +56,8 @@ def main():
         # 2. 检查 2024 年全年有多少条记录
         print("\n[2] 检查 2024 年全年交易日历数据...")
         year_2024_count = db.query(TradingCalendar).filter(
-            TradingCalendar.date >= date(2024, 1, 1),
-            TradingCalendar.date <= date(2024, 12, 31)
+            TradingCalendar.calendar_date >= date(2024, 1, 1),
+            TradingCalendar.calendar_date <= date(2024, 12, 31)
         ).count()
 
         print(f"  2024 年已有记录数: {year_2024_count}")
@@ -83,10 +83,10 @@ def main():
         # 4. 找出需要插入的记录
         print("\n[4] 找出需要插入的记录...")
         existing_dates = {
-            row[0] for row in db.query(TradingCalendar.date)
+            row[0] for row in db.query(TradingCalendar.calendar_date)
             .filter(
-                TradingCalendar.date >= date(2024, 1, 1),
-                TradingCalendar.date <= date(2024, 12, 31)
+                TradingCalendar.calendar_date >= date(2024, 1, 1),
+                TradingCalendar.calendar_date <= date(2024, 12, 31)
             )
             .all()
         }
@@ -96,7 +96,7 @@ def main():
             item_date = date.fromisoformat(item["date"])
             if item_date not in existing_dates:
                 new_records.append({
-                    "date": item_date,
+                    "calendar_date": item_date,
                     "is_open": item["is_open"],
                 })
 
@@ -112,12 +112,12 @@ def main():
             # 验证 2024-12-17 是否已存在
             print("\n[6] 验证 2024-12-17...")
             trading_day = db.query(TradingCalendar).filter(
-                TradingCalendar.date == date(2024, 12, 17)
+                TradingCalendar.calendar_date == date(2024, 12, 17)
             ).first()
 
             if trading_day:
                 print(f"✓ 2024-12-17 已成功插入:")
-                print(f"  日期: {trading_day.date}")
+                print(f"  日期: {trading_day.calendar_date}")
                 print(f"  是否交易日: {'是' if trading_day.is_open else '否'}")
             else:
                 print("✗ 2024-12-17 仍未找到，可能插入失败")

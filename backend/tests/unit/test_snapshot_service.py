@@ -305,7 +305,7 @@ class TestGeneratePortfolioValueSnapshot:
             market="",
             platform_code="MYCF",
             shares=None,
-            amount=Decimal(str(market_value)),
+            cash_amount=Decimal(str(market_value)),
             market_value=Decimal(str(market_value)),
             snapshot_date=snapshot_date,
             asset_type="cash",
@@ -423,7 +423,7 @@ class TestGeneratePortfolioPositionCashNone:
         create_position_snapshot(
             test_db, portfolio_code="ZS20", product_code="STK20",
             market="CN_OTC", snapshot_date=date(2025, 3, 3),
-            shares=0.0, amount=None, platform_code="PLAT20",
+            shares=0.0, cash_amount=None, platform_code="PLAT20",
             asset_type="stock", market_value=0.0,
         )
         # 修复前：(None <= 0) 抛 TypeError；修复后：零持仓被跳过
@@ -517,7 +517,7 @@ class TestUnitPriceChangePct:
         return PortfolioPosition(
             portfolio_code=portfolio_code, product_code="CASH", market="",
             platform_code="MYCF", shares=None,
-            amount=Decimal(str(market_value)), market_value=Decimal(str(market_value)),
+            cash_amount=Decimal(str(market_value)), market_value=Decimal(str(market_value)),
             snapshot_date=snapshot_date, asset_type="cash",
         )
 
@@ -550,7 +550,7 @@ class TestFrozenAmount:
         # 前序 CASH 持仓 1000（CASH 产品由 conftest 预置）
         create_position_snapshot(
             test_db, portfolio_code="FA1", product_code="CASH", market="",
-            snapshot_date=date(2025, 1, 6), amount=1000.0, market_value=1000.0,
+            snapshot_date=date(2025, 1, 6), cash_amount=1000.0, market_value=1000.0,
             platform_code="PLAT_FA", asset_type="cash",
         )
         # pending CASH sell 300
@@ -572,7 +572,7 @@ class TestPositionListener:
         create_portfolio(test_db, code="LST1", status="active")
         pos = create_position_snapshot(
             test_db, portfolio_code="LST1", product_code="CASH", market="",
-            snapshot_date=date(2025, 1, 6), amount=100.0, market_value=100.0,
+            snapshot_date=date(2025, 1, 6), cash_amount=100.0, market_value=100.0,
             platform_code="MYCF", asset_type="cash",
         )
         pos.market_value = Decimal("200")
@@ -583,7 +583,7 @@ class TestPositionListener:
         create_portfolio(test_db, code="LST2", status="active")
         pos = create_position_snapshot(
             test_db, portfolio_code="LST2", product_code="CASH", market="",
-            snapshot_date=date(2025, 1, 6), amount=100.0, market_value=100.0,
+            snapshot_date=date(2025, 1, 6), cash_amount=100.0, market_value=100.0,
             platform_code="MYCF", asset_type="cash",
         )
         test_db.delete(pos)
@@ -653,7 +653,7 @@ class TestCashIncrementalWithManual:
         # 前日快照：CASH = 9900
         create_position_snapshot(
             test_db, portfolio_code="MMV_P", product_code="CASH", market="",
-            snapshot_date=date(2025, 3, 7), amount=9900.0, market_value=9900.0,
+            snapshot_date=date(2025, 3, 7), cash_amount=9900.0, market_value=9900.0,
             platform_code="MMV_PLAT", asset_type="cash",
         )
         # 设置 manual_market_value 覆盖为 8888
@@ -667,7 +667,7 @@ class TestCashIncrementalWithManual:
         cash_positions = [p for p in positions if p.product_code == "CASH"]
         assert len(cash_positions) == 1
         # 应被 manual 覆盖为 8888，而非前日 9900
-        assert Decimal(str(cash_positions[0].amount)) == Decimal("8888")
+        assert Decimal(str(cash_positions[0].cash_amount)) == Decimal("8888")
 
     def test_cash_incremental_from_prev_snapshot_plus_window(self, test_db):
         """前日快照 + 窗口内 CASH trades 增量累加"""
@@ -677,7 +677,7 @@ class TestCashIncrementalWithManual:
         # 前日快照：CASH = 5000
         create_position_snapshot(
             test_db, portfolio_code="CV_P", product_code="CASH", market="",
-            snapshot_date=date(2025, 3, 7), amount=5000.0, market_value=5000.0,
+            snapshot_date=date(2025, 3, 7), cash_amount=5000.0, market_value=5000.0,
             platform_code="CV_PLAT", asset_type="cash",
         )
         # 窗口内 CASH buy +3000, CASH sell -1000
@@ -697,7 +697,7 @@ class TestCashIncrementalWithManual:
         cash_positions = [p for p in positions if p.product_code == "CASH"]
         assert len(cash_positions) == 1
         # 5000 + 3000 - 1000 = 7000
-        assert Decimal(str(cash_positions[0].amount)) == Decimal("7000")
+        assert Decimal(str(cash_positions[0].cash_amount)) == Decimal("7000")
 
     def test_cash_manual_inherits_to_next_day(self, test_db):
         """前日 manual 覆盖值作为后续日基线（增量继承）"""
@@ -709,7 +709,7 @@ class TestCashIncrementalWithManual:
         # D-3 快照：CASH = 9900
         create_position_snapshot(
             test_db, portfolio_code="INH_P", product_code="CASH", market="",
-            snapshot_date=date(2025, 3, 7), amount=9900.0, market_value=9900.0,
+            snapshot_date=date(2025, 3, 7), cash_amount=9900.0, market_value=9900.0,
             platform_code="INH_PLAT", asset_type="cash",
         )
         # D-2 有 manual 覆盖为 10000，先生成 D-2 快照
@@ -721,7 +721,7 @@ class TestCashIncrementalWithManual:
         # 模拟 D-2 快照落库（manual 覆盖后的值）
         create_position_snapshot(
             test_db, portfolio_code="INH_P", product_code="CASH", market="",
-            snapshot_date=date(2025, 3, 8), amount=10000.0, market_value=10000.0,
+            snapshot_date=date(2025, 3, 8), cash_amount=10000.0, market_value=10000.0,
             platform_code="INH_PLAT", asset_type="cash",
         )
         # D-1 窗口内申购 +1000
@@ -736,4 +736,4 @@ class TestCashIncrementalWithManual:
         cash_positions = [p for p in positions if p.product_code == "CASH"]
         assert len(cash_positions) == 1
         # 基线 = D-2 快照 10000（含 manual）+ 窗口 1000 = 11000
-        assert Decimal(str(cash_positions[0].amount)) == Decimal("11000")
+        assert Decimal(str(cash_positions[0].cash_amount)) == Decimal("11000")

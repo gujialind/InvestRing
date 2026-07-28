@@ -50,7 +50,7 @@ class TestIncrementalStart:
 
         record = PriceRecord(
             product_code="510300.SH", market="CN_EXCHANGE",
-            date=day_before, unit_price=3.5, source="tushare",
+            price_date=day_before, unit_price=3.5, source="tushare",
         )
         test_db.add(record)
         test_db.commit()
@@ -109,9 +109,9 @@ class TestAutoConfirmCalled:
         from app.models.portfolio import Portfolio
 
         yesterday = datetime.now().date() - timedelta(days=1)
-        cal = test_db.query(TradingCalendar).filter(TradingCalendar.date == yesterday).first()
+        cal = test_db.query(TradingCalendar).filter(TradingCalendar.calendar_date == yesterday).first()
         if not cal:
-            cal = TradingCalendar(date=yesterday, is_open=True, exchange="SSE")
+            cal = TradingCalendar(calendar_date=yesterday, is_open=True, exchange="SSE")
             test_db.add(cal)
         else:
             cal.is_open = True

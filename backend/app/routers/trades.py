@@ -229,6 +229,7 @@ def update_trade(
         sync_transfer_group(db, db_trade, db_trade.status, db_trade.confirm_date)
 
     # 金额字段变动时，同步配对 CASH 腿金额（#46）
+    # 此处 amount 指 trade.amount（交易金额），与 portfolio_position.cash_amount 无关
     amount_fields = {"actual_amount", "amount", "fee", "shares", "price"}
     if db_trade.transfer_group and db_trade.product_code != "CASH":
         if update_data.keys() & amount_fields:

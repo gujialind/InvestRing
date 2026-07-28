@@ -90,7 +90,7 @@ def get_cash_value(
     获取指定日期的现金值（含 manual_market_value 绝对替换）。
 
     基础 = compute_cash_balance(target_date)
-    若存在 manual_market_value 覆盖（date == target_date），则绝对替换。
+    若存在 manual_market_value 覆盖（value_date == target_date），则绝对替换。
 
     target_date 为 None 时：compute_cash_balance 降级为 today，
     且跳过 manual 覆盖查询（无快照日可匹配）。
@@ -104,7 +104,7 @@ def get_cash_value(
             ManualMarketValue.portfolio_code == portfolio_code,
             ManualMarketValue.platform_code == platform_code,
             ManualMarketValue.product_code == "CASH",
-            ManualMarketValue.date == target_date,
+            ManualMarketValue.value_date == target_date,
         ).first()
         if manual:
             v = Decimal(str(manual.market_value))
@@ -120,7 +120,7 @@ def calculate_available_cash(
     """
     组合可用现金实时计算（显式流水版）。
 
-    基线 = 最新快照日 portfolio_position 快照表中 CASH amount
+    基线 = 最新快照日 portfolio_position 快照表中 CASH 行的 cash_amount
     （与 _generate_portfolio_position 增量范式口径一致，manual_market_value
     覆盖已 baked in 快照，自然继承；无快照时降级为 compute_cash_balance 全量流水）
     + 快照后 confirmed CASH trades（buy +, sell −）
@@ -147,7 +147,7 @@ def calculate_available_cash(
         if platform_code:
             cash_query = cash_query.filter(PortfolioPosition.platform_code == platform_code)
         cash = sum(
-            Decimal(str(p.amount or 0)) for p in cash_query.all()
+            Decimal(str(p.cash_amount or 0)) for p in cash_query.all()
         )
     else:
         cash = compute_cash_balance(db, portfolio_code, platform_code, as_of_date)
@@ -350,7 +350,7 @@ def update_cash_position(
     写入后需重新生成快照才会反映到持仓。不 commit。
 
     Returns:
-        dict：portfolio_code/platform_code/amount/computed_value/update_date(date)
+        dict：portfolio_code/platform_code/cash_amount/computed_value/update_date(date)
     """
     portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
     if not portfolio:
@@ -371,7 +371,7 @@ def update_cash_position(
         ManualMarketValue.portfolio_code == portfolio_code,
         ManualMarketValue.platform_code == platform_code,
         ManualMarketValue.product_code == "CASH",
-        ManualMarketValue.date == target_date,
+        ManualMarketValue.value_date == target_date,
     ).first()
     if manual:
         manual.market_value = Decimal(str(amount))
@@ -381,7 +381,7 @@ def update_cash_position(
             portfolio_code=portfolio_code,
             platform_code=platform_code,
             product_code="CASH",
-            date=target_date,
+            value_date=target_date,
             market_value=Decimal(str(amount)),
             computed_value=computed,
             created_by=created_by,
@@ -392,7 +392,7 @@ def update_cash_position(
     return {
         "portfolio_code": portfolio_code,
         "platform_code": platform_code,
-        "amount": float(manual.market_value),
+        "cash_amount": float(manual.market_value),
         "computed_value": float(computed) if computed is not None else None,
         "update_date": target_date,
     }

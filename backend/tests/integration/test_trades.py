@@ -117,7 +117,7 @@ class TestBuyTrade:
         create_position_snapshot(
             test_db, "TRD_OVR", "CASH", "",
             snapshot_date=date(2025, 10, 3),
-            amount=6001.39, unit_price=None, cost_price=None,
+            cash_amount=6001.39, unit_price=None, cost_price=None,
             market_value=6001.39, platform_code="TRD_OVR_PLAT",
             asset_type="cash",
         )

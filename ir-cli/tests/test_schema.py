@@ -53,10 +53,10 @@ class TestOutputContract:
         fields = output["fields"].split(",")
         # market_value 在契约中且为摘要字段
         assert "*market_value:num?" in fields
-        # amount 可空（带 ? 后缀）
-        assert any(f.lstrip("*").startswith("amount:") and f.endswith("?") for f in fields)
-        # notes 含 amount 警示（基金行恒为 null）
-        assert "恒为null" in output["notes"]["amount"]
+        # cash_amount 可空（带 ? 后缀）
+        assert any(f.lstrip("*").startswith("cash_amount:") and f.endswith("?") for f in fields)
+        # notes 含 cash_amount 警示（基金行恒为 null）
+        assert "恒为null" in output["notes"]["cash_amount"]
 
     def test_nav_history_command_level_note(self, full_schema):
         notes = full_schema["commands"]["portfolio"]["nav-history"]["output"]["notes"]

@@ -161,7 +161,7 @@ def _seed_base_data(test_engine):
             while current <= end:
                 is_weekday = current.weekday() < 5  # Mon-Fri
                 db.add(TradingCalendar(
-                    date=current,
+                    calendar_date=current,
                     is_open=is_weekday,
                     exchange="SSE",
                 ))
@@ -320,9 +320,9 @@ def sample_trading_day(test_db: Session) -> date:
     """返回一个确认为交易日的日期（2025-01-06 是周一）"""
     d = date(2025, 1, 6)
     # 确保该日期存在于交易日历中
-    existing = test_db.query(TradingCalendar).filter(TradingCalendar.date == d).first()
+    existing = test_db.query(TradingCalendar).filter(TradingCalendar.calendar_date == d).first()
     if not existing:
-        test_db.add(TradingCalendar(date=d, is_open=True, exchange="SSE"))
+        test_db.add(TradingCalendar(calendar_date=d, is_open=True, exchange="SSE"))
         test_db.commit()
     return d
 
@@ -331,9 +331,9 @@ def sample_trading_day(test_db: Session) -> date:
 def sample_non_trading_day(test_db: Session) -> date:
     """返回一个确认为非交易日的日期（2025-01-04 是周六）"""
     d = date(2025, 1, 4)
-    existing = test_db.query(TradingCalendar).filter(TradingCalendar.date == d).first()
+    existing = test_db.query(TradingCalendar).filter(TradingCalendar.calendar_date == d).first()
     if not existing:
-        test_db.add(TradingCalendar(date=d, is_open=False, exchange="SSE"))
+        test_db.add(TradingCalendar(calendar_date=d, is_open=False, exchange="SSE"))
         test_db.commit()
     return d
 

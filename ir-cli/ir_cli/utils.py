@@ -34,7 +34,7 @@ DATE_FIELDS = ("_date",)
 SUMMARY_FIELDS = {
     "trade": "id,portfolio_code,product_code,market,platform_code,trade_type,trade_date,confirm_date,status,amount,shares,price",
     "subscription": "id,portfolio_code,investor_code,platform_code,sub_type,apply_date,confirm_date,status,amount,shares,unit_price",
-    "position": "id,portfolio_code,product_code,market,platform_code,shares,amount,market_value,unit_price,snapshot_date",
+    "position": "id,portfolio_code,product_code,market,platform_code,shares,cash_amount,market_value,unit_price,snapshot_date",
     "log_login": "id,investor_code,action,status,ip_address,failure_reason,created_at",
     "log_audit": "id,investor_code,action,resource_type,resource_id,resource_name,created_at",
     "log_error": "id,error_type,error_code,error_message,request_path,created_at",

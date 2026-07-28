@@ -13,7 +13,7 @@ def _seed_prices(test_db, dates, code="510300.SH", market="CN_EXCHANGE"):
     """为指定产品批量写入价格记录"""
     for d in dates:
         test_db.add(PriceRecord(
-            product_code=code, market=market, date=d,
+            product_code=code, market=market, price_date=d,
             unit_price=Decimal("1.2345"), source="test",
         ))
     test_db.commit()

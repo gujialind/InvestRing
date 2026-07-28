@@ -5,7 +5,7 @@ import { PaginatedResponse } from "@/types/common";
 export interface PriceDataPoint {
   product_code: string;
   market: string;
-  date: string;
+  price_date: string;
   unit_price: number;
 }
 

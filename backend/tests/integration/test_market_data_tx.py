@@ -72,7 +72,7 @@ class TestTradingCalendarSyncTx:
         assert resp.json()["synced_count"] == 3
 
         rows = test_db.query(TradingCalendar).filter(
-            TradingCalendar.date >= date(2031, 1, 1),
-            TradingCalendar.date <= date(2031, 1, 31),
+            TradingCalendar.calendar_date >= date(2031, 1, 1),
+            TradingCalendar.calendar_date <= date(2031, 1, 31),
         ).all()
         assert len(rows) == 3

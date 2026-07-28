@@ -29,7 +29,7 @@ class TestTradingCalendarModel:
         """查询交易日应返回记录"""
         ensure_trading_day(test_db, date(2025, 7, 7), is_open=True)
         result = test_db.query(TradingCalendar).filter(
-            TradingCalendar.date == date(2025, 7, 7)
+            TradingCalendar.calendar_date == date(2025, 7, 7)
         ).first()
         assert result is not None
         assert result.is_open is True
@@ -37,7 +37,7 @@ class TestTradingCalendarModel:
     def test_query_nonexistent_date(self, test_db):
         """查询不存在的日期应返回 None"""
         result = test_db.query(TradingCalendar).filter(
-            TradingCalendar.date == date(2099, 1, 1)
+            TradingCalendar.calendar_date == date(2099, 1, 1)
         ).first()
         assert result is None
 

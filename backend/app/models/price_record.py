@@ -8,7 +8,7 @@ class PriceRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     product_code = Column(String(10), nullable=False)
     market = Column(String(20), nullable=False)
-    date = Column(Date, nullable=False)
+    price_date = Column(Date, nullable=False)
     unit_price = Column(Numeric(10, 4))
     accumulated_nav = Column(Numeric(10, 4))
     pre_close = Column(Numeric(10, 4))
@@ -23,5 +23,5 @@ class PriceRecord(Base):
             ["product_code", "market"],
             ["product.code", "product.market"]
         ),
-        UniqueConstraint('product_code', 'market', 'date', name='uix_price_record'),
+        UniqueConstraint('product_code', 'market', 'price_date', name='uix_price_record'),
     )

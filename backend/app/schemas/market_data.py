@@ -6,7 +6,7 @@ from typing import Optional
 class PriceDataResponse(BaseModel):
     product_code: str
     market: str
-    date: date
+    price_date: date
     unit_price: float
 
     class Config:
