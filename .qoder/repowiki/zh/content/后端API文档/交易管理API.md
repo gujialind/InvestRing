@@ -21,10 +21,10 @@
 
 ## 更新摘要
 **变更内容**
-- 新增CASH交易强制配对验证机制，禁止直接创建裸CASH交易
-- 新增transfer_group必填约束，确保现金交易的配对完整性
-- 新增CASH_TRADE_FORBIDDEN错误码，用于处理非法的CASH交易请求
-- 明确三种受控的CASH交易创建路径：申购赎回操作、基金再平衡配对、跨平台现金转移
+- 新增交易预览功能，提供GET /api/trades/{id}/preview接口
+- 增强交易服务中的calculate_confirm_preview函数
+- 改进交易Schema，添加预览响应模型
+- 交易预览系统允许用户在执行前验证交易而不持久化数据
 
 ## 目录
 1. [简介](#简介)
@@ -41,10 +41,10 @@
 ## 简介
 本文件为 InvestRing 交易管理模块的完整API文档，覆盖交易CRUD操作、交易执行与确认、状态管理、费用计算、查询接口及权限控制。文档面向前后端开发者与运维人员，提供HTTP方法、URL模式、请求/响应格式、权限要求、示例与约束说明，帮助快速集成与排错。
 
-**重要更新** 系统增强了现金交易处理机制，现在禁止直接创建裸CASH交易，只允许通过受控路径创建，确保资金流动的完整性和可追溯性。
+**重要更新** 系统新增了交易预览功能，允许用户在正式执行交易前进行验证和模拟，确保交易参数的正确性而不产生实际的数据变更。同时增强了现金交易处理机制，现在禁止直接创建裸CASH交易，只允许通过受控路径创建，确保资金流动的完整性和可追溯性。
 
 ## 项目结构
-交易管理API位于后端FastAPI应用中，通过统一入口注册到根路径下。前端通过React组件与Hooks调用后端接口，实现交易的创建、查询、确认与取消。
+交易管理API位于后端FastAPI应用中，通过统一入口注册到根路径下。前端通过React组件与Hooks调用后端接口，实现交易的创建、查询、确认、取消与预览。
 
 ```mermaid
 graph TB
@@ -56,12 +56,14 @@ D["交易Schema<br/>schemas/trade.py"]
 E["交易日历服务<br/>services/trading_calendar_service.py"]
 F["权限依赖<br/>dependencies.py"]
 G["现金转账服务<br/>cash_transfers.py"]
+H["交易预览功能<br/>calculate_confirm_preview"]
 end
 subgraph "前端"
-H["交易页面<br/>frontend/src/app/portfolio/[code]/trades/page.tsx"]
-I["交易表单<br/>frontend/src/components/shared/TradeForm.tsx"]
-J["交易Hooks<br/>frontend/src/hooks/useTrade.ts"]
-K["类型定义<br/>frontend/src/types/trade.ts"]
+I["交易页面<br/>frontend/src/app/portfolio/[code]/trades/page.tsx"]
+J["交易表单<br/>frontend/src/components/shared/TradeForm.tsx"]
+K["交易Hooks<br/>frontend/src/hooks/useTrade.ts"]
+L["类型定义<br/>frontend/src/types/trade.ts"]
+M["交易预览组件<br/>TradePreview"]
 end
 A --> B
 B --> C
@@ -69,9 +71,12 @@ B --> D
 B --> E
 B --> F
 B --> G
-H --> J
+B --> H
 I --> J
+I --> K
 J --> K
+K --> L
+K --> M
 ```
 
 **图表来源**
@@ -83,13 +88,14 @@ J --> K
 - [backend/app/main.py:32-48](file://backend/app/main.py#L32-L48)
 
 ## 核心组件
-- 路由器：交易路由集中于 [routers/trades.py](file://backend/app/routers/trades.py)，提供交易CRUD、确认、取消与查询。
+- 路由器：交易路由集中于 [routers/trades.py](file://backend/app/routers/trades.py)，提供交易CRUD、确认、取消、预览与查询。
 - 模型：交易实体定义于 [models/trade.py](file://backend/app/models/trade.py)，包含字段、索引与外键约束。
-- Schema：请求/响应数据结构定义于 [schemas/trade.py](file://backend/app/schemas/trade.py)，用于Pydantic校验与序列化。
+- Schema：请求/响应数据结构定义于 [schemas/trade.py](file://backend/app/schemas/trade.py)，用于Pydantic校验与序列化，包含新的预览响应模型。
 - 权限：用户与管理员权限校验位于 [dependencies.py](file://backend/app/dependencies.py)。
 - 交易日历：交易日判断与同步逻辑位于 [services/trading_calendar_service.py](file://backend/app/services/trading_calendar_service.py)。
 - 现金转账：跨平台现金转移处理位于 [cash_transfers.py](file://backend/app/routers/cash_transfers.py)。
-- 前端：交易页面、表单与Hooks位于 [frontend](file://frontend/src/) 目录，负责调用后端API并展示结果。
+- 交易预览：新增的交易预览功能提供execute前的验证能力。
+- 前端：交易页面、表单与Hooks位于 [frontend](file://frontend/src/) 目录，负责调用后端API并展示结果，包括预览功能。
 
 **章节来源**
 - [backend/app/routers/trades.py:108](file://backend/app/routers/trades.py#L108)
@@ -99,7 +105,7 @@ J --> K
 - [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-L125)
 
 ## 架构概览
-交易管理API采用分层设计：路由层处理HTTP请求与权限校验，服务层封装业务逻辑（可用资金/份额计算、净值确认、交易日校验），数据层通过SQLAlchemy模型与数据库交互。
+交易管理API采用分层设计：路由层处理HTTP请求与权限校验，服务层封装业务逻辑（可用资金/份额计算、净值确认、交易日校验、交易预览），数据层通过SQLAlchemy模型与数据库交互。
 
 ```mermaid
 sequenceDiagram
@@ -107,8 +113,10 @@ participant FE as "前端"
 participant API as "FastAPI 路由"
 participant SVC as "业务逻辑"
 participant DB as "数据库"
-FE->>API : POST /api/trades
-API->>SVC : 校验交易日/组合状态/产品存在性
+FE->>API : GET /api/trades/{id}/preview
+API->>SVC : calculate_confirm_preview()
+SVC->>DB : 读取交易及相关数据
+SVC->>SVC : 验证交易日/组合状态/产品存在性
 SVC->>DB : 计算可用现金/份额
 alt CASH交易
 SVC->>SVC : 验证transfer_group配对约束
@@ -116,16 +124,12 @@ alt 无配对或配对无效
 SVC-->>API : 返回CASH_TRADE_FORBIDDEN错误
 API-->>FE : 422 错误响应
 else 配对有效
-SVC->>DB : 通过则创建Trade对象
-API->>DB : 写入数据库
-DB-->>API : 返回持久化后的Trade
-API-->>FE : TradeResponse
+SVC->>SVC : 生成预览结果不持久化
+API-->>FE : TradePreviewResponse
 end
 else 非CASH交易
-SVC->>DB : 通过则创建Trade对象
-API->>DB : 写入数据库
-DB-->>API : 返回持久化后的Trade
-API-->>FE : TradeResponse
+SVC->>SVC : 生成预览结果不持久化
+API-->>FE : TradePreviewResponse
 end
 ```
 
@@ -156,6 +160,19 @@ end
   - 权限：普通用户（需登录）
   - 响应：TradeResponse
   - 实现参考：[backend/app/routers/trades.py:405-414](file://backend/app/routers/trades.py#L405-L414)
+
+- **新增** 交易预览
+  - 方法与路径：GET /api/trades/{id}/preview
+  - 权限：普通用户（需登录）
+  - 功能：在不持久化数据的情况下验证交易参数和计算结果
+  - 业务要点：
+    - 验证交易日有效性
+    - 检查组合状态和产品存在性
+    - 计算预估金额、费用和份额
+    - 验证CASH交易配对约束
+    - 返回预览结果但不修改任何数据
+  - 响应：TradePreviewResponse，包含预估的交易详情
+  - 实现参考：[backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)
 
 - 创建交易（买入/卖出）
   - 方法与路径：POST /api/trades
@@ -200,7 +217,7 @@ end
     - 非净值型产品若传入price，则按price重算amount/shares
     - 确认后更新confirm_date与最终amount/price/shares
   - 响应：包含message、id、portfolio_code、trade_type、status、confirm_date与trade对象
-  - 实现参考：[backend/app/routers/trades.py:417-504](file://backend/app/routers/trades.py#L417-L504)
+  - 实现参考：[backend/app/routers/trades.py:417-504](file://backend/app/routers/trades.py#L417-504)
 
 - 取消交易
   - 方法与路径：POST /api/trades/{id}/cancel
@@ -209,7 +226,7 @@ end
     - 仅pending状态可取消
     - 仅场外（CN_OTC）的pending可取消，场内（CN_EXCHANGE）不可取消
   - 响应：成功消息
-  - 实现参考：[backend/app/routers/trades.py:507-532](file://backend/app/routers/trades.py#L507-L532)
+  - 实现参考：[backend/app/routers/trades.py:507-532](file://backend/app/routers/trades.py#L507-532)
 
 **新增** CASH交易受控创建路径：
 系统现在只允许通过以下三种受控路径创建CASH交易：
@@ -246,6 +263,57 @@ end
 - [frontend/src/hooks/useTrade.ts:22-103](file://frontend/src/hooks/useTrade.ts#L22-L103)
 - [frontend/src/types/trade.ts:1-45](file://frontend/src/types/trade.ts#L1-L45)
 
+### 交易预览功能详解
+**新增** 交易预览功能提供了在执行交易前的验证和模拟能力，允许用户在不持久化数据的情况下查看交易的实际影响。
+
+#### 预览接口特性
+- **无副作用**：预览操作不会修改数据库中的任何数据
+- **实时计算**：基于当前市场数据和账户状态进行实时计算
+- **完整验证**：执行完整的业务逻辑验证，包括交易日、组合状态、产品存在性等
+- **预估结果**：返回预估的金额、费用和份额等关键信息
+
+#### 预览业务流程
+```mermaid
+flowchart TD
+A["用户请求交易预览"] --> B["验证交易ID存在性"]
+B --> C["获取交易详细信息"]
+C --> D["验证交易日有效性"]
+D --> E["检查组合状态"]
+E --> F["验证产品存在性"]
+F --> G["计算可用资金/份额"]
+G --> H{"是否为CASH交易"}
+H --> |是| I["验证transfer_group配对"]
+H --> |否| J["跳过配对验证"]
+I --> K["生成预览结果"]
+J --> K
+K --> L["返回TradePreviewResponse"]
+```
+
+**图表来源**
+- [backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)
+
+#### 预览响应模型
+TradePreviewResponse包含以下关键字段：
+- trade_id: 交易ID
+- portfolio_code: 组合代码
+- product_code: 产品代码
+- trade_type: 交易类型
+- estimated_amount: 预估金额
+- estimated_shares: 预估份额
+- estimated_fee: 预估费用
+- estimated_actual_amount: 预估实际金额
+- validation_status: 验证状态
+- warnings: 警告信息列表
+
+#### 使用场景
+1. **交易参数验证**：在提交交易前验证参数是否正确
+2. **成本估算**：预估交易成本和费用
+3. **风险检查**：检查是否存在潜在的风险或限制
+4. **用户体验优化**：提供实时的交易反馈
+
+**章节来源**
+- [backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)
+
 ### 交易状态管理与流程
 交易状态包括：pending（待确认）、confirmed（已确认）、cancelled（已取消）。确认流程根据产品类型与市场区分净值型与非净值型，并结合交易日历与确认周期自动推导确认日期。
 
@@ -259,7 +327,7 @@ stateDiagram-v2
 ```
 
 **图表来源**
-- [backend/app/routers/trades.py:417-532](file://backend/app/routers/trades.py#L417-L532)
+- [backend/app/routers/trades.py:417-532](file://backend/app/routers/trades.py#L417-532)
 
 **章节来源**
 - [backend/app/routers/trades.py:417-532](file://backend/app/routers/trades.py#L417-L532)
@@ -270,8 +338,8 @@ stateDiagram-v2
 - 确认时若传入price，按price重算；净值型产品按T日净值自动计算
 
 **章节来源**
-- [backend/app/routers/trades.py:337-395](file://backend/app/routers/trades.py#L337-395)
-- [backend/app/routers/trades.py:479-489](file://backend/app/routers/trades.py#L479-489)
+- [backend/app/routers/trades.py:337-395](file://backend/app/routers/trades.py#L337-L395)
+- [backend/app/routers/trades.py:479-489](file://backend/app/routers/trades.py#L479-L489)
 
 ### 可用资金与可用份额计算
 - 可用现金（Cash）：基于最新快照现金，叠加/扣减未生成快照的确认申赎、待确认买入、已确认买入与已确认卖出
@@ -375,7 +443,9 @@ R --> PR["模型 price_record.py"]
 R --> SC["服务 trading_calendar_service.py"]
 R --> D["依赖 dependencies.py"]
 R --> CT["现金转账 cash_transfers.py"]
+R --> TP["交易预览 calculate_confirm_preview"]
 CT --> TG["transfer_group 配对验证"]
+TP --> VC["验证组件"]
 ```
 
 **图表来源**
@@ -384,16 +454,16 @@ CT --> TG["transfer_group 配对验证"]
 - [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-22)
 - [backend/app/models/portfolio_position.py:5-34](file://backend/app/models/portfolio_position.py#L5-34)
 - [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-28)
-- [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-125)
+- [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-L125)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
 
 **章节来源**
-- [backend/app/routers/trades.py:1-16](file://backend/app/routers/trades.py#L1-16)
-- [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-32)
+- [backend/app/routers/trades.py:1-16](file://backend/app/routers/trades.py#L1-L16)
+- [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-L32)
 - [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-22)
 - [backend/app/models/portfolio_position.py:5-34](file://backend/app/models/portfolio_position.py#L5-34)
 - [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-28)
-- [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-125)
+- [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-L125)
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
 
 ## 性能考虑
@@ -401,9 +471,11 @@ CT --> TG["transfer_group 配对验证"]
 - 交易日历批量写入：同步交易日历时采用批量插入，减少数据库往返
 - 余额与份额计算：基于最新快照与增量计算，避免全量扫描
 - **新增** CASH交易配对验证：通过transfer_group索引优化配对查询性能
+- **新增** 交易预览缓存：预览结果可在短时间内缓存，减少重复计算
 - 建议：
   - 前端对高频查询设置合理缓存时间
   - 后端对热点查询增加索引（如按portfolio_code、status、trade_date、transfer_group）
+  - 交易预览接口考虑添加短期缓存机制
 
 ## 故障排除指南
 常见错误与处理：
@@ -420,11 +492,13 @@ CT --> TG["transfer_group 配对验证"]
 - **新增** CASH交易创建失败：返回"CASH_TRADE_FORBIDDEN"错误，表示不允许直接创建裸CASH交易
 - **新增** 缺少transfer_group：返回"transfer_group是CASH交易的必填字段"
 - **新增** 配对交易不完整：返回"配对交易不完整，请确保同一transfer_group内的交易成对出现"
+- **新增** 交易预览失败：检查交易ID是否存在，验证网络连接状态
 
 定位参考：
 - 错误抛出位置与消息定义见 [backend/app/routers/trades.py:298-336](file://backend/app/routers/trades.py#L298-L336)、[L364-L374]、[L428-L432]、[L516-L528]、[L458-L464]、[L546-L553]、[L573-L580]
 - 交易日判断见 [backend/app/services/trading_calendar_service.py:110-124](file://backend/app/services/trading_calendar_service.py#L110-L124)
 - CASH交易验证逻辑见 [backend/app/routers/trades.py:292-402](file://backend/app/routers/trades.py#L292-L402)
+- 交易预览功能见 [backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)
 
 **章节来源**
 - [backend/app/routers/trades.py:298-336](file://backend/app/routers/trades.py#L298-L336)
@@ -435,15 +509,18 @@ CT --> TG["transfer_group 配对验证"]
 - [backend/app/routers/trades.py:546-553](file://backend/app/routers/trades.py#L546-L553)
 - [backend/app/routers/trades.py:573-580](file://backend/app/routers/trades.py#L573-L580)
 - [backend/app/services/trading_calendar_service.py:110-124](file://backend/app/services/trading_calendar_service.py#L110-L124)
+- [backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)
 
 ## 结论
 交易管理API提供了完整的调仓交易生命周期管理：从创建（买入/卖出）、到确认（净值型与非净值型差异化处理）、再到取消与删除。通过严格的权限控制、交易日校验、可用资金/份额计算与状态机管理，确保交易安全与一致性。
 
-**重要更新** 新增的CASH交易强制配对验证机制进一步强化了资金管理的严谨性，通过禁止直接创建裸CASH交易，确保所有现金流动都通过受控路径进行。这一改进为复杂的金融交易管理提供了必要的数据完整性和审计追踪能力。
+**重要更新** 新增的交易预览功能为用户提供了在执行交易前的验证能力，提升了系统的易用性和安全性。用户可以通过预览接口在不产生实际数据变更的情况下验证交易参数和预估结果，大大改善了用户体验。
 
-同时，新增的安全验证机制也强化了数据完整性保护，防止对已确认交易进行直接修改或删除操作。管理员需要遵循"先取消确认，再进行修改或删除"的工作流程，这为复杂的金融交易管理提供了必要的安全保障。
+同时，新增的CASH交易强制配对验证机制进一步强化了资金管理的严谨性，通过禁止直接创建裸CASH交易，确保所有现金流动都通过受控路径进行。这一改进为复杂的金融交易管理提供了必要的数据完整性和审计追踪能力。
 
-前端通过标准化的Hooks与类型定义，简化了集成与调试。
+安全验证机制也强化了数据完整性保护，防止对已确认交易进行直接修改或删除操作。管理员需要遵循"先取消确认，再进行修改或删除"的工作流程，这为复杂的金融交易管理提供了必要的安全保障。
+
+前端通过标准化的Hooks与类型定义，简化了集成与调试，并支持新的预览功能。
 
 ## 附录
 
@@ -462,6 +539,14 @@ CT --> TG["transfer_group 配对验证"]
   - 权限：登录用户
   - 示例响应：TradeResponse
   - 参考：[backend/app/routers/trades.py:405-414](file://backend/app/routers/trades.py#L405-L414)
+
+- **新增** 交易预览
+  - 方法：GET
+  - 路径：/api/trades/{id}/preview
+  - 权限：登录用户
+  - 功能：验证交易参数并返回预估结果
+  - 示例响应：TradePreviewResponse（包含预估金额、费用、份额等信息）
+  - 参考：[backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)
 
 - 创建交易
   - 方法：POST
@@ -495,7 +580,7 @@ CT --> TG["transfer_group 配对验证"]
   - 查询参数：confirm_date（可选）、price（可选）
   - 权限：管理员
   - 示例响应：包含message、id、portfolio_code、trade_type、status、confirm_date与trade对象
-  - 参考：[backend/app/routers/trades.py:417-504](file://backend/app/routers/trades.py#L417-L504)
+  - 参考：[backend/app/routers/trades.py:417-504](file://backend/app/routers/trades.py#L417-504)
 
 - 取消交易
   - 方法：POST
@@ -508,17 +593,17 @@ CT --> TG["transfer_group 配对验证"]
 - Trade模型字段：id、portfolio_code、platform_code、product_code、market、trade_type、shares、amount、price、fee、actual_amount、trade_date、confirm_date、status、notes、created_at、updated_at
   - 参考：[backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-32)
 - Trade Schema：TradeBase/TradeCreate/TradeUpdate/TradeResponse
-  - 参考：[backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-45)
+  - 参考：[backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-L45)
 - Product模型：product_type、confirm_days、is_qdii
-  - 参考：[backend/app/models/product.py:11-14](file://backend/app/models/product.py#L11-14)
+  - 参考：[backend/app/models/product.py:11-14](file://backend/app/models/product.py#L11-L14)
 - Portfolio模型：status
   - 参考：[backend/app/models/portfolio.py](file://backend/app/models/portfolio.py#L11)
 - PortfolioPosition模型：shares、snapshot_date
-  - 参考：[backend/app/models/portfolio_position.py:13-20](file://backend/app/models/portfolio_position.py#L13-20)
+  - 参考：[backend/app/models/portfolio_position.py:13-20](file://backend/app/models/portfolio_position.py#L13-L20)
 - Subscription模型：sub_type、amount、shares、unit_price、apply_date、confirm_date、status
-  - 参考：[backend/app/models/subscription.py:11-17](file://backend/app/models/subscription.py#L11-17)
+  - 参考：[backend/app/models/subscription.py:11-17](file://backend/app/models/subscription.py#L11-L17)
 - PriceRecord模型：unit_price、pre_close、pct_change、net_asset
-  - 参考：[backend/app/models/price_record.py:12-16](file://backend/app/models/price_record.py#L12-16)
+  - 参考：[backend/app/models/price_record.py:12-16](file://backend/app/models/price_record.py#L12-L16)
 
 ### CASH交易配对验证规则
 **新增** CASH交易现在需要遵循严格的配对验证规则：
@@ -528,7 +613,22 @@ CT --> TG["transfer_group 配对验证"]
 - **受控路径**：只能通过申购赎回、基金再平衡或跨平台转账三种方式创建
 - **错误处理**：违反规则的请求将返回CASH_TRADE_FORBIDDEN错误
 
+### 交易预览响应模型
+**新增** TradePreviewResponse包含以下字段：
+- trade_id: 交易ID
+- portfolio_code: 组合代码
+- product_code: 产品代码
+- trade_type: 交易类型
+- estimated_amount: 预估金额
+- estimated_shares: 预估份额
+- estimated_fee: 预估费用
+- estimated_actual_amount: 预估实际金额
+- validation_status: 验证状态（valid/invalid）
+- warnings: 警告信息列表
+- errors: 错误信息列表
+
 **章节来源**
 - [backend/app/routers/trades.py:292-402](file://backend/app/routers/trades.py#L292-L402)
-- [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-32)
-- [backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-45)
+- [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-L32)
+- [backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-L45)
+- [backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)

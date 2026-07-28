@@ -434,7 +434,7 @@ PS --> MD4["manual_market_value"]
 
 - 组合净值序列（GET /portfolios/{code}/nav-history）
   - 查询参数：start_date(可选), end_date(可选)
-  - 响应体：单层数组，元素字段 snapshot_date(YYYY-MM-DD), unit_price, total_value, total_shares
+  - 响应体字段：portfolio_code, data[{"date","unit_price","total_value","total_shares"}]
 
 - 组合收益统计（GET /portfolios/{code}/returns）
   - 响应体字段：portfolio_code, cumulative_return, annualized_return, initial_nav, current_nav, holding_days

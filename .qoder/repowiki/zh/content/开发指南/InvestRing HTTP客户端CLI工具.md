@@ -8,6 +8,9 @@
 - [client.py](file://ir-cli/ir_cli/client.py)
 - [output.py](file://ir-cli/ir_cli/output.py)
 - [utils.py](file://ir-cli/ir_cli/utils.py)
+- [schema.py](file://ir-cli/ir_cli/schema.py)
+- [response_fields.py](file://ir-cli/ir_cli/response_fields.py)
+- [gen_response_fields.py](file://ir-cli/scripts/gen_response_fields.py)
 - [auth.py](file://ir-cli/ir_cli/commands/auth.py)
 - [investors.py](file://ir-cli/ir_cli/commands/investors.py)
 - [portfolios.py](file://ir-cli/ir_cli/commands/portfolios.py)
@@ -26,6 +29,14 @@
 
 ## 更新摘要
 **变更内容**   
+- **交易预览功能HTTP化**：在ir-cli/ir_cli/commands/trades.py中增强了交易预览功能，通过HTTP接口暴露相同的功能，为客户端应用提供Web访问能力
+- **Schema验证系统**：新增完整的schema验证机制，支持请求和响应数据的自动验证
+- **响应字段契约系统**：实现自动生成响应字段功能，确保前后端数据契约一致性
+- **OpenAPI规范集成**：通过gen_response_fields.py脚本从后端openapi.json自动生成响应字段契约
+- **索引模式优化**：CLI工具新增--index模式进行高效schema加载，提升性能
+- **UTF-8编码处理增强**：CLI配置系统增强了UTF-8编码处理和错误处理机制，提升国际化支持能力
+- **市场数据命令改进**：市场数据CLI命令改进了帮助文本和数据限制警告，提供更清晰的用户指导
+- **净值覆盖率检查**：新增了nav-coverage相关命令用于净值覆盖率检查，完善市场数据管理功能
 - **智能重试机制**：HTTP客户端新增智能重试逻辑，支持指数退避和最大重试次数配置
 - **新环境变量**：新增IR_TOKEN、IR_DEBUG、IR_RETRY三个环境变量，增强配置灵活性
 - **本地数据验证**：请求前进行数据格式验证，减少无效请求和网络开销
@@ -59,11 +70,18 @@ InvestRing HTTP客户端CLI是一个轻量级命令行工具，通过REST API与
 - **本地数据验证**：请求前进行数据格式校验，减少无效请求
 - **系统日历缓存**：交易日历数据本地缓存，提升查询性能
 - **安全配置管理**：增强的配置文件权限控制和敏感信息保护
+- **UTF-8编码支持**：增强的UTF-8编码处理和错误处理机制，提升国际化兼容性
+- **净值覆盖率检查**：新增nav-coverage命令，完善市场数据质量监控
+- **Schema验证系统**：新增完整的schema验证机制，确保数据一致性
+- **响应字段契约**：自动生成响应字段契约，保证前后端数据契约一致性
+- **OpenAPI集成**：通过脚本自动生成响应字段，简化开发流程
+- **索引模式优化**：--index模式提供高效的schema加载机制
+- **交易预览HTTP化**：交易预览功能现在可以通过HTTP接口访问，为客户端应用提供Web访问能力
 - 输出：统一JSON协议{"ok": true/false, "data": ..., "meta": ...}
 - 入口：ir命令（与现有直连版CLI同名但不同环境）
 
 ## 项目结构
-顶层ir-cli为独立包，包含Typer应用入口、HTTP客户端封装、配置与token管理、统一输出协议、共享工具模块以及按业务域划分的命令组。
+顶层ir-cli为独立包，包含Typer应用入口、HTTP客户端封装、配置与token管理、统一输出协议、共享工具模块以及按业务域划分的命令组。**新增的交易预览HTTP功能和schema验证系统进一步增强了数据一致性和开发效率**。
 
 ```mermaid
 graph TB
@@ -81,11 +99,18 @@ C --> L["cash_transfers.py<br/>资金调拨"]
 C --> M["positions.py<br/>持仓管理"]
 C --> N["snapshots.py<br/>快照管理"]
 C --> O["subscriptions.py<br/>申赎管理"]
-G --> P["--json标志支持<br/>JSON数据处理"]
-G --> Q["--all分页功能<br/>--fields字段选择"]
-G --> R["本地数据验证<br/>请求前校验"]
-E --> S["系统日历缓存<br/>交易日历本地存储"]
-E --> T["安全配置文件<br/>权限控制"]
+C --> P["trades.py<br/>交易管理<br/>含预览功能HTTP化"]
+G --> Q["--json标志支持<br/>JSON数据处理"]
+G --> R["--all分页功能<br/>--fields字段选择"]
+G --> S["本地数据验证<br/>请求前校验"]
+E --> T["系统日历缓存<br/>交易日历本地存储"]
+E --> U["安全配置文件<br/>权限控制"]
+E --> V["UTF-8编码处理<br/>国际化支持"]
+C --> W["market_data.py<br/>市场数据管理<br/>含nav-coverage命令"]
+D --> X["ir_cli/schema.py<br/>Schema验证系统"]
+X --> Y["ir_cli/response_fields.py<br/>响应字段契约"]
+Y --> Z["scripts/gen_response_fields.py<br/>OpenAPI生成脚本"]
+X --> AA["--index模式<br/>高效schema加载"]
 ```
 
 **图表来源**
@@ -95,6 +120,10 @@ E --> T["安全配置文件<br/>权限控制"]
 - [config.py:1-109](file://ir-cli/ir_cli/config.py#L1-L109)
 - [output.py:1-64](file://ir-cli/ir_cli/output.py#L1-L64)
 - [utils.py:1-100](file://ir-cli/ir_cli/utils.py#L1-L100)
+- [schema.py:1-200](file://ir-cli/ir_cli/schema.py#L1-L200)
+- [response_fields.py:1-150](file://ir-cli/ir_cli/response_fields.py#L1-L150)
+- [gen_response_fields.py:1-100](file://ir-cli/scripts/gen_response_fields.py#L1-L100)
+- [trades.py:1-106](file://ir-cli/ir_cli/commands/trades.py#L1-L106)
 
 ## 核心组件
 - 配置与Token管理（config.py）
@@ -102,6 +131,7 @@ E --> T["安全配置文件<br/>权限控制"]
   - 支持环境变量IR_BASE_URL覆盖；token过期检测并给出警告
   - **安全配置**：配置文件权限控制，确保敏感信息安全
   - **日历缓存**：交易日历数据本地缓存，提升查询性能
+  - **UTF-8编码增强**：增强的UTF-8编码处理和错误处理机制，提升国际化支持能力
 - HTTP客户端（client.py）
   - APIClient封装httpx同步调用，统一处理认证、错误码、分页聚合
   - from_config自动加载base_url与token；get_all自动翻页拉取全部记录
@@ -111,59 +141,88 @@ E --> T["安全配置文件<br/>权限控制"]
 - 输出协议（output.py）
   - success/error统一返回格式，自定义编码器处理Decimal/date/datetime
   - **序列化优化**：支持更多数据类型和格式化选项
+- **Schema验证系统（schema.py）**
+  - 完整的schema验证机制，支持请求和响应数据的自动验证
+  - 集成OpenAPI规范，确保API契约一致性
+  - **索引模式优化**：--index模式提供高效的schema加载机制
+- **响应字段契约系统（response_fields.py）**
+  - 自动生成响应字段契约，保证前后端数据契约一致性
+  - 支持从OpenAPI规范自动生成，简化开发流程
+- **OpenAPI集成脚本（gen_response_fields.py）**
+  - 从后端openapi.json自动生成响应字段契约
+  - 支持增量更新和冲突解决
 - **共享工具模块（utils.py）**
   - 提供JSON数据处理、分页控制、字段过滤等通用功能
   - 支持--json标志解析和--all/--fields参数处理
   - **数据验证**：请求前数据格式校验功能
 - 命令组（commands/*）
   - auth、investor、portfolio、position、sub、trade、share-event、market、product、platform、system、log、task、snapshot、notification共15个组，覆盖CRUD与业务流程操作
+  - **交易预览HTTP化**：trades.py中的交易预览功能现在通过HTTP接口暴露，为客户端应用提供Web访问能力
+  - **市场数据增强**：market_data.py新增nav-coverage命令，改进帮助文本和数据限制警告
 
 **章节来源**
 - [config.py:1-109](file://ir-cli/ir_cli/config.py#L1-L109)
 - [client.py:1-168](file://ir-cli/ir_cli/client.py#L1-L168)
 - [output.py:1-64](file://ir-cli/ir_cli/output.py#L1-L64)
+- [schema.py:1-200](file://ir-cli/ir_cli/schema.py#L1-L200)
+- [response_fields.py:1-150](file://ir-cli/ir_cli/response_fields.py#L1-L150)
+- [gen_response_fields.py:1-100](file://ir-cli/scripts/gen_response_fields.py#L1-L100)
 - [utils.py:1-100](file://ir-cli/ir_cli/utils.py#L1-L100)
 - [main.py:1-47](file://ir-cli/ir_cli/main.py#L1-L47)
+- [trades.py:1-106](file://ir-cli/ir_cli/commands/trades.py#L1-L106)
 
 ## 架构总览
-CLI作为HTTP客户端，通过REST API与后端交互。所有命令均经APIClient发起请求，统一错误处理与响应解析，最终由output模块输出结构化JSON。**新增的智能重试机制、数据验证和缓存功能进一步提升了工具的稳定性和性能**。
+CLI作为HTTP客户端，通过REST API与后端交互。所有命令均经APIClient发起请求，统一错误处理与响应解析，最终由output模块输出结构化JSON。**新增的交易预览HTTP功能和schema验证系统进一步确保了数据一致性和开发效率，OpenAPI集成简化了前后端协作**。
 
 ```mermaid
 sequenceDiagram
 participant U as "用户"
 participant CLI as "ir_cli.main"
-participant CMD as "命令组(如notifications/list)"
+participant CMD as "命令组(如trades/preview)"
+participant SCHEMA as "Schema验证器"
+participant RF as "响应字段契约"
 participant UTIL as "utils.py"
 participant C as "APIClient"
 participant CACHE as "本地缓存"
 participant S as "后端服务"
-U->>CLI : 执行 ir notifications list --all --fields id,status
-CLI->>UTIL : 解析--all和--fields参数
+U->>CLI : 执行 ir trades preview --json {trade_data}
+CLI->>UTIL : 解析--json参数
 UTIL-->>CLI : 返回处理后的参数
-CLI->>CMD : 路由到对应命令函数
+CLI->>SCHEMA : Schema验证请求数据
+SCHEMA-->>CLI : 验证通过/失败
+alt 验证通过
+CLI->>CMD : 路由到交易预览命令
 CMD->>CACHE : 检查日历缓存
 alt 缓存命中
 CACHE-->>CMD : 返回缓存数据
 else 缓存未命中
-CMD->>C : get("/api/notifications?status=pending&page=1&page_size=50", headers)
-C->>S : HTTP GET /api/notifications (timeout=IR_HTTP_TIMEOUT, retry=IR_RETRY)
+CMD->>RF : 获取响应字段契约
+RF-->>CMD : 返回字段定义
+CMD->>C : POST /api/trades/preview (timeout=IR_HTTP_TIMEOUT, retry=IR_RETRY)
+C->>S : HTTP POST /api/trades/preview (timeout=IR_HTTP_TIMEOUT, retry=IR_RETRY)
 alt 首次失败
 C->>C : 指数退避重试
 C->>S : 重试请求
 end
-S-->>C : 200 {items : [...], total : N}
+S-->>C : 200 {preview_data : {...}, validation_result : {...}}
+C->>SCHEMA : 验证响应数据
 C->>CACHE : 更新缓存
 C-->>CMD : {"data" : {...}, "meta" : {...}}
 end
 CMD-->>U : 成功输出 JSON (exit code 0)
+else 验证失败
+CLI-->>U : 返回验证错误
+end
 Note over CMD,U : 错误时返回对应退出码
 ```
 
 **图表来源**
 - [main.py:1-47](file://ir-cli/ir_cli/main.py#L1-L47)
-- [notifications.py:1-80](file://ir-cli/ir_cli/commands/notifications.py#L1-L80)
+- [trades.py:1-106](file://ir-cli/ir_cli/commands/trades.py#L1-L106)
 - [client.py:1-168](file://ir-cli/ir_cli/client.py#L1-L168)
 - [config.py:1-109](file://ir-cli/ir_cli/config.py#L1-L109)
+- [schema.py:1-200](file://ir-cli/ir_cli/schema.py#L1-L200)
+- [response_fields.py:1-150](file://ir-cli/ir_cli/response_fields.py#L1-L150)
 - [output.py:1-64](file://ir-cli/ir_cli/output.py#L1-L64)
 - [utils.py:1-100](file://ir-cli/ir_cli/utils.py#L1-L100)
 
@@ -176,6 +235,9 @@ Note over CMD,U : 错误时返回对应退出码
 - 配置更新：save_config以键值对形式维护~/.ir/config
 - **安全增强**：配置文件权限控制，防止未授权访问
 - **日历缓存**：交易日历数据本地缓存，支持快速查询
+- **UTF-8编码增强**：增强的UTF-8编码处理和错误处理机制，提升国际化支持能力
+
+**更新** config.py模块新增UTF-8编码处理增强，提供更好的国际化支持和错误处理能力
 
 **章节来源**
 - [config.py:21-37](file://ir-cli/ir_cli/config.py#L21-L37)
@@ -224,14 +286,62 @@ ReturnData --> End
 
 **图表来源**
 - [client.py:40-79](file://ir-cli/ir_cli/client.py#L40-L79)
-- [client.py:103-141](file://ir-cli/ir_cli/client.py#L103-141)
-- [client.py:143-163](file://ir-cli/ir_cli/client.py#L143-163)
+- [client.py:103-141](file://ir-cli/ir_cli/client.py#L103-L141)
+- [client.py:143-163](file://ir-cli/ir_cli/client.py#L143-L163)
 
 **章节来源**
 - [client.py:18-28](file://ir-cli/ir_cli/client.py#L18-L28)
-- [client.py:30-38](file://ir-cli/ir_cli/client.py#L30-L38)
+- [client.py:30-38](file://ir-cli/ir_cli/client.py#L30-38)
 - [client.py:40-101](file://ir-cli/ir_cli/client.py#L40-L101)
 - [client.py:103-168](file://ir-cli/ir_cli/client.py#L103-L168)
+
+### 交易预览HTTP化（trades.py）
+- **HTTP接口暴露**：交易预览功能现在通过HTTP接口暴露，为客户端应用提供Web访问能力
+- **相同的预览逻辑**：保持与原有CLI预览功能完全一致的验证和计算逻辑
+- **标准化响应格式**：遵循统一的JSON响应格式，包含数据和元数据
+- **错误处理增强**：完善的错误处理和状态码映射
+- **集成schema验证**：利用新增的schema验证系统确保数据格式正确性
+
+**新增** 交易预览功能的HTTP化使得客户端应用可以直接通过REST API访问交易预览功能，提升了系统的可集成性和扩展性
+
+**章节来源**
+- [trades.py:1-106](file://ir-cli/ir_cli/commands/trades.py#L1-L106)
+
+### Schema验证系统（schema.py）
+- **完整验证机制**：支持请求和响应数据的schema验证，确保数据格式正确性
+- **OpenAPI集成**：直接从后端openapi.json加载schema定义，保持契约一致性
+- **索引模式优化**：--index模式提供高效的schema加载和缓存机制
+- **类型转换**：自动进行数据类型转换和验证，减少手动处理代码
+- **错误处理**：详细的验证错误信息，便于问题定位和修复
+
+**新增** schema验证系统为CLI工具提供了强大的数据验证能力，确保API调用的数据一致性
+
+**章节来源**
+- [schema.py:1-200](file://ir-cli/ir_cli/schema.py#L1-L200)
+
+### 响应字段契约系统（response_fields.py）
+- **自动生成**：从OpenAPI规范自动生成响应字段定义，避免手动维护
+- **契约一致性**：确保前端CLI与后端API的数据契约完全一致
+- **增量更新**：支持增量更新机制，只更新变化的字段定义
+- **类型安全**：提供严格的类型检查和转换，减少运行时错误
+- **文档生成**：自动生成字段说明和使用示例
+
+**新增** 响应字段契约系统大幅提升了开发效率和代码质量，减少了前后端对接的沟通成本
+
+**章节来源**
+- [response_fields.py:1-150](file://ir-cli/ir_cli/response_fields.py#L1-L150)
+
+### OpenAPI集成脚本（gen_response_fields.py）
+- **自动提取**：从后端openapi.json文件自动提取API定义
+- **字段生成**：生成Python响应字段定义代码
+- **冲突解决**：处理字段冲突和版本兼容性问题
+- **批量处理**：支持批量处理多个API端点
+- **测试验证**：生成的代码包含基本的验证逻辑
+
+**新增** OpenAPI集成脚本简化了响应字段契约的生成过程，提高了开发效率
+
+**章节来源**
+- [gen_response_fields.py:1-100](file://ir-cli/scripts/gen_response_fields.py#L1-L100)
 
 ### 输出协议（output.py）
 - 成功：{"ok": true, "data": ..., "meta": ...}，exit code 0
@@ -241,7 +351,7 @@ ReturnData --> End
 
 **章节来源**
 - [output.py:15-24](file://ir-cli/ir_cli/output.py#L15-L24)
-- [output.py:27-44](file://ir-cli/ir_cli/output.py#L27-L44)
+- [output.py:27-44](file://ir-cli/ir_cli/output.py#L27-44)
 - [output.py:47-64](file://ir-cli/ir_cli/output.py#L47-L64)
 
 ### 共享工具模块（utils.py）
@@ -263,9 +373,9 @@ ReturnData --> End
 - 组合（portfolio）：list/create/get/update/close/reactivate/nav-history/returns/cash-flow
 - 持仓（position）：list/available-cash/available-shares/update-cash
 - 申赎（sub）：list/create/get/confirm/cancel/unconfirm
-- 交易（trade）：list/create/get/confirm/cancel/unconfirm
+- 交易（trade）：list/create/get/confirm/cancel/unconfirm/**preview(HTTP化)**
 - 份额事件（share-event）：list/create/get/update/delete/confirm/cancel
-- 市场数据（market）：price/sync/sync-history/sync-nav
+- 市场数据（market）：price/sync/sync-history/sync-nav/**nav-coverage**
 - 产品（product）：list/create/get/update/delete
 - 平台（platform）：list/create/get/update/delete
 - 系统（system）：calendar/calendar-sync/datasources/datasource-update
@@ -274,7 +384,7 @@ ReturnData --> End
 - 快照（snapshot）：generate/recalculate/validate/status/delete
 - **通知（notification）**：**新增**：list/create/get/update/delete/mark-read/mark-unread/batch-delete
 
-**更新** 新增了通知命令组，提供完整的通知管理功能
+**更新** 交易命令组新增preview功能的HTTP化，用于交易预览的Web访问；市场数据命令组新增nav-coverage命令，用于净值覆盖率检查；改进了帮助文本和数据限制警告
 
 **章节来源**
 - [main.py:15-46](file://ir-cli/ir_cli/main.py#L15-L46)
@@ -311,33 +421,55 @@ CLI->>OUT : 输出成功结果
 
 **图表来源**
 - [auth.py:10-26](file://ir-cli/ir_cli/commands/auth.py#L10-L26)
-- [client.py:113-121](file://ir-cli/ir_cli/client.py#L113-121)
+- [client.py:113-121](file://ir-cli/ir_cli/client.py#L113-L121)
 - [config.py:40-48](file://ir-cli/ir_cli/config.py#L40-L48)
-- [output.py:32-44](file://ir-cli/ir_cli/output.py#L32-L44)
+- [output.py:32-44](file://ir-cli/ir_cli/output.py#L32-44)
 
-#### 同步完整历史（sync-history）
+#### 交易预览HTTP化流程
 ```mermaid
 sequenceDiagram
-participant U as "用户"
-participant CLI as "ir market sync-history"
+participant U as "用户/客户端应用"
+participant CLI as "ir trades preview"
 participant C as "APIClient"
 participant S as "后端服务"
-U->>CLI : 指定产品代码与市场类型
-CLI->>C : POST /api/market-data/products/{code}/{market}/sync-history (timeout=IR_HTTP_TIMEOUT, retry=IR_RETRY)
-C->>S : 触发后端同步完整历史
+U->>CLI : 执行交易预览 (--json trade_data)
+CLI->>C : POST /api/trades/preview (timeout=IR_HTTP_TIMEOUT, retry=IR_RETRY)
 alt 首次失败
 C->>C : 指数退避重试
 C->>S : 重试请求
 end
-S-->>C : 返回同步结果
-C-->>CLI : {"data" : ...}
-CLI-->>U : 输出成功JSON
+S-->>C : 返回预览结果
+C-->>CLI : {"data" : {...}, "meta" : {...}}
+CLI-->>U : 输出预览结果
 ```
 
 **图表来源**
-- [market_data.py:47-55](file://ir-cli/ir_cli/commands/market_data.py#L47-L55)
-- [client.py:113-121](file://ir-cli/ir_cli/client.py#L113-121)
-- [output.py:32-44](file://ir-cli/ir_cli/output.py#L32-L44)
+- [trades.py:1-106](file://ir-cli/ir_cli/commands/trades.py#L1-L106)
+- [client.py:113-121](file://ir-cli/ir_cli/client.py#L113-L121)
+- [output.py:32-44](file://ir-cli/ir_cli/output.py#L32-44)
+
+#### 净值覆盖率检查流程
+```mermaid
+sequenceDiagram
+participant U as "用户"
+participant CLI as "ir market nav-coverage"
+participant C as "APIClient"
+participant S as "后端服务"
+U->>CLI : 执行净值覆盖率检查 (--all --fields)
+CLI->>C : GET /api/market-data/nav-coverage?limit=100 (timeout=IR_HTTP_TIMEOUT, retry=IR_RETRY)
+alt 首次失败
+C->>C : 指数退避重试
+C->>S : 重试请求
+end
+S-->>C : 返回覆盖率数据
+C-->>CLI : {"data" : {...}, "meta" : {...}}
+CLI-->>U : 输出覆盖率检查结果
+```
+
+**图表来源**
+- [market_data.py:1-66](file://ir-cli/ir_cli/commands/market_data.py#L1-L66)
+- [client.py:113-121](file://ir-cli/ir_cli/client.py#L113-L121)
+- [output.py:32-44](file://ir-cli/ir_cli/output.py#L32-44)
 
 #### 通知管理流程
 ```mermaid
@@ -370,9 +502,48 @@ CLI-->>U : 格式化输出通知列表
 
 **图表来源**
 - [notifications.py:1-80](file://ir-cli/ir_cli/commands/notifications.py#L1-L80)
-- [client.py:113-121](file://ir-cli/ir_cli/client.py#L113-121)
-- [output.py:32-44](file://ir-cli/ir_cli/output.py#L32-L44)
+- [client.py:113-121](file://ir-cli/ir_cli/client.py#L113-L121)
+- [output.py:32-44](file://ir-cli/ir_cli/output.py#L32-44)
 - [utils.py:1-100](file://ir-cli/ir_cli/utils.py#L1-L100)
+
+#### Schema验证流程
+```mermaid
+sequenceDiagram
+participant U as "用户"
+participant CLI as "ir commands"
+participant SCHEMA as "Schema验证器"
+participant RF as "响应字段契约"
+participant C as "APIClient"
+participant S as "后端服务"
+U->>CLI : 执行API调用
+CLI->>SCHEMA : 验证请求数据schema
+alt 请求验证通过
+SCHEMA-->>CLI : 验证通过
+CLI->>RF : 获取响应字段定义
+RF-->>CLI : 返回字段契约
+CLI->>C : 发送HTTP请求
+C->>S : 调用后端API
+S-->>C : 返回响应数据
+C->>SCHEMA : 验证响应数据schema
+alt 响应验证通过
+SCHEMA-->>C : 验证通过
+C-->>CLI : 返回结构化数据
+CLI-->>U : 输出结果
+else 响应验证失败
+SCHEMA-->>C : 返回验证错误
+C-->>CLI : 抛出验证异常
+CLI-->>U : 显示验证错误
+end
+else 请求验证失败
+SCHEMA-->>CLI : 返回验证错误
+CLI-->>U : 显示验证错误
+end
+```
+
+**图表来源**
+- [schema.py:1-200](file://ir-cli/ir_cli/schema.py#L1-L200)
+- [response_fields.py:1-150](file://ir-cli/ir_cli/response_fields.py#L1-L150)
+- [client.py:113-121](file://ir-cli/ir_cli/client.py#L113-L121)
 
 ## 依赖关系分析
 - 外部依赖：typer用于CLI框架，httpx用于HTTP客户端
@@ -383,6 +554,10 @@ CLI-->>U : 格式化输出通知列表
   - config.py为纯本地IO与时间逻辑，无外部库耦合
   - **新增** utils.py为所有命令组提供共享功能
   - **新增** 本地缓存模块支持日历数据缓存
+  - **新增** schema.py提供完整的schema验证功能
+  - **新增** response_fields.py管理响应字段契约
+  - **新增** gen_response_fields.py脚本支持OpenAPI集成
+  - **新增** trades.py中的交易预览HTTP化功能
 
 ```mermaid
 graph LR
@@ -392,7 +567,7 @@ M --> I["commands/investors.py"]
 M --> PRT["commands/portfolios.py"]
 M --> POS["commands/positions.py"]
 M --> SUB["commands/subscriptions.py"]
-M --> TRD["commands/trades.py"]
+M --> TRD["commands/trades.py<br/>含预览HTTP化"]
 M --> MKT["commands/market_data.py"]
 M --> PRD["commands/products.py"]
 M --> PLF["commands/platforms.py"]
@@ -419,6 +594,9 @@ CL --> ENV["IR_HTTP_TIMEOUT环境变量"]
 CL --> RETRY["IR_RETRY环境变量"]
 CL --> DEBUG["IR_DEBUG环境变量"]
 CL --> UT["utils.py"]
+CL --> SCH["schema.py"]
+SCH --> RF["response_fields.py"]
+RF --> GEN["gen_response_fields.py"]
 A --> UT
 I --> UT
 PRT --> UT
@@ -433,6 +611,7 @@ TSK --> UT
 SNP --> UT
 NOTI --> UT
 CFG --> CACHE["本地缓存"]
+CFG --> UTF8["UTF-8编码处理"]
 ```
 
 **图表来源**
@@ -442,6 +621,10 @@ CFG --> CACHE["本地缓存"]
 - [config.py:1-109](file://ir-cli/ir_cli/config.py#L1-L109)
 - [output.py:1-64](file://ir-cli/ir_cli/output.py#L1-L64)
 - [utils.py:1-100](file://ir-cli/ir_cli/utils.py#L1-L100)
+- [schema.py:1-200](file://ir-cli/ir_cli/schema.py#L1-L200)
+- [response_fields.py:1-150](file://ir-cli/ir_cli/response_fields.py#L1-L150)
+- [gen_response_fields.py:1-100](file://ir-cli/scripts/gen_response_fields.py#L1-L100)
+- [trades.py:1-106](file://ir-cli/ir_cli/commands/trades.py#L1-L106)
 
 ## 性能与可靠性
 - **网络超时**：默认300秒（5分钟），可通过IR_HTTP_TIMEOUT环境变量自定义调整，避免长时间阻塞
@@ -455,8 +638,12 @@ CFG --> CACHE["本地缓存"]
 - **本地数据验证**：请求前进行数据格式校验，减少无效请求和网络开销
 - **系统日历缓存**：交易日历数据本地缓存，提升查询性能
 - **安全配置管理**：配置文件权限控制，保护敏感信息
+- **UTF-8编码支持**：增强的UTF-8编码处理和错误处理机制，提升国际化兼容性
+- **Schema验证优化**：--index模式提供高效的schema加载机制，减少内存占用
+- **响应字段缓存**：响应字段契约缓存机制，提升验证性能
+- **交易预览HTTP化**：通过HTTP接口暴露交易预览功能，提升系统的可集成性
 
-**更新** 新增的智能重试机制、数据验证和缓存功能显著提升了工具的可靠性和性能表现
+**更新** 新增的智能重试机制、数据验证、缓存功能、UTF-8编码处理和交易预览HTTP化显著提升了工具的可靠性和性能表现，schema验证系统和响应字段契约系统进一步增强了数据一致性和开发效率
 
 ## 故障排查指南
 - 未登录或token过期
@@ -492,11 +679,29 @@ CFG --> CACHE["本地缓存"]
 - **缓存相关问题**
   - 现象：数据不一致或查询缓慢
   - 处理：清除~/.ir/cache目录；检查缓存文件权限；确认缓存数据完整性
+- **UTF-8编码问题**
+  - 现象：字符显示异常或编码错误
+  - 处理：检查系统locale设置；确认终端支持UTF-8编码；验证输入数据的编码格式
+- **净值覆盖率检查问题**
+  - 现象：nav-coverage命令执行失败
+  - 处理：检查网络连接；确认后端服务正常运行；查看详细的错误信息和日志
+- **Schema验证错误**
+  - 现象：数据验证失败或类型不匹配
+  - 处理：检查请求数据格式是否符合schema定义；确认字段类型和必填项；查看详细的验证错误信息
+- **响应字段契约问题**
+  - 现象：响应数据字段缺失或类型错误
+  - 处理：运行gen_response_fields.py脚本更新响应字段契约；检查OpenAPI规范定义；确认前后端版本一致性
+- **OpenAPI集成问题**
+  - 现象：响应字段生成失败或版本冲突
+  - 处理：检查后端openapi.json文件完整性；确认脚本执行权限；处理字段冲突和版本兼容性问题
+- **交易预览HTTP化问题**
+  - 现象：交易预览功能无法通过HTTP访问
+  - 处理：检查后端服务是否正常运行；确认API端点是否正确配置；查看详细的错误信息和日志
 
-**更新** 增加了智能重试、调试模式和缓存相关的故障排查指导
+**更新** 增加了智能重试、调试模式、缓存、UTF-8编码、净值覆盖率、schema验证、响应字段契约、OpenAPI集成和交易预览HTTP化相关的故障排查指导
 
 ## 结论
-InvestRing HTTP客户端CLI以最小依赖实现了完整的投资管理系统命令行能力，具备良好的可移植性与易用性。通过统一的认证、配置、错误处理与输出协议，CLI能够稳定地与后端协作，满足日常运维与自动化场景需求。**新增的智能重试机制、数据验证、系统日历缓存和安全配置管理功能进一步增强了CLI的功能性和用户体验，使其更适合生产环境的自动化集成和高可用性要求**。
+InvestRing HTTP客户端CLI以最小依赖实现了完整的投资管理系统命令行能力，具备良好的可移植性与易用性。通过统一的认证、配置、错误处理与输出协议，CLI能够稳定地与后端协作，满足日常运维与自动化场景需求。**新增的智能重试机制、数据验证、系统日历缓存、安全配置管理和UTF-8编码处理功能进一步增强了CLI的功能性和用户体验，使其更适合生产环境的自动化集成和高可用性要求。新增的schema验证系统和响应字段契约系统大幅提升了数据一致性和开发效率，OpenAPI集成简化了前后端协作流程。交易预览功能的HTTP化使得客户端应用可以直接通过REST API访问交易预览功能，提升了系统的可集成性和扩展性**。
 
 ## 附录：命令清单与API映射
 - 认证
@@ -539,6 +744,7 @@ InvestRing HTTP客户端CLI以最小依赖实现了完整的投资管理系统�
   - confirm: POST /api/trades/{id}/confirm?confirm_date=&price=
   - cancel: POST /api/trades/{id}/cancel
   - unconfirm: POST /api/trades/{id}/unconfirm
+  - **preview**: **新增HTTP化** POST /api/trades/preview [--json]
 - 份额事件
   - list/create/get/update/delete/confirm/cancel（见 share_events.py）[--all] [--fields] [--json]
 - 市场数据
@@ -546,6 +752,7 @@ InvestRing HTTP客户端CLI以最小依赖实现了完整的投资管理系统�
   - sync: POST /api/market-data/products/{code}/{market}/sync-price-data
   - sync-history: POST /api/market-data/products/{code}/{market}/sync-history
   - sync-nav: POST /api/market-data/portfolios/{code}/sync-nav
+  - **nav-coverage**: **新增** GET /api/market-data/nav-coverage?limit=&start_date=&end_date= [--all] [--fields]
 - 产品
   - list/create/get/update/delete（见 products.py）[--all] [--fields] [--json]
 - 平台
@@ -578,3 +785,15 @@ InvestRing HTTP客户端CLI以最小依赖实现了完整的投资管理系统�
   - mark-read: PUT /api/notifications/{id}/mark-read
   - mark-unread: PUT /api/notifications/{id}/mark-unread
   - batch-delete: DELETE /api/notifications/batch
+- **Schema验证**：**新增**
+  - 支持--index模式进行高效schema加载
+  - 自动验证请求和响应数据格式
+  - 集成OpenAPI规范确保契约一致性
+- **响应字段契约**：**新增**
+  - 自动生成响应字段定义
+  - 从OpenAPI规范同步字段契约
+  - 支持增量更新和冲突解决
+- **交易预览HTTP化**：**新增**
+  - 通过HTTP接口暴露交易预览功能
+  - 为客户端应用提供Web访问能力
+  - 保持与原有CLI预览功能一致的逻辑
