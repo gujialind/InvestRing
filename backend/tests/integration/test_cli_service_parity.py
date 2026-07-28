@@ -159,7 +159,7 @@ class TestProductConfirmDaysParity:
 
     def test_cli_cn_otc_qdii_confirm_days_2(self, cli_db):
         result = runner.invoke(products_app, [
-            "create", "--code", "PAR_QDII.OF", "--market", "CN_OTC",
+            "create", "--code", "PQD.OF", "--market", "CN_OTC",
             "--name", "场外QDII", "--product-type", "OEF",
             "--asset-class-code", "STOCK_CN_LARGE", "--is-qdii",
         ])
@@ -170,7 +170,7 @@ class TestProductConfirmDaysParity:
     def test_rest_cn_otc_non_qdii_confirm_days_1(self, client, admin_headers, test_db):
         resp = client.post(
             "/api/products",
-            json={"code": "PAR_OTC_R.OF", "market": "CN_OTC", "name": "场外非QDII",
+            json={"code": "POTCR.OF", "market": "CN_OTC", "name": "场外非QDII",
                   "product_type": "OEF", "asset_class_code": "STOCK_CN_LARGE",
                   "is_qdii": False},
             headers=admin_headers,
