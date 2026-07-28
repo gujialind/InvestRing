@@ -824,6 +824,8 @@ def _generate_portfolio_value_snapshot(
     else:
         # 首次快照：无前序快照，使用市值作为初始份额（NAV=1.0，份额=金额）
         # 份额产生点：量化到 2 位，与首次申购确认份额（amount/1.0 量化）口径一致
+        # 极小值边界：若 total_value 在 (0, 0.01) 区间，量化后 total_shares=0.00，
+        # 后续走 total_shares<=0 分支 unit_price 固定 1.0000 作为兜底，属预期设计
         total_shares = quantize_shares(total_value) if total_value > 0 else Decimal("1")
     
     # 计算净值
