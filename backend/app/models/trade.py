@@ -18,7 +18,7 @@ class Trade(Base):
     #   - 平台间现金转移（CASH sell + CASH buy）：uuid（裸 uuid）
     # 每笔 trade 均隶属一个业务组，不存在裸 trade（NOT NULL 保证数据规范）
     transfer_group = Column(String(36), nullable=False)
-    shares = Column(Numeric(15, 4))
+    shares = Column(Numeric(15, 2))
     amount = Column(Numeric(15, 4), nullable=False)
     price = Column(Numeric(10, 4))
     fee = Column(Numeric(15, 4), default=0)

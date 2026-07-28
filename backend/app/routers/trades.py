@@ -6,10 +6,17 @@ from decimal import Decimal
 from app.database import get_db
 from app.models.trade import Trade
 from app.models.product import Product
-from app.schemas.trade import TradeCreate, TradeUpdate, TradeResponse
+from app.schemas.trade import (
+    TradeCreate,
+    TradeUpdate,
+    TradeResponse,
+    TradePreviewResult,
+    TradePreviewResponse,
+)
 from app.dependencies import get_current_user, get_current_admin
 from app.services.trade_service import (
     confirm_single_trade,
+    calculate_confirm_preview,
     sync_transfer_group,
     create_trade as create_trade_service,
     cancel_trade as cancel_trade_service,
@@ -64,6 +71,46 @@ def create_trade(
     db.commit()
     db.refresh(new_trade)
     return new_trade
+
+
+# 注意：必须注册在 GET /{id} 之前，避免路径 "preview" 被 /{id} 吞掉
+@router.get("/{id}/preview", response_model=TradePreviewResponse)
+def preview_trade_confirm(
+    id: int,
+    confirm_date: Optional[date] = None,
+    price: Optional[float] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_admin),
+):
+    """确认前预览：返回真实确认将写入的净值/份额/金额，不落库（与 confirm 共用计算实现）"""
+    trade = db.query(Trade).filter(Trade.id == id).first()
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    if trade.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_STATUS", "message": "仅 pending 状态可预览确认结果"},
+        )
+
+    product = (
+        db.query(Product)
+        .filter(Product.code == trade.product_code, Product.market == trade.market)
+        .first()
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    price_decimal = Decimal(str(price)) if price is not None else None
+    preview = calculate_confirm_preview(
+        db, trade, product, confirm_date=confirm_date, price=price_decimal
+    )
+    return TradePreviewResponse(
+        trade=TradeResponse.from_orm(trade),
+        preview=TradePreviewResult(
+            **{k: v for k, v in preview.items() if k != "paired_cash_amount"}
+        ),
+        paired_cash_amount=preview["paired_cash_amount"],
+    )
 
 
 @router.get("/{id}", response_model=TradeResponse)

@@ -95,7 +95,7 @@ ir portfolio create --help   # 查看具体命令的参数帮助
 ### 3.4 数据类型说明
 
 - **日期参数**：所有日期参数使用 `YYYY-MM-DD` 格式字符串，如 `--apply-date 2025-01-06`
-- **金额/份额**：使用浮点数输入，内部以 Decimal 运算，输出保留 4 位小数
+- **金额/份额**：使用浮点数输入，内部以 Decimal 运算；金额输出保留 4 位小数，份额统一 2 位小数（ROUND_DOWN，第 3 位直接舍去）
 - **ID 参数**：数值型主键，直接作为位置参数传入
 
 ### 3.5 AI Agent 友好特性（仅 ir-cli HTTP 版）
@@ -383,14 +383,14 @@ ir sub create --portfolio-code <组合> --investor-code <投资人> --type redee
 | `--investor-code` | 是 | 投资人代码 |
 | `--type` | 是 | `subscribe`（申购）或 `redeem`（赎回） |
 | `--amount` | 申购时必填 | 申购金额（必须 > 0） |
-| `--shares` | 赎回时必填 | 赎回份额（必须 > 0，不可超过可用份额） |
+| `--shares` | 赎回时必填 | 赎回份额（必须 > 0；先量化到 2 位小数再校验，不可超过可用份额） |
 | `--apply-date` | 是 | 申请日期（必须是交易日） |
 | `--notes` | 否 | 备注 |
 
 > **业务规则**：
 > - 申请日期必须是交易日
 > - 组合状态必须为 `active` 或 `draft`
-> - 赎回份额不可超过投资人可用份额
+> - 赎回份额先量化到 2 位小数（第 3 位舍去），再与投资人可用份额精确比较，超出则拒绝
 
 #### `ir sub get`
 
@@ -471,7 +471,7 @@ ir trade create --portfolio-code <组合> --product-code <产品> --market <市�
 | `--actual-amount` | 买入时必填 | 实际支付金额（必须 > 0，不超过可用现金） |
 | `--fee` | 否（默认0） | 手续费 |
 | `--price` | 否 | 交易价格 |
-| `--shares` | 卖出时必填 | 卖出份额（必须 > 0，不超过可用份额） |
+| `--shares` | 卖出时必填 | 卖出份额（必须 > 0；先量化到 2 位小数再校验，不超过可用份额） |
 | `--platform-code` | 否 | 平台代码 |
 | `--trade-date` | 是 | 交易日期（必须是交易日） |
 | `--notes` | 否 | 备注 |
@@ -483,6 +483,20 @@ ir trade create --portfolio-code <组合> --product-code <产品> --market <市�
 ```bash
 ir trade get <ID>
 ```
+
+#### `ir trade preview`
+
+确认前预览：返回真实确认将写入的净值/份额/金额，不落库（与 `confirm` 共用同一计算实现，预览 == 真实确认）。两套 CLI（管理 CLI 与 ir-cli）均提供本命令。
+
+```bash
+ir trade preview <ID> [--confirm-date YYYY-MM-DD] [--price <价格>]
+```
+
+> **说明**：
+> - 仅 `pending` 状态可预览，否则返回 `INVALID_STATUS`
+> - 输出 `trade`（当前交易）+ `preview`（将写入的 price/shares/amount/actual_amount/fee/confirm_date/nav_date/is_otc_nav_fund）+ `paired_cash_amount`（配对 CASH 腿将同步的金额）
+> - 场外基金 T 日净值缺失返回 `MISSING_NAV`；传入 `--price` 与净值不一致返回 `PRICE_NAV_MISMATCH`
+> - 预览为时点快照，核对无误后执行 `ir trade confirm <ID>`
 
 #### `ir trade confirm`
 

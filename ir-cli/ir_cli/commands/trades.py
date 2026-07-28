@@ -93,6 +93,37 @@ def get(id: int = typer.Argument(..., help="交易ID")):
     success(data=result["data"])
 
 
+@app.command("preview")
+def preview(
+    id: int = typer.Argument(..., help="交易ID"),
+    confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="确认日期(YYYY-MM-DD)"),
+    price: Optional[float] = typer.Option(None, "--price", help="确认价格"),
+    quiet: bool = typer.Option(False, "--quiet", help="仅输出 preview/paired_cash_amount"),
+):
+    """确认前预览：返回真实确认将写入的净值/份额/金额，不落库。
+
+    需要后端支持 GET /api/trades/{id}/preview（issue #65 后的版本）。
+    仅 pending 状态可预览；场外基金 T 日净值缺失时返回 MISSING_NAV。
+    """
+    client = APIClient.from_config()
+    params = {}
+    if confirm_date is not None:
+        params["confirm_date"] = confirm_date
+    if price is not None:
+        params["price"] = price
+    result = client.get(f"/api/trades/{id}/preview", params=params)
+    data = result["data"]
+    hints = [
+        "预览为时点快照，实际以确认时为准",
+        f"核对无误后执行: ir trade confirm {id}",
+    ]
+    # data 为嵌套结构 {trade, preview, paired_cash_amount}，--quiet 时裁掉冗长的 trade 全字段
+    success(
+        data=project_fields(data, "preview,paired_cash_amount") if quiet else data,
+        hints=hints,
+    )
+
+
 @app.command("confirm")
 def confirm(
     id: int = typer.Argument(..., help="交易ID"),

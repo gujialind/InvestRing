@@ -21,6 +21,7 @@ from app.services.trading_utils import is_trading_day as _trading_utils_is_tradi
 from app.services.exceptions import BusinessError
 from app.services.subscription_service import unconfirm_single_subscription
 from app.models.manual_market_value import ManualMarketValue
+from app.utils.quantize import quantize_shares
 
 logger = logging.getLogger(__name__)
 
@@ -822,7 +823,8 @@ def _generate_portfolio_value_snapshot(
         total_shares += Decimal(str(subscribe_shares or 0)) - Decimal(str(redeem_shares or 0))
     else:
         # 首次快照：无前序快照，使用市值作为初始份额（NAV=1.0，份额=金额）
-        total_shares = total_value if total_value > 0 else Decimal("1")
+        # 份额产生点：量化到 2 位，与首次申购确认份额（amount/1.0 量化）口径一致
+        total_shares = quantize_shares(total_value) if total_value > 0 else Decimal("1")
     
     # 计算净值
     if total_shares > 0:

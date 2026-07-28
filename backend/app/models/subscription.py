@@ -11,7 +11,7 @@ class Subscription(Base):
     platform_code = Column(String(20), ForeignKey("platform.code"), nullable=False)
     sub_type = Column(String(10), nullable=False)
     amount = Column(Numeric(15, 4))
-    shares = Column(Numeric(15, 4))
+    shares = Column(Numeric(15, 2))
     unit_price = Column(Numeric(10, 4))
     apply_date = Column(Date, nullable=False)
     confirm_date = Column(Date)

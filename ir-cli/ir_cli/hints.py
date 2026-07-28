@@ -19,6 +19,7 @@ ERROR_HINTS: dict = {
     "PENDING_TRANSACTIONS_EXIST": "存在 pending 申赎/交易，先逐笔 confirm 或 cancel 后重试",
     "CASH_TRADE_FORBIDDEN": "禁止直接创建 CASH 交易，现金变动须走 ir sub（申赎）/ ir cash-transfer（跨平台转移）/ 基金调仓自动配对",
     "PRICE_NAV_MISMATCH": "传入价格与 T 日净值不一致: ir market price 查询净值核对，或省略 --price 由后端取 T 日净值",
+    "MISSING_NAV": "T 日净值尚未同步: ir market sync <product_code> <market> 同步后重试，或 ir market price 查询净值确认覆盖",
     "MISSING_OR_INVALID_PRICE": "场内交易必须传入有效 --price（成交价）",
     "CANNOT_CANCEL_EXCHANGE": "场内交易当天确认、不可 cancel；已确认的用 unconfirm 回退",
     "TRANSFER_NOT_READY": "转移未到确认日，到 confirm_date 当日再执行 ir cash-transfer confirm",

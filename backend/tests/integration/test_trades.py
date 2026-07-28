@@ -676,3 +676,229 @@ class TestCashTradeForbidden:
         assert paired[0].product_code == "CASH"
         assert paired[0].trade_type == "sell"
         assert float(paired[0].amount) == 10000.0
+
+
+class TestTradePreview:
+    """#65 确认前预览：GET /api/trades/{id}/preview 与真实 confirm 完全一致"""
+
+    def _setup_base(self, test_db, *, portfolio, product, platform,
+                    confirm_days=1, is_qdii=False, nav=None):
+        """创建组合/产品/平台/交易日/可用现金，可选写入 T 日净值"""
+        create_portfolio(test_db, code=portfolio, status="active")
+        create_product(test_db, code=product, market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       confirm_days=confirm_days, is_qdii=is_qdii)
+        create_platform(test_db, code=platform)
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        ensure_trading_day(test_db, date(2025, 10, 7), is_open=True)
+        ensure_trading_day(test_db, date(2025, 10, 8), is_open=True)
+        create_trade(
+            test_db, portfolio, "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code=platform, trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+        if nav is not None:
+            create_price_record(test_db, product, "CN_OTC", date(2025, 10, 6), unit_price=nav)
+
+    def _create_otc_buy(self, client, admin_headers, *, portfolio, product, platform,
+                        amount=10000.0, fee=0.0):
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": portfolio,
+                "product_code": product,
+                "market": "CN_OTC",
+                "trade_type": "buy",
+                "amount": amount,
+                "fee": fee,
+                "platform_code": platform,
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), f"Response: {resp.status_code} {resp.json()}"
+        return resp.json()["id"]
+
+    def test_preview_matches_confirm_otc_buy(self, client, admin_headers, test_db):
+        """场外 OEF 买入：preview 各字段与 confirm 后 trade 逐一相等，CASH 腿金额 == paired_cash_amount"""
+        self._setup_base(test_db, portfolio="PRV_B1", product="FUND_PRV1",
+                         platform="PRV_PLAT1", nav=1.25)
+        trade_id = self._create_otc_buy(
+            client, admin_headers,
+            portfolio="PRV_B1", product="FUND_PRV1", platform="PRV_PLAT1",
+        )
+
+        prev = client.get(f"/api/trades/{trade_id}/preview", headers=admin_headers)
+        assert prev.status_code == 200, f"Response: {prev.status_code} {prev.json()}"
+        data = prev.json()
+        preview = data["preview"]
+        assert preview["is_otc_nav_fund"] is True
+        assert preview["nav_date"] == "2025-10-06"
+
+        conf = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
+        assert conf.status_code == 200, f"Response: {conf.status_code} {conf.json()}"
+        confirmed = conf.json()["trade"]
+
+        # preview 与真实确认逐字段一致
+        assert float(preview["price"]) == float(confirmed["price"])
+        assert float(preview["shares"]) == float(confirmed["shares"])
+        assert float(preview["amount"]) == float(confirmed["amount"])
+        assert float(preview["actual_amount"]) == float(confirmed["actual_amount"])
+        assert preview["confirm_date"] == confirmed["confirm_date"]
+
+        # 配对 CASH 腿金额 == paired_cash_amount
+        test_db.expire_all()
+        fund_leg = test_db.query(Trade).get(trade_id)
+        paired = test_db.query(Trade).filter(
+            Trade.transfer_group == fund_leg.transfer_group,
+            Trade.id != trade_id,
+        ).first()
+        assert float(paired.amount) == float(data["paired_cash_amount"])
+
+    def test_preview_matches_confirm_otc_sell(self, client, admin_headers, test_db):
+        """场外 OEF 卖出：preview 与 confirm 结果一致"""
+        self._setup_base(test_db, portfolio="PRV_S1", product="FUND_PRV2",
+                         platform="PRV_PLAT2", nav=1.25)
+        # 先有持仓可卖
+        create_position_snapshot(
+            test_db, "PRV_S1", "FUND_PRV2", "CN_OTC",
+            snapshot_date=date(2025, 10, 3),
+            shares=1000.0, unit_price=1.2, cost_price=1.2,
+            market_value=1200.0, platform_code="PRV_PLAT2",
+        )
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "PRV_S1",
+                "product_code": "FUND_PRV2",
+                "market": "CN_OTC",
+                "trade_type": "sell",
+                "shares": 400.0,
+                "platform_code": "PRV_PLAT2",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), f"Response: {resp.status_code} {resp.json()}"
+        trade_id = resp.json()["id"]
+
+        prev = client.get(f"/api/trades/{trade_id}/preview", headers=admin_headers)
+        assert prev.status_code == 200, f"Response: {prev.status_code} {prev.json()}"
+        data = prev.json()
+        preview = data["preview"]
+        # 卖出：amount = 400 × 1.25 = 500，actual = 500 - 0
+        assert float(preview["amount"]) == 500.0
+        assert float(preview["actual_amount"]) == 500.0
+
+        conf = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
+        assert conf.status_code == 200, f"Response: {conf.status_code} {conf.json()}"
+        confirmed = conf.json()["trade"]
+        assert float(preview["price"]) == float(confirmed["price"])
+        assert float(preview["shares"]) == float(confirmed["shares"])
+        assert float(preview["amount"]) == float(confirmed["amount"])
+        assert float(preview["actual_amount"]) == float(confirmed["actual_amount"])
+        assert preview["confirm_date"] == confirmed["confirm_date"]
+
+        test_db.expire_all()
+        fund_leg = test_db.query(Trade).get(trade_id)
+        paired = test_db.query(Trade).filter(
+            Trade.transfer_group == fund_leg.transfer_group,
+            Trade.id != trade_id,
+        ).first()
+        assert float(paired.amount) == float(data["paired_cash_amount"])
+
+    def test_preview_qdii_confirm_date_consistent(self, client, admin_headers, test_db):
+        """QDII（confirm_days=2）：preview 的 confirm_date 与 confirm 后一致（T+2）"""
+        self._setup_base(test_db, portfolio="PRV_Q1", product="FUND_PRVQ",
+                         platform="PRV_PLATQ", confirm_days=2, is_qdii=True, nav=1.25)
+        trade_id = self._create_otc_buy(
+            client, admin_headers,
+            portfolio="PRV_Q1", product="FUND_PRVQ", platform="PRV_PLATQ",
+        )
+
+        prev = client.get(f"/api/trades/{trade_id}/preview", headers=admin_headers)
+        assert prev.status_code == 200, f"Response: {prev.status_code} {prev.json()}"
+        preview = prev.json()["preview"]
+        assert preview["confirm_date"] == "2025-10-08"
+
+        conf = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
+        assert conf.status_code == 200, f"Response: {conf.status_code} {conf.json()}"
+        assert preview["confirm_date"] == conf.json()["trade"]["confirm_date"]
+
+    def test_preview_missing_nav_rejected(self, client, admin_headers, test_db):
+        """T 日净值缺失：preview 返回 422 MISSING_NAV"""
+        self._setup_base(test_db, portfolio="PRV_N1", product="FUND_PRVN",
+                         platform="PRV_PLATN", nav=None)
+        trade_id = self._create_otc_buy(
+            client, admin_headers,
+            portfolio="PRV_N1", product="FUND_PRVN", platform="PRV_PLATN",
+        )
+
+        prev = client.get(f"/api/trades/{trade_id}/preview", headers=admin_headers)
+        assert prev.status_code == 422
+        assert prev.json()["detail"]["error"] == "MISSING_NAV"
+
+    def test_preview_price_nav_mismatch_rejected(self, client, admin_headers, test_db):
+        """传入与 T 日净值不一致的 price：preview 返回 422 PRICE_NAV_MISMATCH"""
+        self._setup_base(test_db, portfolio="PRV_M1", product="FUND_PRVM",
+                         platform="PRV_PLATM", nav=1.25)
+        trade_id = self._create_otc_buy(
+            client, admin_headers,
+            portfolio="PRV_M1", product="FUND_PRVM", platform="PRV_PLATM",
+        )
+
+        prev = client.get(
+            f"/api/trades/{trade_id}/preview", params={"price": 1.30},
+            headers=admin_headers,
+        )
+        assert prev.status_code == 422
+        assert prev.json()["detail"]["error"] == "PRICE_NAV_MISMATCH"
+
+    def test_preview_confirmed_trade_rejected(self, client, admin_headers, test_db):
+        """对已 confirmed 交易 preview：422 INVALID_STATUS"""
+        self._setup_base(test_db, portfolio="PRV_C1", product="FUND_PRVC",
+                         platform="PRV_PLATC", nav=1.25)
+        trade_id = self._create_otc_buy(
+            client, admin_headers,
+            portfolio="PRV_C1", product="FUND_PRVC", platform="PRV_PLATC",
+        )
+        conf = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
+        assert conf.status_code == 200
+
+        prev = client.get(f"/api/trades/{trade_id}/preview", headers=admin_headers)
+        assert prev.status_code == 422
+        assert prev.json()["detail"]["error"] == "INVALID_STATUS"
+
+    def test_preview_has_zero_side_effects(self, client, admin_headers, test_db):
+        """preview 后 trade 仍 pending、price 仍 null，CASH 腿状态/金额未变"""
+        self._setup_base(test_db, portfolio="PRV_Z1", product="FUND_PRVZ",
+                         platform="PRV_PLATZ", nav=1.25)
+        trade_id = self._create_otc_buy(
+            client, admin_headers,
+            portfolio="PRV_Z1", product="FUND_PRVZ", platform="PRV_PLATZ",
+        )
+        fund_leg = test_db.query(Trade).get(trade_id)
+        tg = fund_leg.transfer_group
+        cash_before = test_db.query(Trade).filter(
+            Trade.transfer_group == tg, Trade.id != trade_id
+        ).first()
+        cash_status_before = cash_before.status
+        cash_amount_before = float(cash_before.amount)
+
+        prev = client.get(f"/api/trades/{trade_id}/preview", headers=admin_headers)
+        assert prev.status_code == 200
+
+        # 重新 GET trade：零副作用
+        got = client.get(f"/api/trades/{trade_id}", headers=admin_headers)
+        assert got.status_code == 200
+        assert got.json()["status"] == "pending"
+        assert got.json()["price"] is None
+
+        test_db.expire_all()
+        cash_after = test_db.query(Trade).filter(
+            Trade.transfer_group == tg, Trade.id != trade_id
+        ).first()
+        assert cash_after.status == cash_status_before
+        assert float(cash_after.amount) == cash_amount_before
+

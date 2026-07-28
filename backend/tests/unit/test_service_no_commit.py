@@ -6,12 +6,14 @@
 # - trading_calendar_service.sync_trading_calendar
 # - market_data_service.sync_product_prices（含 _mark_failed 失败路径）
 # - task_runner.cleanup_old_logs
+# - trade_service.calculate_confirm_preview（纯计算，不修改 trade，issue #65）
 # 方式：monkeypatch 会话的 commit 为直接抛 AssertionError，
 # 函数若能正常完成即证明无 commit 调用（flush 允许）。
 # ============================================================================
 
 import pytest
 from datetime import date
+from decimal import Decimal
 from unittest.mock import patch
 
 from app.models import PortfolioValueSnapshot, PriceRecord, TradingCalendar
@@ -20,6 +22,8 @@ from tests.factories import (
     create_position_snapshot,
     create_value_snapshot,
     create_product,
+    create_trade,
+    create_price_record,
 )
 
 
@@ -184,3 +188,36 @@ class TestTaskRunnerCleanupNoCommit:
         _forbid_commit(monkeypatch, test_db)
         result = cleanup_old_logs(test_db)
         assert set(result.keys()) == {"login_logs", "audit_logs", "task_logs", "error_logs"}
+
+
+class TestTradePreviewNoCommit:
+    """calculate_confirm_preview 纯计算：不 commit、不修改 trade（issue #65）"""
+
+    def test_calculate_confirm_preview_no_commit_no_mutation(self, test_db, monkeypatch):
+        from app.services.trade_service import calculate_confirm_preview
+
+        create_portfolio(test_db, code="NC_PRV", status="active")
+        product = create_product(
+            test_db, code="PRVNC.OF", market="CN_OTC",
+            product_type="OEF", asset_class_code="STOCK_CN_LARGE", confirm_days=1,
+        )
+        create_price_record(test_db, "PRVNC.OF", "CN_OTC", D0, unit_price=1.25)
+        trade = create_trade(
+            test_db, "NC_PRV", "PRVNC.OF", "CN_OTC",
+            trade_type="buy", amount=10000.0, actual_amount=10000.0,
+            price=None, trade_date=D0, confirm_date=NEXT_DAY, status="pending",
+        )
+
+        _forbid_commit(monkeypatch, test_db)
+        result = calculate_confirm_preview(test_db, trade, product)
+
+        # 计算结果正确（与 confirm 共用同一实现）
+        assert result["price"] == Decimal("1.25")
+        assert result["shares"] == Decimal("8000")
+        assert result["confirm_date"] == NEXT_DAY
+        assert result["is_otc_nav_fund"] is True
+        assert result["paired_cash_amount"] == Decimal("10000")
+        # 纯计算：trade 对象未被修改
+        assert trade.status == "pending"
+        assert trade.price is None
+        assert trade.shares is None
