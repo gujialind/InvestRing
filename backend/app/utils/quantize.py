@@ -21,6 +21,10 @@ SHARES_QUANT = Decimal("0.01")
 def quantize_shares(value: Optional[Union[Decimal, float, int, str]]) -> Optional[Decimal]:
     """将份额量化为 2 位小数（ROUND_DOWN，第 3 位舍去）。
 
+    负数语义：正数直接截断第 3 位及以后（如 1.2349 → 1.23）；
+    负数向零截断（如 -1.2349 → -1.23），确保缩减类事件不会因进位
+    增加份额绝对值。
+
     None 原样返回，方便可空字段直接透传。
     """
     if value is None:
