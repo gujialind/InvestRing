@@ -131,11 +131,10 @@ def update(
     shares: Optional[float] = typer.Option(None, "--shares", help="份额"),
     unit_price: Optional[float] = typer.Option(None, "--unit-price", help="净值"),
     platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
-    confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="确认日期(YYYY-MM-DD)"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
-    """更新申赎（仅 pending 可改，confirmed 需先 unconfirm）"""
+    """更新申赎（仅 pending 可改，confirmed 需先 unconfirm；confirm_date 由后端自动维护，不开放直改）"""
     client = APIClient.from_config()
     body = resolve_body(
         json_body,
@@ -143,7 +142,6 @@ def update(
         shares=shares,
         unit_price=unit_price,
         platform_code=platform_code,
-        confirm_date=confirm_date,
         notes=notes,
     )
     if not body:

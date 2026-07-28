@@ -157,6 +157,44 @@ class TestCheckPendingTransactions:
         result = _check_pending_transactions(test_db, "PEND_S", date(2025, 3, 3))
         assert result["status"] == "failed"
 
+    def test_pending_trade_null_confirm_date_fails(self, test_db):
+        """confirm_date 为 NULL 的 pending 交易应兜底按 trade_date 命中（防 NULL 逃逸）"""
+        create_portfolio(test_db, code="PEND_TN", status="active")
+        create_product(test_db, code="FUND02", market="CN_OTC", asset_class_code="STOCK_CN_LARGE")
+        create_trade(
+            test_db, portfolio_code="PEND_TN",
+            product_code="FUND02", market="CN_OTC",
+            status="pending", trade_date=date(2025, 3, 3),
+            confirm_date=None,  # 异常数据：NULL confirm_date
+        )
+        result = _check_pending_transactions(test_db, "PEND_TN", date(2025, 3, 3))
+        assert result["status"] == "failed"
+
+    def test_pending_subscription_null_confirm_date_fails(self, test_db):
+        """confirm_date 为 NULL 的 pending 申购应兜底按 apply_date 命中（防 NULL 逃逸）"""
+        create_portfolio(test_db, code="PEND_SN", status="active")
+        create_investor(test_db, code="INV_PENDN")
+        create_subscription(
+            test_db, portfolio_code="PEND_SN", investor_code="INV_PENDN",
+            status="pending", apply_date=date(2025, 3, 2),
+            confirm_date=None,  # 异常数据：NULL confirm_date
+        )
+        result = _check_pending_transactions(test_db, "PEND_SN", date(2025, 3, 3))
+        assert result["status"] == "failed"
+
+    def test_pending_null_confirm_date_after_target_passes(self, test_db):
+        """NULL confirm_date 但 trade_date/apply_date 晚于 target 时不应误报"""
+        create_portfolio(test_db, code="PEND_NF", status="active")
+        create_product(test_db, code="FUND03", market="CN_OTC", asset_class_code="STOCK_CN_LARGE")
+        create_trade(
+            test_db, portfolio_code="PEND_NF",
+            product_code="FUND03", market="CN_OTC",
+            status="pending", trade_date=date(2025, 3, 5),
+            confirm_date=None,
+        )
+        result = _check_pending_transactions(test_db, "PEND_NF", date(2025, 3, 3))
+        assert result["status"] == "passed"
+
 
 class TestCheckShareChangeEvents:
     """份额变动事件检查测试"""

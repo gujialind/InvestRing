@@ -212,7 +212,9 @@ def unconfirm_single_subscription(
             )
 
     subscription.status = "pending"
-    subscription.confirm_date = None
+    # 重算期望确认日（申赎恒 T+1）而非置 None，保持 pending 记录 confirm_date 非空，
+    # 避免快照校验 confirm_date <= target 因 SQL NULL 比较漏检（与 unconfirm_trade 对齐）
+    subscription.confirm_date = get_next_trading_day(db, subscription.apply_date, days=1)
     subscription.unit_price = None
     # 申购时 shares 由确认计算得出，回退后应清空让重新确认时再算
     if subscription.sub_type == "subscribe":

@@ -22,11 +22,11 @@ class SubscriptionCreate(SubscriptionBase):
 
 
 class SubscriptionUpdate(BaseModel):
+    # confirm_date 不开放直改：创建/unconfirm 时由服务层按 T+1 自动维护
     platform_code: Optional[str] = None
     amount: Optional[float] = None
     shares: Optional[float] = None
     unit_price: Optional[float] = None
-    confirm_date: Optional[date] = None
     status: Optional[str] = None
     notes: Optional[str] = None
 

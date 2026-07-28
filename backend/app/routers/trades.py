@@ -22,6 +22,7 @@ from app.services.trade_service import (
     cancel_trade as cancel_trade_service,
     unconfirm_trade as unconfirm_trade_service,
 )
+from app.services.trading_utils import get_next_trading_day
 
 router = APIRouter()
 
@@ -217,12 +218,22 @@ def update_trade(
         )
 
     update_data = trade.dict(exclude_unset=True)
-    # 记录是否改动与配对同步相关的字段
-    sync_fields = {"status", "confirm_date", "trade_date"}
+    # 记录是否改动与配对同步相关的字段（confirm_date 不开放直改，见 TradeUpdate）
+    sync_fields = {"status", "trade_date"}
     needs_sync = bool(update_data.keys() & sync_fields)
 
     for field, value in update_data.items():
         setattr(db_trade, field, value)
+
+    # trade_date 变更时按产品 confirm_days 联动重算 confirm_date，避免确认日错位
+    if "trade_date" in update_data:
+        product = db.query(Product).filter(
+            Product.code == db_trade.product_code, Product.market == db_trade.market
+        ).first()
+        db_trade.confirm_date = get_next_trading_day(
+            db, db_trade.trade_date,
+            days=(product.confirm_days or 0) if product else 0,
+        )
 
     # 若改动涉及配对同步相关字段，同步 transfer_group 配对 CASH 腿
     if needs_sync and db_trade.transfer_group:

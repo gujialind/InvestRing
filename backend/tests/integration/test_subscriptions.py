@@ -280,6 +280,8 @@ class TestUnconfirmSubscriptionSnapshotProtection:
         """无快照依赖时 unconfirm 成功回退 pending 并级联删除配对 CASH trade"""
         create_portfolio(test_db, code="SUB_UC2", status="active")
         create_investor(test_db, code="SUB_UCI2")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
         sub = create_subscription(
             test_db, "SUB_UC2", "SUB_UCI2",
             sub_type="subscribe", amount=10000.0, shares=10000.0,
@@ -303,6 +305,8 @@ class TestUnconfirmSubscriptionSnapshotProtection:
 
         updated = test_db.query(Subscription).filter(Subscription.id == sub.id).first()
         assert updated.status == "pending"
+        # confirm_date 不置 None，重算为 T+1，避免快照校验 NULL 漏检
+        assert updated.confirm_date == date(2025, 9, 2)
         # 配对 CASH trade 已物理删除
         remaining = test_db.query(Trade).filter(
             Trade.transfer_group == f"sub_{sub.id}"

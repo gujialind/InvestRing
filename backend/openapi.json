@@ -7760,18 +7760,6 @@
             ],
             "title": "Unit Price"
           },
-          "confirm_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confirm Date"
-          },
           "status": {
             "anyOf": [
               {
@@ -8532,18 +8520,6 @@
               }
             ],
             "title": "Trade Date"
-          },
-          "confirm_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confirm Date"
           },
           "status": {
             "anyOf": [

@@ -183,14 +183,14 @@ def update(
     price: Optional[float] = typer.Option(None, "--price", help="价格"),
     fee: Optional[float] = typer.Option(None, "--fee", help="手续费"),
     actual_amount: Optional[float] = typer.Option(None, "--actual-amount", help="实际金额"),
-    confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="确认日期(YYYY-MM-DD)"),
     trade_date: Optional[str] = typer.Option(None, "--trade-date", help="交易日期(YYYY-MM-DD)"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """更新交易（仅 pending 状态可改，confirmed 需先 unconfirm）。
 
-    改动 confirm_date/trade_date/status 会自动同步配对 CASH 腿。
+    改动 trade_date/status 会自动同步配对 CASH 腿；confirm_date 不开放直改，
+    改 trade_date 时后端自动联动重算，补录覆盖请用 confirm --confirm-date。
     """
     client = APIClient.from_config()
     body = resolve_body(
@@ -200,7 +200,6 @@ def update(
         price=price,
         fee=fee,
         actual_amount=actual_amount,
-        confirm_date=confirm_date,
         trade_date=trade_date,
         notes=notes,
     )

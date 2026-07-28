@@ -26,13 +26,14 @@ class TradeCreate(TradeBase):
 
 
 class TradeUpdate(BaseModel):
+    # confirm_date 不开放直改：创建/unconfirm 按 confirm_days 自动维护，
+    # 改 trade_date 时由 router 联动重算；补录覆盖走 confirm 端点传参
     shares: Optional[float] = None
     amount: Optional[float] = None
     price: Optional[float] = None
     fee: Optional[float] = None
     actual_amount: Optional[float] = None
     trade_date: Optional[date] = None
-    confirm_date: Optional[date] = None
     status: Optional[str] = None
     notes: Optional[str] = None
 
