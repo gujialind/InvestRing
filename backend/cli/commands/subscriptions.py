@@ -149,10 +149,9 @@ def update_subscription(
     shares: Optional[float] = typer.Option(None, "--shares", help="份额"),
     unit_price: Optional[float] = typer.Option(None, "--unit-price", help="净值"),
     platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
-    confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="YYYY-MM-DD"),
     notes: Optional[str] = typer.Option(None, "--notes"),
 ):
-    """更新申购赎回（仅 pending 可改，confirmed 需先 unconfirm）"""
+    """更新申购赎回（仅 pending 可改，confirmed 需先 unconfirm；confirm_date 由服务层自动维护，不开放直改）"""
     with cli_context() as db:
         from app.models.subscription import Subscription
 
@@ -171,8 +170,6 @@ def update_subscription(
             updates["unit_price"] = Decimal(str(unit_price))
         if platform_code is not None:
             updates["platform_code"] = platform_code
-        if confirm_date is not None:
-            updates["confirm_date"] = parse_date(confirm_date)
         if notes is not None:
             updates["notes"] = notes
         if not updates:

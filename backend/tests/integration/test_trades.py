@@ -374,7 +374,7 @@ class TestUpdateDeletePairedSync:
     """#26 PUT/DELETE 配对 CASH 腿同步"""
 
     def test_update_trade_date_syncs_cash_leg(self, client, admin_headers, test_db):
-        """update 改动 confirm_date 时，配对 CASH 腿 confirm_date 同步"""
+        """update 改动 trade_date 时 confirm_date 联动重算，并同步配对 CASH 腿"""
         create_portfolio(test_db, code="UPD_P1", status="active")
         create_product(test_db, code="ETF_UPD", market="CN_EXCHANGE",
                        product_type="ETF", asset_class_code="STOCK_CN_LARGE",
@@ -410,13 +410,27 @@ class TestUpdateDeletePairedSync:
         ).first()
         assert cash_leg.confirm_date == date(2025, 10, 6)
 
+        # confirm_date 不开放直改：额外字段被 schema 忽略，不产生变更
         upd = client.put(
             f"/api/trades/{trade_id}",
-            json={"confirm_date": "2025-10-08"},
+            json={"confirm_date": "2025-10-08", "notes": "try direct set"},
             headers=admin_headers,
         )
         assert upd.status_code == 200
         test_db.expire_all()
+        fund_leg = test_db.query(Trade).get(trade_id)
+        assert fund_leg.confirm_date == date(2025, 10, 6)
+
+        # 改 trade_date → 按产品 confirm_days 联动重算 confirm_date 并同步 CASH 腿
+        upd = client.put(
+            f"/api/trades/{trade_id}",
+            json={"trade_date": "2025-10-08"},
+            headers=admin_headers,
+        )
+        assert upd.status_code == 200
+        test_db.expire_all()
+        fund_leg = test_db.query(Trade).get(trade_id)
+        assert fund_leg.confirm_date == date(2025, 10, 8)
         cash_leg = test_db.query(Trade).filter(
             Trade.transfer_group == tg, Trade.id != trade_id
         ).first()

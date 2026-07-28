@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Dict, Any, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, delete
+from sqlalchemy import func, and_, or_, delete
 
 from app.models import (
     Portfolio, PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
@@ -1200,16 +1200,26 @@ def _check_pending_transactions(
     portfolio_code: str,
     target_date: date
 ) -> Dict[str, Any]:
-    """检查是否存在pending交易"""
+    """检查是否存在pending交易
+
+    confirm_date 为 NULL 时 SQL 比较恒不命中，故兜底按 trade_date/apply_date 判断，
+    防止异常数据（如历史遗留的 NULL confirm_date）逃过校验静默生成脏快照。
+    """
     pending_trades = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
-        Trade.confirm_date <= target_date,
+        or_(
+            Trade.confirm_date <= target_date,
+            and_(Trade.confirm_date.is_(None), Trade.trade_date <= target_date),
+        ),
         Trade.status == "pending"
     ).count()
     
     pending_subs = db.query(Subscription).filter(
         Subscription.portfolio_code == portfolio_code,
-        Subscription.confirm_date <= target_date,
+        or_(
+            Subscription.confirm_date <= target_date,
+            and_(Subscription.confirm_date.is_(None), Subscription.apply_date <= target_date),
+        ),
         Subscription.status == "pending"
     ).count()
     
