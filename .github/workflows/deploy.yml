@@ -30,7 +30,7 @@ on:
     workflows: ["CI"]
     types: [completed]
 
-  # 手动触发：留空 image_tag 则构建当前 main 并部署；
+  # 手动触发：留空 image_tag 则构建触发分支当前 commit 并部署；
   # 填写已有 tag（如短 commit SHA）则跳过构建直接部署该版本（用于回滚）
   workflow_dispatch:
     inputs:
@@ -84,11 +84,13 @@ jobs:
             echo "need_build=true" >> $GITHUB_OUTPUT
             echo "checkout_ref=$SHA" >> $GITHUB_OUTPUT
           else
-            # 手动触发且未指定 tag：构建 main 最新代码
+            # 手动触发且未指定 tag：构建触发分支当前 commit 的代码
+            # 镜像必须从触发 commit 构建（checkout_ref 与 image_tag 均取 github.sha），
+            # 避免镜像内容与生产 DB 的 alembic 迁移版本错位导致启动失败
             SHA="${{ github.sha }}"
             echo "image_tag=${SHA:0:7}" >> $GITHUB_OUTPUT
             echo "need_build=true" >> $GITHUB_OUTPUT
-            echo "checkout_ref=main" >> $GITHUB_OUTPUT
+            echo "checkout_ref=$SHA" >> $GITHUB_OUTPUT
           fi
 
   # ==========================================================================
