@@ -68,12 +68,12 @@ def available_shares(
 def update_cash(
     portfolio_code: str = typer.Argument(..., help="组合代码"),
     platform_code: str = typer.Option(..., "--platform-code", help="平台代码"),
-    amount: float = typer.Option(..., "--amount", help="现金金额"),
+    cash_amount: float = typer.Option(..., "--cash-amount", help="现金金额"),
     update_date: Optional[str] = typer.Option(None, "--update-date", help="更新日期(YYYY-MM-DD)"),
 ):
     """更新组合现金持仓"""
     client = APIClient.from_config()
-    body = {"platform_code": platform_code, "amount": amount}
+    body = {"platform_code": platform_code, "cash_amount": cash_amount}
     if update_date is not None:
         body["update_date"] = update_date
     result = client.post(f"/api/positions/portfolio/{portfolio_code}/cash-position", json_data=body)

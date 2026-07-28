@@ -68,7 +68,7 @@ def _trigger_daily_nav_sync():
 
         today = date.today()
         from app.models.trading_calendar import TradingCalendar
-        cal = db.query(TradingCalendar).filter(TradingCalendar.date == today).first()
+        cal = db.query(TradingCalendar).filter(TradingCalendar.calendar_date == today).first()
         if not cal or not cal.is_open:
             logger.info(f"{today} 非交易日，跳过每日净值同步")
             return

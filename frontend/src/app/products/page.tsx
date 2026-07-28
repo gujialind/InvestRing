@@ -466,8 +466,8 @@ export default function ProductsPage() {
                   </TableHeader>
                   <TableBody>
                     {priceData.map((record) => (
-                      <TableRow key={record.date}>
-                        <TableCell>{record.date}</TableCell>
+                      <TableRow key={record.price_date}>
+                        <TableCell>{record.price_date}</TableCell>
                         <TableCell className="text-right font-medium">
                           {formatCurrency(record.unit_price)}
                         </TableCell>

@@ -43,7 +43,7 @@ def _setup_cash_snapshot(db, portfolio_code: str, snapshot_date: date, amount: f
     create_position_snapshot(
         db, portfolio_code, "CASH", "",
         snapshot_date=snapshot_date,
-        amount=amount, unit_price=None, cost_price=None,
+        cash_amount=amount, unit_price=None, cost_price=None,
         market_value=amount, platform_code="MYCF", asset_type="cash",
     )
     create_value_snapshot(
@@ -140,7 +140,7 @@ class TestTradingCalendarServiceNoCommit:
         assert result["synced_count"] == 2
         # flush 后同事务内可见
         assert test_db.query(TradingCalendar).filter(
-            TradingCalendar.date == date(2030, 1, 2)
+            TradingCalendar.calendar_date == date(2030, 1, 2)
         ).first() is not None
 
 
@@ -161,7 +161,7 @@ class TestMarketDataServiceNoCommit:
         assert result["success"] is True
         assert test_db.query(PriceRecord).filter(
             PriceRecord.product_code == sample_etf_product.code,
-            PriceRecord.date == D0,
+            PriceRecord.price_date == D0,
         ).first() is not None
 
     @patch("app.services.market_data_service.get_fund_daily")

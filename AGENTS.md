@@ -76,7 +76,7 @@
 compute_cash_balance(T) = SUM(confirmed CASH trades WHERE confirm_date <= T)
                         + SUM(confirmed events WHERE ex_date <= T, cash_change != 0)
 
-calculate_available_cash = 最新快照日 portfolio_position 的 CASH amount（基线）
+calculate_available_cash = 最新快照日 portfolio_position 的 CASH cash_amount（基线）
                          + SUM(confirmed CASH trades WHERE confirm_date > 快照日)
                          − SUM(pending CASH sells)
                          + SUM(confirmed event cash_change WHERE ex_date > 快照日)
@@ -219,9 +219,9 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 **唯一约束**：
 - `trade`：`(transfer_group, product_code, trade_type)` — 防重复确认生成重复 CASH trade。`transfer_group` **NOT NULL**（每笔 trade 必属一个业务组）：基金腿与 CASH 腿按 `product_code` 区分、现金转移两腿按 `trade_type` 区分、申赎为单腿 `sub_{id}`，故 NOT NULL 下仍无碰撞。
-- `portfolio_position`：`(portfolio_code, product_code, market, platform_code, snapshot_date)`；并有 CHECK 约束 `shares` 与 `amount` 二者恰有其一（净值型 vs 非净值型）。
+- `portfolio_position`：`(portfolio_code, product_code, market, platform_code, snapshot_date)`；并有 CHECK 约束 `shares` 与 `cash_amount` 二者恰有其一（净值型 vs 非净值型）。
 - `portfolio_value_snapshot`：`(portfolio_code, snapshot_date)`。
-- `manual_market_value`：`(portfolio_code, platform_code, product_code, date)`。
+- `manual_market_value`：`(portfolio_code, platform_code, product_code, value_date)`。
 
 **双日期与分级（`share_change_event`）**：`ex_date`（除息日，应用日）+ `entitlement_date`（权益登记日，基数日），要求 `ex_date > entitlement_date` 且两者均为交易日。`platform_code`（平台级事件必填）、`parent_event_id`（基金级拆分子记录自引用）。
 

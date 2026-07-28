@@ -102,7 +102,7 @@ def available_shares(
 def update_cash_position(
     portfolio_code: str = typer.Argument(...),
     platform_code: str = typer.Option(..., "--platform-code"),
-    amount: float = typer.Option(..., "--amount"),
+    cash_amount: float = typer.Option(..., "--cash-amount"),
     update_date: str = typer.Option(None, "--update-date", help="YYYY-MM-DD"),
 ):
     """更新现金市值（写入 manual_market_value，绝对替换，不直接写快照表）"""
@@ -113,14 +113,14 @@ def update_cash_position(
             db,
             portfolio_code=portfolio_code,
             platform_code=platform_code,
-            amount=Decimal(str(amount)),
+            amount=Decimal(str(cash_amount)),
             update_date=parse_date(update_date) if update_date else None,
         )
         success(data={
             "message": "现金市值覆盖已写入 manual_market_value，建议重新生成快照以更新持仓",
             "portfolio_code": result["portfolio_code"],
             "platform_code": result["platform_code"],
-            "amount": result["amount"],
+            "cash_amount": result["cash_amount"],
             "computed_value": result["computed_value"],
             "update_date": result["update_date"].isoformat(),
             "requires_snapshot_regen": True,

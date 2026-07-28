@@ -163,7 +163,7 @@ def create_price_record(
     """创建价格记录"""
     record = PriceRecord(
         product_code=product_code, market=market,
-        date=record_date, unit_price=Decimal(str(unit_price)),
+        price_date=record_date, unit_price=Decimal(str(unit_price)),
     )
     db.add(record)
     db.commit()
@@ -177,10 +177,10 @@ def create_price_record(
 
 def ensure_trading_day(db: Session, d: date, is_open: bool = True) -> TradingCalendar:
     """确保指定日期在交易日历中存在"""
-    existing = db.query(TradingCalendar).filter(TradingCalendar.date == d).first()
+    existing = db.query(TradingCalendar).filter(TradingCalendar.calendar_date == d).first()
     if existing:
         return existing
-    cal = TradingCalendar(date=d, is_open=is_open, exchange="SSE")
+    cal = TradingCalendar(calendar_date=d, is_open=is_open, exchange="SSE")
     db.add(cal)
     db.commit()
     db.refresh(cal)
@@ -285,7 +285,7 @@ def create_position_snapshot(
     market: str,
     snapshot_date: date,
     shares: Optional[float] = None,
-    amount: Optional[float] = None,
+    cash_amount: Optional[float] = None,
     unit_price: Optional[float] = 1.5,
     cost_price: Optional[float] = 1.5,
     market_value: float = 0.0,
@@ -296,9 +296,9 @@ def create_position_snapshot(
 ) -> PortfolioPosition:
     """创建持仓快照。
 
-    CHECK 约束：shares 和 amount 二选一，不能同时为 None 或同时非 None。
-    - 净值型资产（ETF/OEF/LOF）：传 shares，不传 amount
-    - 非净值型资产（CASH）：传 amount，不传 shares
+    CHECK 约束：shares 和 cash_amount 二选一，不能同时为 None 或同时非 None。
+    - 净值型资产（ETF/OEF/LOF）：传 shares，不传 cash_amount
+    - 非净值型资产（CASH）：传 cash_amount，不传 shares
     """
     pos = PortfolioPosition(
         portfolio_code=portfolio_code,
@@ -306,7 +306,7 @@ def create_position_snapshot(
         product_code=product_code,
         market=market,
         shares=Decimal(str(shares)) if shares is not None else None,
-        amount=Decimal(str(amount)) if amount is not None else None,
+        cash_amount=Decimal(str(cash_amount)) if cash_amount is not None else None,
         unit_price=Decimal(str(unit_price)) if unit_price is not None else None,
         cost_price=Decimal(str(cost_price)) if cost_price is not None else None,
         market_value=Decimal(str(market_value)),
@@ -428,7 +428,7 @@ def create_manual_market_value(
         portfolio_code=portfolio_code,
         platform_code=platform_code,
         product_code=product_code,
-        date=record_date,
+        value_date=record_date,
         market_value=Decimal(str(market_value)),
         computed_value=Decimal(str(computed_value)) if computed_value is not None else None,
         created_by=created_by,

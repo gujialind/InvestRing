@@ -11,7 +11,7 @@ class ManualMarketValue(Base):
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
     platform_code = Column(String(20), ForeignKey("platform.code"), nullable=False)
     product_code = Column(String(10), nullable=False)
-    date = Column(Date, nullable=False)
+    value_date = Column(Date, nullable=False)
     market_value = Column(Numeric(15, 4), nullable=False)
     computed_value = Column(Numeric(15, 4))  # 隐式计算值（审计用）
     created_by = Column(String(50))
@@ -20,7 +20,7 @@ class ManualMarketValue(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            'portfolio_code', 'platform_code', 'product_code', 'date',
+            'portfolio_code', 'platform_code', 'product_code', 'value_date',
             name='uq_manual_market_value'
         ),
     )

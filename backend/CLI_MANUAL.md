@@ -344,13 +344,13 @@ ir position available-shares <PORTFOLIO_CODE> <PRODUCT_CODE> [--market <市场>]
 更新非净值类现金市值：写入 `manual_market_value`（绝对替换），**不直接写快照表 `portfolio_position`**；写入后需重新生成快照方能反映到持仓（响应含 `requires_snapshot_regen: true`）。与 REST `POST /api/positions/portfolio/{code}/cash-position` 共用同一 service。
 
 ```bash
-ir position update-cash <PORTFOLIO_CODE> --platform-code <平台代码> --amount <金额> [--update-date YYYY-MM-DD]
+ir position update-cash <PORTFOLIO_CODE> --platform-code <平台代码> --cash-amount <金额> [--update-date YYYY-MM-DD]
 ```
 
 | 参数 | 必填 | 说明 |
 |------|:----:|------|
 | `--platform-code` | 是 | 所属平台代码 |
-| `--amount` | 是 | 现金金额（绝对值，覆盖当日该平台现金市值） |
+| `--cash-amount` | 是 | 现金金额（绝对值，覆盖当日该平台现金市值） |
 | `--update-date` | 否 | 更新日期（默认今天，必须是交易日） |
 
 ---

@@ -185,7 +185,7 @@ def update_cash_position(
         db,
         portfolio_code=portfolio_code,
         platform_code=request.platform_code,
-        amount=request.amount,
+        amount=request.cash_amount,
         update_date=request.update_date,
         created_by=current_user.code if hasattr(current_user, 'code') else None,
     )
@@ -196,7 +196,7 @@ def update_cash_position(
         "message": "现金市值覆盖已写入 manual_market_value，建议重新生成快照以更新持仓",
         "portfolio_code": result["portfolio_code"],
         "platform_code": result["platform_code"],
-        "amount": result["amount"],
+        "cash_amount": result["cash_amount"],
         "computed_value": result["computed_value"],
         "update_date": result["update_date"].isoformat(),
         "requires_snapshot_regen": True,

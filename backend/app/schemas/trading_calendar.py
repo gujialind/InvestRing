@@ -4,7 +4,7 @@ from typing import Optional
 
 
 class TradingCalendarBase(BaseModel):
-    date: date
+    calendar_date: date
     is_open: bool = True
 
 

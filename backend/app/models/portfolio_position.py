@@ -15,7 +15,7 @@ class PortfolioPosition(Base):
     cost_price = Column(Numeric(10, 4))
     unit_price = Column(Numeric(10, 4))
     market_value = Column(Numeric(15, 4), default=0)
-    amount = Column(Numeric(15, 4))
+    cash_amount = Column(Numeric(15, 4))
     frozen_amount = Column(Numeric(15, 4), default=0)
     asset_type = Column(String(20))
     snapshot_date = Column(Date, nullable=False)
@@ -27,7 +27,7 @@ class PortfolioPosition(Base):
             ["product.code", "product.market"]
         ),
         CheckConstraint(
-            '(shares IS NOT NULL AND amount IS NULL) OR (shares IS NULL AND amount IS NOT NULL)',
+            '(shares IS NOT NULL AND cash_amount IS NULL) OR (shares IS NULL AND cash_amount IS NOT NULL)',
             name='check_nav_or_non_nav'
         ),
         UniqueConstraint('portfolio_code', 'product_code', 'market', 'platform_code', 'snapshot_date', name='uix_position_snapshot'),

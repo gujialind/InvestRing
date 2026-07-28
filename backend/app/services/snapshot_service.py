@@ -550,7 +550,7 @@ def _generate_portfolio_position(
                 key = ("CASH", "", pos.platform_code)
                 positions[key] = {
                     "shares": None,
-                    "amount": Decimal(str(pos.amount or 0)),
+                    "cash_amount": Decimal(str(pos.cash_amount or 0)),
                     "cost_price": None,
                     "asset_type": "cash",
                 }
@@ -570,7 +570,7 @@ def _generate_portfolio_position(
                         pos_asset_type = ac.asset_type
             positions[key] = {
                 "shares": Decimal(str(pos.shares or 0)),
-                "amount": Decimal(str(pos.amount or 0)) if pos.amount is not None else None,
+                "cash_amount": Decimal(str(pos.cash_amount or 0)) if pos.cash_amount is not None else None,
                 "cost_price": Decimal(str(pos.cost_price or 0)) if pos.cost_price else None,
                 "asset_type": pos_asset_type,
             }
@@ -591,8 +591,8 @@ def _generate_portfolio_position(
         if trade.product_code == "CASH":
             cash_key = ("CASH", "", trade.platform_code)
             if cash_key not in positions:
-                positions[cash_key] = {"shares": None, "amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
-            positions[cash_key]["amount"] += Decimal(str(trade.amount or 0))
+                positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
+            positions[cash_key]["cash_amount"] += Decimal(str(trade.amount or 0))
             continue
         key = (trade.product_code, trade.market, trade.platform_code)
         if key not in positions:
@@ -602,7 +602,7 @@ def _generate_portfolio_position(
             ).first()
             positions[key] = {
                 "shares": Decimal("0"),
-                "amount": None,
+                "cash_amount": None,
                 "cost_price": None,
                 "asset_type": _get_product_asset_type(db, product) if product else "stock",
             }
@@ -633,8 +633,8 @@ def _generate_portfolio_position(
         if trade.product_code == "CASH":
             cash_key = ("CASH", "", trade.platform_code)
             if cash_key not in positions:
-                positions[cash_key] = {"shares": None, "amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
-            positions[cash_key]["amount"] -= Decimal(str(trade.amount or 0))
+                positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
+            positions[cash_key]["cash_amount"] -= Decimal(str(trade.amount or 0))
             continue
         key = (trade.product_code, trade.market, trade.platform_code)
         if key in positions:
@@ -657,8 +657,8 @@ def _generate_portfolio_position(
             if event.cash_change:
                 cash_key = ("CASH", "", event.platform_code)
                 if cash_key not in positions:
-                    positions[cash_key] = {"shares": None, "amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
-                positions[cash_key]["amount"] += Decimal(str(event.cash_change))
+                    positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
+                positions[cash_key]["cash_amount"] += Decimal(str(event.cash_change))
             continue
 
         # 按平台精确匹配持仓
@@ -672,7 +672,7 @@ def _generate_portfolio_position(
             ).first()
             positions[fund_key] = {
                 "shares": Decimal("0"),
-                "amount": None,
+                "cash_amount": None,
                 "cost_price": None,
                 "asset_type": _get_product_asset_type(db, product) if product else "stock",
             }
@@ -691,10 +691,10 @@ def _generate_portfolio_position(
                 ManualMarketValue.portfolio_code == portfolio_code,
                 ManualMarketValue.platform_code == plat_code,
                 ManualMarketValue.product_code == "CASH",
-                ManualMarketValue.date == target_date,
+                ManualMarketValue.value_date == target_date,
             ).first()
             if manual:
-                pos_data["amount"] = Decimal(str(manual.market_value))
+                pos_data["cash_amount"] = Decimal(str(manual.market_value))
 
     # 构建最终的持仓快照对象
     result_positions = []
@@ -702,7 +702,7 @@ def _generate_portfolio_position(
         # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
         is_cash = pos_data.get("asset_type") == "cash"
         if not is_cash:
-            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and (pos_data.get("amount") or Decimal("0")) <= 0:
+            if pos_data["shares"] is not None and pos_data["shares"] <= 0 and (pos_data.get("cash_amount") or Decimal("0")) <= 0:
                 continue  # 跳过零持仓
         
         # 获取产品价格
@@ -716,7 +716,7 @@ def _generate_portfolio_position(
         
         if pos_data["asset_type"] == "cash":
             # 现金资产
-            market_value = pos_data["amount"]
+            market_value = pos_data["cash_amount"]
         elif product:
             # 根据产品类型获取净值
             if product.is_qdii:
@@ -725,15 +725,15 @@ def _generate_portfolio_position(
                 price_record = db.query(PriceRecord).filter(
                     PriceRecord.product_code == product_code,
                     PriceRecord.market == market,
-                    PriceRecord.date <= prev_date
-                ).order_by(PriceRecord.date.desc()).first()
+                    PriceRecord.price_date <= prev_date
+                ).order_by(PriceRecord.price_date.desc()).first()
             else:
                 # 普通基金：取当日净值
                 price_record = db.query(PriceRecord).filter(
                     PriceRecord.product_code == product_code,
                     PriceRecord.market == market,
-                    PriceRecord.date <= target_date
-                ).order_by(PriceRecord.date.desc()).first()
+                    PriceRecord.price_date <= target_date
+                ).order_by(PriceRecord.price_date.desc()).first()
             
             if price_record:
                 unit_price = Decimal(str(price_record.unit_price))
@@ -753,7 +753,7 @@ def _generate_portfolio_position(
             product_code=product_code,
             market=market,
             shares=float(pos_data["shares"]) if pos_data["shares"] and not is_cash else None,
-            amount=float(pos_data["amount"]) if is_cash and pos_data["amount"] is not None else None,
+            cash_amount=float(pos_data["cash_amount"]) if is_cash and pos_data["cash_amount"] is not None else None,
             frozen_shares=float(frozen_shares) if frozen_shares > 0 else 0,
             frozen_amount=float(frozen_amount) if frozen_amount > 0 else 0,
             cost_price=float(pos_data["cost_price"]) if pos_data["cost_price"] else None,
@@ -786,8 +786,8 @@ def _generate_portfolio_value_snapshot(
     for pos in positions:
         if pos.market_value is not None:
             total_value += Decimal(str(pos.market_value))
-        elif pos.amount is not None:
-            total_value += Decimal(str(pos.amount))
+        elif pos.cash_amount is not None:
+            total_value += Decimal(str(pos.cash_amount))
     
     # 获取总份额：前序快照 + 窗口内申赎变动（与 _generate_portfolio_position 增量法一致）
     prev_pvs_date = db.query(func.max(PortfolioValueSnapshot.snapshot_date)).filter(
@@ -1183,7 +1183,7 @@ def auto_confirm_after_snapshot(
 def _check_trading_day(db: Session, target_date: date) -> Dict[str, Any]:
     """检查目标日期是否为交易日"""
     cal = db.query(TradingCalendar).filter(
-        TradingCalendar.date == target_date
+        TradingCalendar.calendar_date == target_date
     ).first()
     
     if not cal or not cal.is_open:
@@ -1270,7 +1270,7 @@ def _check_price_data_completeness(
             price = db.query(PriceRecord).filter(
                 PriceRecord.product_code == product_code,
                 PriceRecord.market == market,
-                PriceRecord.date == prev_date
+                PriceRecord.price_date == prev_date
             ).first()
             
             if not price:
@@ -1280,8 +1280,8 @@ def _check_price_data_completeness(
             price = db.query(PriceRecord).filter(
                 PriceRecord.product_code == product_code,
                 PriceRecord.market == market,
-                PriceRecord.date <= target_date
-            ).order_by(PriceRecord.date.desc()).first()
+                PriceRecord.price_date <= target_date
+            ).order_by(PriceRecord.price_date.desc()).first()
             
             if not price:
                 missing_prices.append(f"{product_code}({market})")
@@ -1420,10 +1420,10 @@ def _calculate_frozen_amount(
 
 def _prev_trading_day(db: Session, target_date: date, offset: int = 1) -> date:
     """获取目标日期之前第offset个交易日"""
-    trading_days = db.query(TradingCalendar.date).filter(
-        TradingCalendar.date < target_date,
+    trading_days = db.query(TradingCalendar.calendar_date).filter(
+        TradingCalendar.calendar_date < target_date,
         TradingCalendar.is_open == True
-    ).order_by(TradingCalendar.date.desc()).limit(offset).all()
+    ).order_by(TradingCalendar.calendar_date.desc()).limit(offset).all()
     
     if len(trading_days) < offset:
         # 如果找不到足够的交易日，返回target_date - offset天

@@ -100,7 +100,7 @@ def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
 
     for product in products:
         try:
-            latest = db.query(func.max(PriceRecord.date)).filter(
+            latest = db.query(func.max(PriceRecord.price_date)).filter(
                 PriceRecord.product_code == product.code,
                 PriceRecord.market == product.market,
             ).scalar()

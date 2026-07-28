@@ -295,12 +295,7 @@ export function useConfirmSubscription() {
   const addToast = useUIStore((state) => state.addToast);
 
   return useMutation({
-    mutationFn: ({
-      id,
-      data,
-    }: {
-      id: number;
-    }) => subscriptionApi.confirm(id),
+    mutationFn: ({ id }: { id: number }) => subscriptionApi.confirm(id),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, data.id] });
       queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, "list"] });

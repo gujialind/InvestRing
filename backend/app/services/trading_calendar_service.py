@@ -43,8 +43,8 @@ def sync_trading_calendar(db: Session, year: int) -> Dict[str, Any]:
 
     existing_dates = {
         row[0]
-        for row in db.query(TradingCalendar.date)
-        .filter(and_(TradingCalendar.date >= start_date, TradingCalendar.date <= end_date))
+        for row in db.query(TradingCalendar.calendar_date)
+        .filter(and_(TradingCalendar.calendar_date >= start_date, TradingCalendar.calendar_date <= end_date))
         .all()
     }
 
@@ -54,7 +54,7 @@ def sync_trading_calendar(db: Session, year: int) -> Dict[str, Any]:
         item_date = date.fromisoformat(item["date"])
         if item_date not in existing_dates:
             new_records.append({
-                "date": item_date,
+                "calendar_date": item_date,
                 "is_open": item["is_open"],
             })
 
@@ -95,19 +95,19 @@ def get_calendar_query(
         year_start = date(year, 1, 1)
         year_end = date(year, 12, 31)
         query = query.filter(
-            and_(TradingCalendar.date >= year_start, TradingCalendar.date <= year_end)
+            and_(TradingCalendar.calendar_date >= year_start, TradingCalendar.calendar_date <= year_end)
         )
 
     if start_date is not None:
-        query = query.filter(TradingCalendar.date >= start_date)
+        query = query.filter(TradingCalendar.calendar_date >= start_date)
 
     if end_date is not None:
-        query = query.filter(TradingCalendar.date <= end_date)
+        query = query.filter(TradingCalendar.calendar_date <= end_date)
 
     if is_open is not None:
         query = query.filter(TradingCalendar.is_open == is_open)
 
-    return query.order_by(TradingCalendar.date)
+    return query.order_by(TradingCalendar.calendar_date)
 
 
 def is_trading_day(db: Session, target_date: date) -> bool:
@@ -121,7 +121,7 @@ def is_trading_day(db: Session, target_date: date) -> bool:
     Returns:
         True 如果是交易日，False  otherwise
     """
-    cal = db.query(TradingCalendar).filter(TradingCalendar.date == target_date).first()
+    cal = db.query(TradingCalendar).filter(TradingCalendar.calendar_date == target_date).first()
     if not cal:
         return False
     return cal.is_open

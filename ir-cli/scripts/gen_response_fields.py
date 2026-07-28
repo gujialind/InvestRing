@@ -41,7 +41,7 @@ COMMAND_SCHEMA_MAP = [
 
 # 人工标注层：openapi 无法表达的业务语义（键为 "group.sub" 或 "group.sub.field"）
 NOTES_OVERRIDES = {
-    "position.list.amount": "仅CASH行有值，基金行恒为null（CHECK约束shares/amount二选一），市值请用market_value",
+    "position.list.cash_amount": "仅CASH行有值，基金行恒为null（CHECK约束shares/cash_amount二选一），市值请用market_value",
     "position.list.shares": "净值型资产有值，CASH行为null",
     "portfolio.nav-history.total_value": "组合总市值（快照口径，为持仓行market_value之和）",
     "portfolio.nav-history": "单层列表按snapshot_date升序（#62已修复，勿再按data.data/date取值）",

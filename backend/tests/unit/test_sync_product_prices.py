@@ -62,7 +62,7 @@ class TestBulkUpsertIdempotent:
 
         record = test_db.query(PriceRecord).filter(
             PriceRecord.product_code == "510300.SH",
-            PriceRecord.date == date(2025, 1, 6),
+            PriceRecord.price_date == date(2025, 1, 6),
         ).first()
         assert float(record.unit_price) == 4.0, "值应被更新为 4.0"
 

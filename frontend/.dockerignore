@@ -1,0 +1,23 @@
+# 前端镜像构建上下文排除项（上下文为 frontend/ 目录）
+
+# 依赖与构建产物（镜像内重新安装/构建）
+node_modules/
+.next/
+tsconfig.tsbuildinfo
+
+# 环境变量（防止密钥泄漏进镜像层）
+.env*
+!.env.example
+
+# 测试
+e2e/
+playwright.config.ts
+test-results/
+playwright-report/
+
+# Docker
+Dockerfile
+.dockerignore
+
+# 文档
+*.md

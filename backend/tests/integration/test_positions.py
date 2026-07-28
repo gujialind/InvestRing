@@ -41,7 +41,7 @@ class TestAvailableCash:
         create_position_snapshot(
             test_db, "AC_S", "CASH", "",
             snapshot_date=date(2025, 11, 3),
-            amount=10000.0, unit_price=None, cost_price=None,
+            cash_amount=10000.0, unit_price=None, cost_price=None,
             market_value=10000.0, platform_code="AC_S_PLAT",
         )
 
@@ -63,7 +63,7 @@ class TestAvailableCash:
         create_position_snapshot(
             test_db, "AC_PB", "CASH", "",
             snapshot_date=date(2025, 10, 31),
-            amount=50000.0, unit_price=None, cost_price=None,
+            cash_amount=50000.0, unit_price=None, cost_price=None,
             market_value=50000.0, platform_code="AC_PLAT",
         )
 
@@ -88,7 +88,7 @@ class TestAvailableCash:
         create_position_snapshot(
             test_db, "AC_OVR", "CASH", "",
             snapshot_date=date(2025, 10, 31),
-            amount=6001.39, unit_price=None, cost_price=None,
+            cash_amount=6001.39, unit_price=None, cost_price=None,
             market_value=6001.39, platform_code="AC_OVR_PLAT",
             asset_type="cash",
         )

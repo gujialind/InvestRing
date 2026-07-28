@@ -69,10 +69,10 @@ export const positionApi = {
     request<Position>({ method: "PUT", url: `/positions/${id}`, data }),
 
   updateCashPosition: (portfolioCode: string, amount: number, platformCode: string, updateDate?: string) =>
-    request<{ success: boolean; message: string; portfolio_code: string; platform_code: string; amount: number; update_date: string }>({
+    request<{ success: boolean; message: string; portfolio_code: string; platform_code: string; cash_amount: number; update_date: string }>({
       method: "POST",
       url: `/positions/portfolio/${portfolioCode}/cash-position`,
-      data: { amount, platform_code: platformCode, update_date: updateDate },
+      data: { cash_amount: amount, platform_code: platformCode, update_date: updateDate },
     }),
 
   getAttribution: (portfolioCode: string) =>

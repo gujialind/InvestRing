@@ -15,7 +15,7 @@ from app.models.trading_calendar import TradingCalendar
 
 def is_trading_day(db: Session, target_date: date) -> bool:
     """判断指定日期是否为交易日"""
-    cal = db.query(TradingCalendar).filter(TradingCalendar.date == target_date).first()
+    cal = db.query(TradingCalendar).filter(TradingCalendar.calendar_date == target_date).first()
     if not cal:
         return False
     return cal.is_open
@@ -29,9 +29,9 @@ def get_next_trading_day(db: Session, from_date: date, days: int = 1) -> Optiona
     next_date = from_date
     for _ in range(max(days, 0)):
         next_date = (
-            db.query(func.min(TradingCalendar.date))
+            db.query(func.min(TradingCalendar.calendar_date))
             .filter(
-                TradingCalendar.date > next_date,
+                TradingCalendar.calendar_date > next_date,
                 TradingCalendar.is_open == True,
             )
             .scalar()
@@ -46,9 +46,9 @@ def get_prev_trading_day(db: Session, from_date: date, days: int = 1) -> Optiona
     prev_date = from_date
     for _ in range(max(days, 0)):
         prev_date = (
-            db.query(func.max(TradingCalendar.date))
+            db.query(func.max(TradingCalendar.calendar_date))
             .filter(
-                TradingCalendar.date < prev_date,
+                TradingCalendar.calendar_date < prev_date,
                 TradingCalendar.is_open == True,
             )
             .scalar()
