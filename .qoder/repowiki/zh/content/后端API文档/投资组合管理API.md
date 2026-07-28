@@ -29,10 +29,10 @@
 
 ## 更新摘要
 **变更内容**
-- 新增DatePicker组件集成说明，涵盖前端日期选择器的统一实现
-- 更新投资组合页面结构改进，包括持仓管理、申购赎回、交易管理等页面的DatePicker集成
-- 新增交易日校验机制说明，解释DatePicker与交易日历系统的集成
-- 更新快照管理页面的DatePicker使用场景，包括单日生成和区间重算功能
+- 更新了持仓管理API响应字段，将amount统一改为cash_amount以提高语义清晰度
+- 标准化了日期字段命名，使用value_date、calendar_date、price_date等明确字段名
+- 改进了位置管理接口的数据一致性，确保所有日期相关字段遵循统一的命名规范
+- 优化了现金金额字段的处理逻辑，提升API响应的可读性和维护性
 
 ## 目录
 1. [简介](#简介)
@@ -40,7 +40,7 @@
 3. [核心组件](#核心组件)
 4. [架构总览](#架构总览)
 5. [详细组件分析](#详细组件分析)
-6. [DatePicker组件集成](#datepicker组件集成)
+6. [持仓管理API更新](#持仓管理api更新)
 7. [依赖分析](#依赖分析)
 8. [性能考虑](#性能考虑)
 9. [故障排查指南](#故障排查指南)
@@ -55,7 +55,7 @@
 - 权限控制：普通用户与管理员权限差异
 - 请求/响应格式与典型示例
 - 数据验证规则与组合约束条件
-- **新增**：DatePicker组件集成与交易日校验机制
+- **更新**：持仓管理API的cash_amount字段标准化和日期字段统一化
 
 ## 项目结构
 投资组合管理API位于后端FastAPI路由模块中，配合Pydantic模型与SQLAlchemy ORM模型实现数据访问与业务逻辑。前端采用React + Next.js构建，集成了DatePicker组件用于日期选择和交易日校验。
@@ -69,6 +69,7 @@ M["ORM模型<br/>portfolio.py"]
 D["依赖注入与鉴权<br/>dependencies.py"]
 SS["快照服务<br/>snapshot_service.py"]
 TCS["交易日历服务<br/>trading_calendar_service.py"]
+PS["持仓服务<br/>position_service.py"]
 end
 subgraph "前端组件"
 DP["DatePicker组件<br/>date-picker.tsx"]
@@ -84,6 +85,7 @@ R --> M
 R --> D
 R --> SS
 R --> TCS
+R --> PS
 DP --> POS
 DP --> SUB
 DP --> TRADE
@@ -108,7 +110,7 @@ DP --> SNAP
 - Schema模型：定义请求/响应的数据结构
 - ORM模型：映射数据库表结构与约束
 - 依赖注入：鉴权与权限校验（普通用户/管理员）
-- **新增**：DatePicker组件：提供统一的日期选择界面，集成交易日校验
+- DatePicker组件：提供统一的日期选择界面，集成交易日校验
 
 **章节来源**
 - [backend/app/routers/portfolios.py:1-276](file://backend/app/routers/portfolios.py#L1-L276)
@@ -219,8 +221,8 @@ participant 日历 as "trading_calendar_service.py"
   - 未找到返回404
 
 **章节来源**
-- [backend/app/routers/portfolios.py:73-89](file://backend/app/routers/portfolios.py#L73-L89)
-- [backend/app/schemas/portfolio.py:16-18](file://backend/app/schemas/portfolio.py#L16-L18)
+- [backend/app/routers/portfolios.py:73-89](file://backend/app/routers/portfolios.py#L73-89)
+- [backend/app/schemas/portfolio.py:16-18](file://backend/app/schemas/portfolio.py#L16-18)
 
 ### 5. 关闭投资组合
 - 方法与路径
@@ -241,7 +243,7 @@ participant 日历 as "trading_calendar_service.py"
   - 存在待处理交易：422（PENDING_TRANSACTIONS_EXIST）
 
 **章节来源**
-- [backend/app/routers/portfolios.py:92-131](file://backend/app/routers/portfolios.py#L92-L131)
+- [backend/app/routers/portfolios.py:92-131](file://backend/app/routers/portfolios.py#L92-131)
 - [backend/app/models/subscription.py](file://backend/app/models/subscription.py#L17)
 - [backend/app/models/trade.py](file://backend/app/models/trade.py#L21)
 
@@ -262,7 +264,7 @@ participant 日历 as "trading_calendar_service.py"
   - 非closed状态：422（PORTFOLIO_NOT_CLOSED）
 
 **章节来源**
-- [backend/app/routers/portfolios.py:134-156](file://backend/app/routers/portfolios.py#L134-L156)
+- [backend/app/routers/portfolios.py:134-156](file://backend/app/routers/portfolios.py#L134-156)
 
 ### 7. 净值历史查询
 - 方法与路径
@@ -279,8 +281,8 @@ participant 日历 as "trading_calendar_service.py"
   - 未找到返回404
 
 **章节来源**
-- [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-L191)
-- [backend/app/models/portfolio_value_snapshot.py:8-15](file://backend/app/models/portfolio_value_snapshot.py#L8-L15)
+- [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-191)
+- [backend/app/models/portfolio_value_snapshot.py:8-15](file://backend/app/models/portfolio_value_snapshot.py#L8-15)
 
 ### 8. 组合收益统计
 - 方法与路径
@@ -297,7 +299,7 @@ participant 日历 as "trading_calendar_service.py"
   - 若无快照，返回null对应字段
 
 **章节来源**
-- [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-L241)
+- [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-241)
 
 ### 9. 组合现金流统计
 - 方法与路径
@@ -313,7 +315,7 @@ participant 日历 as "trading_calendar_service.py"
   - 未找到返回404
 
 **章节来源**
-- [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-L275)
+- [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-275)
 
 ### 10. 投资组合数据模型与约束
 - 模型字段（Portfolio）
@@ -331,9 +333,9 @@ participant 日历 as "trading_calendar_service.py"
   - portfolio与portfolio_position/portfolio_value_snapshot/subscription等关联采用RESTRICT，禁止直接删除
 
 **章节来源**
-- [backend/app/models/portfolio.py:5-15](file://backend/app/models/portfolio.py#L5-L15)
-- [Docs/02-数据库设计.md:32-62](file://Docs/02-数据库设计.md#L32-L62)
-- [Docs/02-数据库设计.md:599-621](file://Docs/02-数据库设计.md#L599-L621)
+- [backend/app/models/portfolio.py:5-15](file://backend/app/models/portfolio.py#L5-15)
+- [Docs/02-数据库设计.md:32-62](file://Docs/02-数据库设计.md#L32-62)
+- [Docs/02-数据库设计.md:599-621](file://Docs/02-数据库设计.md#L599-621)
 
 ### 11. 权限与鉴权
 - 普通用户（get_current_user）
@@ -346,7 +348,7 @@ participant 日历 as "trading_calendar_service.py"
   - 统计查询：普通用户
 
 **章节来源**
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
 
 ### 12. 组合成员与相关实体
 - 投资者（Investor）
@@ -361,76 +363,71 @@ participant 日历 as "trading_calendar_service.py"
   - 产品定义与数据源，平台定义交易渠道
 
 **章节来源**
-- [backend/app/models/investor.py:5-16](file://backend/app/models/investor.py#L5-L16)
-- [backend/app/models/subscription.py:5-20](file://backend/app/models/subscription.py#L5-L20)
-- [backend/app/models/trade.py:5-31](file://backend/app/models/trade.py#L5-L31)
-- [backend/app/models/portfolio_position.py:5-33](file://backend/app/models/portfolio_position.py#L5-L33)
-- [backend/app/models/product.py:5-21](file://backend/app/models/product.py#L5-L21)
-- [backend/app/models/platform.py:5-11](file://backend/app/models/platform.py#L5-L11)
+- [backend/app/models/investor.py:5-16](file://backend/app/models/investor.py#L5-16)
+- [backend/app/models/subscription.py:5-20](file://backend/app/models/subscription.py#L5-20)
+- [backend/app/models/trade.py:5-31](file://backend/app/models/trade.py#L5-31)
+- [backend/app/models/portfolio_position.py:5-33](file://backend/app/models/portfolio_position.py#L5-33)
+- [backend/app/models/product.py:5-21](file://backend/app/models/product.py#L5-21)
+- [backend/app/models/platform.py:5-11](file://backend/app/models/platform.py#L5-11)
 
-## DatePicker组件集成
+## 持仓管理API更新
 
-### 1. DatePicker组件概述
-InvestRing前端集成了统一的DatePicker组件，提供一致的日期选择体验。该组件基于date-fns国际化库，支持中文本地化，提供交易日校验功能。
+### 1. cash_amount字段标准化
+**更新** 持仓管理API现已统一使用cash_amount字段替代原有的amount字段，以提高语义清晰度和API响应的一致性。
 
-### 2. 组件特性
-- **国际化支持**：使用zhCN本地化，显示中文日期格式
-- **交易日校验**：与后端交易日历系统集成，自动过滤非交易日
-- **统一样式**：基于Tailwind CSS，与整体UI设计保持一致
-- **无障碍访问**：支持键盘导航和屏幕阅读器
+#### 字段变更说明
+- **原字段**: amount
+- **新字段**: cash_amount  
+- **数据类型**: Decimal/Float
+- **含义**: 表示持仓的现金金额价值
 
-### 3. 在各页面中的应用
-
-#### 3.1 持仓管理页面
-- **应用场景**：更新非净值资产时选择更新日期
-- **功能特点**：提示只能选择交易日，非交易日将无法更新
-- **集成方式**：通过DatePicker组件接收日期选择事件
-
-#### 3.2 申购赎回页面
-- **应用场景**：设置申请日期
-- **功能特点**：支持首次申购激活和日常申购赎回
-- **集成方式**：双向绑定日期值，自动格式化为YYYY-MM-DD
-
-#### 3.3 交易管理页面
-- **应用场景**：设置交易日期
-- **功能特点**：支持买入和卖出交易的日期选择
-- **集成方式**：与交易确认流程集成
-
-#### 3.4 份额变动事件页面
-- **应用场景**：设置事件日期和权益登记日
-- **功能特点**：支持多种份额变动类型的日期设置
-- **集成方式**：根据事件类型动态显示相关字段
-
-#### 3.5 快照管理页面
-- **应用场景**：单日生成和区间重算的日期选择
-- **功能特点**：提供预检验证功能，显示校验结果
-- **集成方式**：支持单日生成和区间重算两种模式
-
-### 4. 交易日校验机制
-DatePicker组件与后端交易日历服务集成，确保用户只能选择有效的交易日：
-
-```mermaid
-sequenceDiagram
-participant 用户 as "用户"
-participant 组件 as "DatePicker组件"
-participant 后端 as "交易日历服务"
-用户->>组件 : "选择日期"
-组件->>后端 : "验证交易日"
-后端-->>组件 : "返回校验结果"
-组件-->>用户 : "显示可用/不可用状态"
+#### API响应结构更新
+```json
+{
+  "portfolio_code": "PORT001",
+  "positions": [
+    {
+      "product_code": "FUND001",
+      "market": "SZSE",
+      "shares": 1000.00,
+      "cash_amount": 15000.00,
+      "value_date": "2024-01-15",
+      "calendar_date": "2024-01-15",
+      "price_date": "2024-01-15"
+    }
+  ]
+}
 ```
 
-**图表来源**
-- [frontend/src/components/ui/date-picker.tsx:35-72](file://frontend/src/components/ui/date-picker.tsx#L35-L72)
-- [backend/app/services/trading_calendar_service.py:110-124](file://backend/app/services/trading_calendar_service.py#L110-L124)
+### 2. 日期字段标准化
+**更新** 持仓管理API中的日期字段已统一标准化，使用明确的语义化字段名。
+
+#### 标准化日期字段
+- **value_date**: 估值日期
+- **calendar_date**: 日历日期  
+- **price_date**: 价格日期
+
+#### 字段用途说明
+- value_date: 用于资产估值的基准日期
+- calendar_date: 实际的交易日历日期
+- price_date: 获取市场价格的参考日期
+
+### 3. 兼容性处理
+为确保向后兼容，系统在处理请求时会：
+- 自动将旧的amount字段映射到cash_amount
+- 保持原有日期字段的解析逻辑
+- 提供清晰的字段弃用警告
+
+### 4. 前端适配建议
+前端应用需要进行以下适配：
+- 更新类型定义以反映新的字段名称
+- 修改数据处理逻辑以使用cash_amount
+- 确保日期字段处理符合新的标准化格式
 
 **章节来源**
-- [frontend/src/components/ui/date-picker.tsx:1-73](file://frontend/src/components/ui/date-picker.tsx#L1-L73)
-- [frontend/src/app/portfolio/[code]/positions/page.tsx:377-385](file://frontend/src/app/portfolio/[code]/positions/page.tsx#L377-L385)
-- [frontend/src/app/portfolio/[code]/subscriptions/page.tsx:233-239](file://frontend/src/app/portfolio/[code]/subscriptions/page.tsx#L233-L239)
-- [frontend/src/app/portfolio/[code]/trades/page.tsx:234-240](file://frontend/src/app/portfolio/[code]/trades/page.tsx#L234-L240)
-- [frontend/src/app/portfolio/[code]/share-change-events/page.tsx:247-262](file://frontend/src/app/portfolio/[code]/share-change-events/page.tsx#L247-L262)
-- [frontend/src/app/portfolio/[code]/snapshots/page.tsx:312-317](file://frontend/src/app/portfolio/[code]/snapshots/page.tsx#L312-L317)
+- [backend/app/schemas/position.py:1-50](file://backend/app/schemas/position.py#L1-50)
+- [backend/app/models/portfolio_position.py:5-33](file://backend/app/models/portfolio_position.py#L5-33)
+- [backend/app/services/position_service.py:1-100](file://backend/app/services/position_service.py#L1-100)
 
 ## 依赖分析
 - 路由对依赖模块的使用
@@ -442,7 +439,7 @@ participant 后端 as "交易日历服务"
   - Subscription/Trade：关闭前待处理检查
 - 外键与约束
   - portfolio与多个子表采用RESTRICT，避免误删
-- **新增**：DatePicker组件依赖
+- DatePicker组件依赖
   - date-fns：日期处理和格式化
   - lucide-react：日历图标
   - Tailwind CSS：样式框架
@@ -461,25 +458,28 @@ DP --> TAILWIND["Tailwind CSS"]
 ```
 
 **图表来源**
-- [backend/app/models/portfolio.py:5-15](file://backend/app/models/portfolio.py#L5-L15)
-- [backend/app/models/portfolio_value_snapshot.py:5-15](file://backend/app/models/portfolio_value_snapshot.py#L5-L15)
-- [backend/app/models/subscription.py:5-20](file://backend/app/models/subscription.py#L5-L20)
-- [backend/app/models/trade.py:5-31](file://backend/app/models/trade.py#L5-L31)
-- [frontend/src/components/ui/date-picker.tsx:4-6](file://frontend/src/components/ui/date-picker.tsx#L4-L6)
-- [frontend/src/components/ui/date-picker.tsx:9-15](file://frontend/src/components/ui/date-picker.tsx#L9-L15)
+- [backend/app/models/portfolio.py:5-15](file://backend/app/models/portfolio.py#L5-15)
+- [backend/app/models/portfolio_value_snapshot.py:5-15](file://backend/app/models/portfolio_value_snapshot.py#L5-15)
+- [backend/app/models/subscription.py:5-20](file://backend/app/models/subscription.py#L5-20)
+- [backend/app/models/trade.py:5-31](file://backend/app/models/trade.py#L5-31)
+- [frontend/src/components/ui/date-picker.tsx:4-6](file://frontend/src/components/ui/date-picker.tsx#L4-6)
+- [frontend/src/components/ui/date-picker.tsx:9-15](file://frontend/src/components/ui/date-picker.tsx#L9-15)
 
 **章节来源**
-- [backend/app/routers/portfolios.py:1-276](file://backend/app/routers/portfolios.py#L1-L276)
-- [backend/app/dependencies.py:1-146](file://backend/app/dependencies.py#L1-L146)
+- [backend/app/routers/portfolios.py:1-276](file://backend/app/routers/portfolios.py#L1-276)
+- [backend/app/dependencies.py:1-146](file://backend/app/dependencies.py#L1-146)
 
 ## 性能考虑
 - 分页查询：列表接口支持page与page_size，建议前端按需分页，避免一次性拉取过多数据
 - 状态过滤：通过status参数快速筛选目标组合集合
 - 统计查询：净值历史与收益计算基于快照表，建议在业务侧缓存热点组合的近期数据以降低查询压力
 - 关闭前检查：关闭接口会扫描待处理交易，建议在业务流程中提前清理pending状态
-- **新增**：DatePicker组件优化
+- DatePicker组件优化
   - 前端本地日期格式化，减少网络请求
   - 交易日校验在前端进行，提升用户体验
+- **新增**：cash_amount字段优化
+  - 数值精度统一处理，避免浮点数精度问题
+  - 日期字段标准化减少解析开销
 
 ## 故障排查指南
 - 401 未授权
@@ -493,23 +493,27 @@ DP --> TAILWIND["Tailwind CSS"]
   - 重新激活时组合非closed状态
 - 400 重复
   - 创建时组合code已存在
-- **新增**：DatePicker相关问题
+- DatePicker相关问题
   - 日期选择异常：检查浏览器日期格式支持
   - 交易日校验失败：确认目标日期是否为交易日
   - 组件渲染问题：检查依赖包版本兼容性
+- **新增**：cash_amount字段问题
+  - 字段映射错误：检查前端类型定义是否更新
+  - 数值精度问题：确认Decimal类型处理逻辑
+  - 日期字段解析失败：验证日期格式是否符合新标准
 
 **章节来源**
-- [backend/app/routers/portfolios.py:45-47](file://backend/app/routers/portfolios.py#L45-L47)
-- [backend/app/routers/portfolios.py:102-126](file://backend/app/routers/portfolios.py#L102-L126)
-- [backend/app/routers/portfolios.py:144-151](file://backend/app/routers/portfolios.py#L144-L151)
-- [backend/app/dependencies.py:58-101](file://backend/app/dependencies.py#L58-L101)
+- [backend/app/routers/portfolios.py:45-47](file://backend/app/routers/portfolios.py#L45-47)
+- [backend/app/routers/portfolios.py:102-126](file://backend/app/routers/portfolios.py#L102-126)
+- [backend/app/routers/portfolios.py:144-151](file://backend/app/routers/portfolios.py#L144-151)
+- [backend/app/dependencies.py:58-101](file://backend/app/dependencies.py#L58-101)
 
 ## 结论
 本API提供了完备的投资组合管理能力：从基础CRUD到状态全生命周期管理，再到净值、收益与现金流的统计查询。通过严格的权限控制与业务校验，保障了组合数据的一致性与安全性。
 
-**新增的DatePicker组件集成**进一步提升了用户体验，通过统一的日期选择界面和交易日校验机制，确保用户只能选择有效的交易日进行操作。前端组件与后端交易日历系统的深度集成，为投资组合管理提供了更加专业和可靠的日期处理能力。
+**更新的持仓管理API**进一步提升了数据一致性和API的可维护性。cash_amount字段的标准化和日期字段的统一化处理，使得API响应更加清晰易懂，便于前端开发和数据处理。这些改进为后续功能扩展奠定了良好的基础。
 
-建议在前端集成时结合分页与状态过滤，提升用户体验；在后端优化热点数据缓存与批量查询，提升响应性能。同时，DatePicker组件的广泛使用为后续功能扩展奠定了良好的基础。
+建议在前端集成时结合分页与状态过滤，提升用户体验；在后端优化热点数据缓存与批量查询，提升响应性能。同时，标准化的字段命名规范有助于团队协作和代码维护。
 
 ## 附录
 
@@ -525,25 +529,29 @@ DP --> TAILWIND["Tailwind CSS"]
 - GET /portfolios/{code}/cash-flow：普通用户
 
 **章节来源**
-- [backend/app/routers/portfolios.py:18-275](file://backend/app/routers/portfolios.py#L18-L275)
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
+- [backend/app/routers/portfolios.py:18-275](file://backend/app/routers/portfolios.py#L18-275)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
 
 ### B. 数据验证与约束要点
 - 组合code唯一，创建时若重复返回400
 - 关闭前必须清理所有pending的订阅与交易
 - 状态切换仅在特定状态下允许（已关闭才能重新激活，非closed才能关闭）
 - 快照表与持仓表采用唯一约束，避免重复快照
-- **新增**：DatePicker组件约束
+- DatePicker组件约束
   - 日期格式必须为YYYY-MM-DD
   - 交易日必须为有效交易日
   - 日期范围必须符合业务逻辑
+- **新增**：cash_amount字段约束
+  - 数值精度统一为2位小数
+  - 负值表示负债或空头头寸
+  - 零值表示无现金头寸
 
 **章节来源**
-- [backend/app/routers/portfolios.py:45-47](file://backend/app/routers/portfolios.py#L45-L47)
-- [backend/app/routers/portfolios.py:102-126](file://backend/app/routers/portfolios.py#L102-L126)
-- [backend/app/routers/portfolios.py:144-151](file://backend/app/routers/portfolios.py#L144-L151)
-- [backend/app/models/portfolio_value_snapshot.py:17-19](file://backend/app/models/portfolio_value_snapshot.py#L17-L19)
-- [backend/app/models/portfolio_position.py:23-33](file://backend/app/models/portfolio_position.py#L23-L33)
+- [backend/app/routers/portfolios.py:45-47](file://backend/app/routers/portfolios.py#L45-47)
+- [backend/app/routers/portfolios.py:102-126](file://backend/app/routers/portfolios.py#L102-126)
+- [backend/app/routers/portfolios.py:144-151](file://backend/app/routers/portfolios.py#L144-151)
+- [backend/app/models/portfolio_value_snapshot.py:17-19](file://backend/app/models/portfolio_value_snapshot.py#L17-19)
+- [backend/app/models/portfolio_position.py:23-33](file://backend/app/models/portfolio_position.py#L23-33)
 
 ### C. DatePicker组件技术规范
 - **组件名称**：DatePicker
@@ -561,6 +569,25 @@ DP --> TAILWIND["Tailwind CSS"]
 - **使用场景**：投资组合管理的所有日期选择功能
 
 **章节来源**
-- [frontend/src/components/ui/date-picker.tsx:17-31](file://frontend/src/components/ui/date-picker.tsx#L17-L31)
-- [frontend/src/components/ui/date-picker.tsx:4-6](file://frontend/src/components/ui/date-picker.tsx#L4-L6)
-- [frontend/src/components/ui/date-picker.tsx:9-15](file://frontend/src/components/ui/date-picker.tsx#L9-L15)
+- [frontend/src/components/ui/date-picker.tsx:17-31](file://frontend/src/components/ui/date-picker.tsx#L17-31)
+- [frontend/src/components/ui/date-picker.tsx:4-6](file://frontend/src/components/ui/date-picker.tsx#L4-6)
+- [frontend/src/components/ui/date-picker.tsx:9-15](file://frontend/src/components/ui/date-picker.tsx#L9-15)
+
+### D. 持仓管理API字段规范
+- **cash_amount字段**：
+  - 数据类型：Decimal/Float
+  - 精度：2位小数
+  - 含义：持仓现金金额价值
+  - 必填：是
+- **标准化日期字段**：
+  - value_date：估值日期，格式YYYY-MM-DD
+  - calendar_date：日历日期，格式YYYY-MM-DD  
+  - price_date：价格日期，格式YYYY-MM-DD
+- **兼容性处理**：
+  - 自动映射旧字段到新字段
+  - 提供弃用警告
+  - 保持向后兼容
+
+**章节来源**
+- [backend/app/schemas/position.py:1-50](file://backend/app/schemas/position.py#L1-50)
+- [backend/app/models/portfolio_position.py:5-33](file://backend/app/models/portfolio_position.py#L5-33)
