@@ -196,6 +196,24 @@ def _seed_base_data(test_engine):
 
 
 # ============================================================================
+# 认证全局状态隔离（autouse）
+# ============================================================================
+
+@pytest.fixture(autouse=True)
+def _clear_auth_global_state():
+    """每个测试前清空进程级认证全局状态，避免跨测试污染。
+
+    token_blacklist 为模块级内存集合：改密/登出测试会将当前 token 拉黑，
+    而同一秒内生成的同 sub/role token 字节完全一致，导致后续无关测试
+    随机 401（Token has been revoked）。login_failure_tracker 同理。
+    """
+    from app.utils.security import token_blacklist, login_failure_tracker
+    token_blacklist.clear()
+    login_failure_tracker.clear()
+    yield
+
+
+# ============================================================================
 # 数据库会话（function-scoped，使用事务隔离）
 # ============================================================================
 

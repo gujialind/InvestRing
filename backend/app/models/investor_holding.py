@@ -8,8 +8,8 @@ class InvestorHolding(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
     investor_code = Column(String(20), ForeignKey("investor.code"), nullable=False)
-    shares = Column(Numeric(15, 4), nullable=False)
-    frozen_shares = Column(Numeric(15, 4), default=0)
+    shares = Column(Numeric(15, 2), nullable=False)
+    frozen_shares = Column(Numeric(15, 2), default=0)
     cost_per_share = Column(Numeric(10, 4))
     # 派生字段（#40 改进1）：快照生成时回填，历史快照可为 NULL
     market_value = Column(Numeric(15, 4))  # shares * 组合净值

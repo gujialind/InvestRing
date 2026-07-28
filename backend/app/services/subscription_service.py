@@ -24,6 +24,7 @@ from app.services.trading_utils import (
 )
 from app.services.position_service import calculate_investor_available_shares
 from app.services.exceptions import BusinessError, NotFoundError
+from app.utils.quantize import quantize_shares
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,8 @@ def confirm_single_subscription(
 
     # 4. 计算份额/金额
     if subscription.sub_type == "subscribe":
-        shares = Decimal(str(subscription.amount)) / nav
+        # 确认份额量化到 2 位（第 3 位舍去）；净值与金额保持原精度
+        shares = quantize_shares(Decimal(str(subscription.amount)) / nav)
         subscription.unit_price = nav
         subscription.shares = shares
     else:
@@ -288,15 +290,19 @@ def create_subscription(
     elif sub_type == "redeem":
         if shares is None or Decimal(str(shares)) <= 0:
             raise BusinessError("INVALID_SHARES", "赎回份额必须大于0")
+        # 用户输入份额先量化到 2 位（第 3 位舍去），再做精确比较
+        shares_d = quantize_shares(Decimal(str(shares)))
+        if shares_d <= 0:
+            raise BusinessError("INVALID_SHARES", "赎回份额必须大于0")
         available = calculate_investor_available_shares(
             db, portfolio_code, investor_code, as_of_date=apply_date
         )
-        if Decimal(str(shares)) > available:
+        if shares_d > available:
             raise BusinessError("INSUFFICIENT_SHARES", "赎回份额超过可用份额")
         new_sub = Subscription(
             portfolio_code=portfolio_code, investor_code=investor_code,
             platform_code=platform_code, sub_type="redeem",
-            shares=Decimal(str(shares)), apply_date=apply_date,
+            shares=shares_d, apply_date=apply_date,
             confirm_date=confirm_date, status="pending", notes=notes,
         )
     else:

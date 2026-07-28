@@ -84,6 +84,41 @@ def get_trade(
         success(data=serialize_model(trade))
 
 
+@app.command("preview")
+def preview_trade(
+    id: int = typer.Argument(...),
+    confirm_date: str = typer.Option(None, "--confirm-date", help="YYYY-MM-DD"),
+    price: Optional[float] = typer.Option(None, "--price"),
+):
+    """确认前预览：返回真实确认将写入的净值/份额/金额，不落库（与 confirm 共用计算实现）"""
+    with cli_context() as db:
+        from app.models.trade import Trade
+        from app.models.product import Product
+        from app.services.trade_service import calculate_confirm_preview
+
+        trade = db.query(Trade).filter(Trade.id == id).first()
+        if not trade:
+            error("NOT_FOUND", f"交易记录 {id} 不存在")
+        if trade.status != "pending":
+            error("INVALID_STATUS", "仅 pending 状态可预览确认结果")
+
+        product = db.query(Product).filter(
+            Product.code == trade.product_code, Product.market == trade.market
+        ).first()
+        if not product:
+            error("NOT_FOUND", f"产品 {trade.product_code} 不存在")
+
+        cd = parse_date(confirm_date) if confirm_date else None
+        price_d = Decimal(str(price)) if price is not None else None
+        preview = calculate_confirm_preview(db, trade, product, confirm_date=cd, price=price_d)
+        # 结构对齐 REST GET /api/trades/{id}/preview：trade + preview + paired_cash_amount
+        success(data={
+            "trade": serialize_model(trade),
+            "preview": {k: v for k, v in preview.items() if k != "paired_cash_amount"},
+            "paired_cash_amount": preview["paired_cash_amount"],
+        })
+
+
 @app.command("confirm")
 def confirm_trade(
     id: int = typer.Argument(...),

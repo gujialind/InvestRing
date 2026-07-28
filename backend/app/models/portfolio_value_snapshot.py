@@ -9,9 +9,9 @@ class PortfolioValueSnapshot(Base):
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
     snapshot_date = Column(Date, nullable=False)
     total_value = Column(Numeric(15, 4), nullable=False)
-    total_shares = Column(Numeric(15, 4), nullable=False)
+    total_shares = Column(Numeric(15, 2), nullable=False)
     unit_price = Column(Numeric(10, 4), nullable=False)
-    frozen_shares = Column(Numeric(15, 4), default=0)
+    frozen_shares = Column(Numeric(15, 2), default=0)
     unit_price_change_pct = Column(Numeric(8, 4))
     created_at = Column(DateTime, server_default=func.now())
 

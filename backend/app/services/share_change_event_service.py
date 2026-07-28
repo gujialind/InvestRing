@@ -20,6 +20,7 @@ from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.services.trading_utils import is_trading_day, get_latest_snapshot_date
 from app.services.exceptions import BusinessError, NotFoundError
+from app.utils.quantize import quantize_shares
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,13 @@ PLATFORM_LEVEL_TYPES = {"cash_dividend", "reinvest_dividend", "forced_adjustment
 
 def _compute_event_fields(event: ShareChangeEvent) -> None:
     """按 event_type 计算 shares_change/shares_after/cash_change。
-    forced_adjustment 由用户直接填写，不自动计算。
+    forced_adjustment 由用户直接填写，不自动计算（份额仅量化）。
+
+    份额类字段统一量化到 2 位（第 3 位舍去），且保证 shares_after 与
+    shares_change 严格自洽：乘除产生新份额的类型（split/merge）先量化
+    shares_after 再反算 shares_change；增量型（reinvest/bonus）先量化
+    shares_change 再用 es + shares_change 重算 shares_after。
+    cash_change 是金额，不量化。
     """
     es = event.entitlement_shares or Decimal("0")
     if event.event_type == "cash_dividend":
@@ -37,22 +44,27 @@ def _compute_event_fields(event: ShareChangeEvent) -> None:
         event.shares_change = Decimal("0")
         event.shares_after = es
     elif event.event_type == "reinvest_dividend":
-        event.shares_change = es * Decimal(str(event.div_cash or 0)) / Decimal(str(event.reinvest_nav or 1))
+        event.shares_change = quantize_shares(
+            es * Decimal(str(event.div_cash or 0)) / Decimal(str(event.reinvest_nav or 1))
+        )
         event.shares_after = es + event.shares_change
         event.cash_change = Decimal("0")
     elif event.event_type == "share_split":
-        event.shares_after = es * Decimal(str(event.ratio or 1))
+        event.shares_after = quantize_shares(es * Decimal(str(event.ratio or 1)))
         event.shares_change = event.shares_after - es
         event.cash_change = Decimal("0")
     elif event.event_type == "share_merge":
-        event.shares_after = es / Decimal(str(event.ratio or 1))
+        event.shares_after = quantize_shares(es / Decimal(str(event.ratio or 1)))
         event.shares_change = event.shares_after - es
         event.cash_change = Decimal("0")
     elif event.event_type == "bonus_share":
-        event.shares_change = es * Decimal(str(event.ratio or 0))
+        event.shares_change = quantize_shares(es * Decimal(str(event.ratio or 0)))
         event.shares_after = es + event.shares_change
         event.cash_change = Decimal("0")
-    # forced_adjustment: shares_change / cash_change 由用户直接填写，不自动计算
+    elif event.event_type == "forced_adjustment":
+        # shares_change / cash_change 由用户直接填写；份额量化，金额不动
+        if event.shares_change is not None:
+            event.shares_change = quantize_shares(Decimal(str(event.shares_change)))
 
 
 def check_platform_coverage(
@@ -231,10 +243,11 @@ def create_share_change_event(
         ex_date=ex_date,
         entitlement_date=entitlement_date,
         platform_code=platform_code,
-        entitlement_shares=entitlement_shares,
-        shares_before=shares_before,
-        shares_change=shares_change,
-        shares_after=shares_after,
+        # 用户直填的份额类字段统一量化到 2 位（cash_change 是金额不量化）
+        entitlement_shares=quantize_shares(entitlement_shares),
+        shares_before=quantize_shares(shares_before),
+        shares_change=quantize_shares(shares_change),
+        shares_after=quantize_shares(shares_after),
         cash_change=cash_change,
         cash_product_code=cash_product_code,
         div_cash=div_cash,

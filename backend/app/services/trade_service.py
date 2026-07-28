@@ -19,6 +19,7 @@ from app.models.portfolio import Portfolio
 from app.services.trading_utils import get_next_trading_day, is_trading_day, get_latest_snapshot_date
 from app.services.position_service import calculate_available_cash, calculate_available_shares
 from app.services.exceptions import BusinessError, NotFoundError
+from app.utils.quantize import quantize_shares
 
 logger = logging.getLogger(__name__)
 
@@ -144,24 +145,25 @@ def sync_transfer_group(
         raise
 
 
-def confirm_single_trade(
+def calculate_confirm_preview(
     db: Session,
     trade: Trade,
     product: Optional[Product],
     *,
     confirm_date: Optional[date] = None,
     price: Optional[Decimal] = None,
-) -> Trade:
+) -> dict:
     """
-    确认单笔调仓交易的核心逻辑，供手动确认与 auto_confirm 共用。
+    计算交易确认结果（纯计算，不落库），供确认前预览与真实确认共用。
 
-    - confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
-    - 场外基金（OEF/LOF 且 CN_OTC）确认时统一获取 T 日（成交当日）净值并重算 shares/amount，
-      不区分 QDII/非 QDII，一律以净值计算；缺失 T 日净值时抛 MISSING_NAV 拒绝确认
-    - 场外基金若传入 price 仅作一致性校验：须与 T 日净值相等，否则抛 PRICE_NAV_MISMATCH，
-      手动价不覆盖净值（不传则直接取净值）
-    - 场内基金不取净值，使用创建时录入的成交价（成交价录入时必填，见 trades.py 创建校验）
-    - 置 status=confirmed 并原子同步配对 CASH 腿
+    只做查询与计算：**不修改 trade 对象、不同步配对腿、不 flush/commit**。
+    confirm_single_trade 调用本函数取结果后回写，保证「预览 == 真实确认」。
+
+    计算规则（与确认语义完全一致）：
+    - 场外净值型基金（OEF/LOF 且 CN_OTC）：取 T 日净值重算 shares/amount，
+      缺失抛 MISSING_NAV；传入 price 仅作一致性校验（不一致抛 PRICE_NAV_MISMATCH）
+    - 非净值型且传入 price：按传入成交价重算（补录/手动覆盖场景）
+    - 否则（场内不传价）：不重算，返回 trade 现有字段原样
 
     Args:
         db: 数据库会话
@@ -172,11 +174,18 @@ def confirm_single_trade(
             场内基金作为覆盖成交价
 
     Returns:
-        确认后的 trade 对象（未 commit，事务由调用方控制）
+        {
+            "price"/"shares"/"amount"/"actual_amount": 确认后将写入的数值,
+            "fee": trade.fee,
+            "confirm_date": 生效确认日（传参覆盖或 trade.confirm_date）,
+            "nav_date": OTC 净值型时取净值的 T 日（trade.trade_date），否则 None,
+            "is_otc_nav_fund": 是否场外净值型基金,
+            "paired_cash_amount": 配对 CASH 腿将同步的金额
+                （actual_amount 优先，否则 amount，与 sync_transfer_group 镜像规则一致；
+                CASH 腿自身为 None）,
+        }
     """
-    # confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
-    if confirm_date is not None:
-        trade.confirm_date = confirm_date
+    effective_confirm_date = confirm_date if confirm_date is not None else trade.confirm_date
 
     # 场外净值型基金（CN_OTC 的 OEF/LOF）确认时必须获取 T 日净值进行计算
     is_otc_nav_fund = (
@@ -184,6 +193,11 @@ def confirm_single_trade(
         and product.product_type in ["OEF", "LOF"]
         and trade.market == "CN_OTC"
     )
+
+    result_price = trade.price
+    result_shares = trade.shares
+    result_amount = trade.amount
+    result_actual_amount = trade.actual_amount
 
     if is_otc_nav_fund:
         # 净值型产品：获取T日净值
@@ -210,27 +224,94 @@ def confirm_single_trade(
 
         final_price = nav_price
 
-        trade.price = final_price
+        result_price = final_price
         if trade.trade_type == "buy":
             amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
-            trade.shares = amount / final_price
-            trade.amount = amount
-            
+            result_shares = quantize_shares(amount / final_price)
+            result_amount = amount
         else:
             amount = Decimal(str(trade.shares)) * final_price
-            trade.actual_amount = amount - Decimal(str(trade.fee))
-            trade.amount = amount
+            result_actual_amount = amount - Decimal(str(trade.fee))
+            result_amount = amount
     elif price is not None:
         # 场内基金/其他非净值型：仅在传入价格时按传入成交价重算（补录/手动覆盖场景）
-        trade.price = Decimal(str(price))
+        result_price = Decimal(str(price))
         if trade.trade_type == "buy":
             amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
-            trade.shares = amount / Decimal(str(price))
-            trade.amount = amount
+            result_shares = quantize_shares(amount / Decimal(str(price)))
+            result_amount = amount
         else:
             amount = Decimal(str(trade.shares)) * Decimal(str(price))
-            trade.actual_amount = amount - Decimal(str(trade.fee))
-            trade.amount = amount
+            result_actual_amount = amount - Decimal(str(trade.fee))
+            result_amount = amount
+    # else：场内不传价 → 不重算，返回 trade 现有字段原样
+
+    # 配对 CASH 腿镜像金额（与 sync_transfer_group 规则一致，仅基金腿有意义）
+    paired_cash_amount = None
+    if trade.product_code != "CASH":
+        paired_cash_amount = (
+            result_actual_amount if result_actual_amount is not None else result_amount
+        )
+
+    return {
+        "price": result_price,
+        "shares": result_shares,
+        "amount": result_amount,
+        "actual_amount": result_actual_amount,
+        "fee": trade.fee,
+        "confirm_date": effective_confirm_date,
+        "nav_date": trade.trade_date if is_otc_nav_fund else None,
+        "is_otc_nav_fund": is_otc_nav_fund,
+        "paired_cash_amount": paired_cash_amount,
+    }
+
+
+def confirm_single_trade(
+    db: Session,
+    trade: Trade,
+    product: Optional[Product],
+    *,
+    confirm_date: Optional[date] = None,
+    price: Optional[Decimal] = None,
+) -> Trade:
+    """
+    确认单笔调仓交易的核心逻辑，供手动确认与 auto_confirm 共用。
+
+    - 计算统一委托 calculate_confirm_preview（确认与预览共用同一实现），
+      本函数负责将结果回写 trade 并置 confirmed
+    - confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
+    - 场外基金（OEF/LOF 且 CN_OTC）确认时统一获取 T 日（成交当日）净值并重算 shares/amount，
+      不区分 QDII/非 QDII，一律以净值计算；缺失 T 日净值时抛 MISSING_NAV 拒绝确认
+    - 场外基金若传入 price 仅作一致性校验：须与 T 日净值相等，否则抛 PRICE_NAV_MISMATCH，
+      手动价不覆盖净值（不传则直接取净值）
+    - 场内基金不取净值，使用创建时录入的成交价（成交价录入时必填，见 trades.py 创建校验）
+    - 置 status=confirmed 并原子同步配对 CASH 腿
+
+    Args:
+        db: 数据库会话
+        trade: 待确认交易（须为 pending）
+        product: 交易对应产品（CASH/未知产品可为 None，跳过净值逻辑）
+        confirm_date: 覆盖确认日（补录场景）
+        price: 手动价格；场外基金仅用于与 T 日净值一致性校验（不覆盖净值），
+            场内基金作为覆盖成交价
+
+    Returns:
+        确认后的 trade 对象（未 commit，事务由调用方控制）
+    """
+    preview = calculate_confirm_preview(
+        db, trade, product, confirm_date=confirm_date, price=price
+    )
+
+    # confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
+    if confirm_date is not None:
+        trade.confirm_date = confirm_date
+
+    # 仅在重算分支回写数值字段（场内不传价时保持 trade 现有字段不动）
+    if preview["is_otc_nav_fund"] or price is not None:
+        trade.price = preview["price"]
+        trade.shares = preview["shares"]
+        trade.amount = preview["amount"]
+        trade.actual_amount = preview["actual_amount"]
 
     trade.status = "confirmed"
     # 同步 transfer_group 配对腿（如基金调仓的配对 CASH 腿）
@@ -323,7 +404,7 @@ def create_trade(
                 msg = f"平台 {platform_code} 的可用现金不足"
             raise BusinessError("INSUFFICIENT_CASH", msg)
         net_amount = cash_out_d - fee_d
-        shares_d = net_amount / price_d if price_d else Decimal("0")
+        shares_d = quantize_shares(net_amount / price_d) if price_d else Decimal("0")
         actual_amount_final = cash_out_d
         new_trade = Trade(
             portfolio_code=portfolio_code, product_code=product_code, market=market,
@@ -335,7 +416,10 @@ def create_trade(
     elif trade_type == "sell":
         if shares is None or Decimal(str(shares)) <= 0:
             raise BusinessError("INVALID_SHARES", "卖出份额必须大于0")
-        shares_d = Decimal(str(shares))
+        # 用户输入份额先量化到 2 位（第 3 位舍去），再做精确比较
+        shares_d = quantize_shares(Decimal(str(shares)))
+        if shares_d <= 0:
+            raise BusinessError("INVALID_SHARES", "卖出份额必须大于0")
         available_shares = calculate_available_shares(
             db, portfolio_code, product_code, market, as_of_date=trade_date
         )

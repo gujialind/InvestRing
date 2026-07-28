@@ -44,3 +44,21 @@ class TradeResponse(TradeBase):
 
     class Config:
         from_attributes = True
+
+
+class TradePreviewResult(BaseModel):
+    """确认前预览的计算结果（与真实确认共用同一计算实现）"""
+    price: Optional[float] = None
+    shares: Optional[float] = None
+    amount: Optional[float] = None
+    actual_amount: Optional[float] = None
+    fee: float = 0
+    confirm_date: Optional[date] = None
+    nav_date: Optional[date] = None  # OTC 净值型时取净值的 T 日
+    is_otc_nav_fund: bool = False
+
+
+class TradePreviewResponse(BaseModel):
+    trade: TradeResponse
+    preview: TradePreviewResult
+    paired_cash_amount: Optional[float] = None  # 配对 CASH 腿将同步的金额
