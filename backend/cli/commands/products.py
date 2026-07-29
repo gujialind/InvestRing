@@ -64,12 +64,15 @@ def create_product(
 @app.command("get")
 def get_product(
     code: str = typer.Argument(...),
-    market: str = typer.Argument(..., help="市场类型"),
+    market: Optional[str] = typer.Argument(None, help="市场类型（省略时自动解析；LOF 多市场须显式指定）"),
 ):
     """查看产品详情"""
     with cli_context() as db:
         from app.models.product import Product
+        from app.services.product_service import resolve_product_market
 
+        # #83：market 省略时经服务层解析（与 REST 同一实现）
+        _, market = resolve_product_market(db, code, market)
         product = db.query(Product).filter(
             Product.code == code, Product.market == market
         ).first()

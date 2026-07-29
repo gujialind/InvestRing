@@ -1,11 +1,16 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Optional
 from app.database import get_db
 from app.models.scheduled_task import ScheduledTask
 from app.models.task_execution_log import TaskExecutionLog
-from app.schemas.task import TaskResponse, TaskExecutionLogResponse
+from app.schemas.task import (
+    TaskResponse,
+    TaskExecutionLogResponse,
+    TaskDetailResponse,
+    PaginatedTaskLogResponse,
+)
 from app.dependencies import get_current_admin
 from app.services.trading_calendar_service import sync_trading_calendar
 
@@ -128,7 +133,7 @@ def disable_task(
     return {"message": f"Task {code} disabled"}
 
 
-@router.get("/{code}/logs", response_model=List[TaskExecutionLogResponse])
+@router.get("/{code}/logs", response_model=PaginatedTaskLogResponse)
 def get_task_logs(
     code: str,
     page: Optional[int] = 1,
@@ -151,3 +156,31 @@ def get_task_logs(
         "page": page,
         "page_size": page_size,
     }
+
+
+@router.get("/{code}", response_model=TaskDetailResponse)
+def get_task(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_admin),
+):
+    """查看任务详情：任务全字段 + 最近一次执行记录（last_execution 可为 null）"""
+    task = db.query(ScheduledTask).filter(ScheduledTask.code == code).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    last_execution = (
+        db.query(TaskExecutionLog)
+        .filter(TaskExecutionLog.task_code == code)
+        .order_by(TaskExecutionLog.created_at.desc(), TaskExecutionLog.id.desc())
+        .first()
+    )
+
+    return TaskDetailResponse(
+        **TaskResponse.model_validate(task).model_dump(),
+        last_execution=(
+            TaskExecutionLogResponse.model_validate(last_execution)
+            if last_execution
+            else None
+        ),
+    )

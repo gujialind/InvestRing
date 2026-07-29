@@ -6,11 +6,16 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_admin
+from app.models.trading_calendar import TradingCalendar
 from app.schemas.trading_calendar import (
     TradingCalendarResponse,
     TradingCalendarSyncRequest,
     TradingCalendarSyncResponse,
+    TradingDayIsOpenResponse,
+    TradingDayResponse,
 )
+from app.services import trading_utils
+from app.services.exceptions import BusinessError
 from app.services.trading_calendar_service import (
     sync_trading_calendar as sync_service,
     get_calendar_query,
@@ -19,6 +24,57 @@ from app.services.trading_calendar_service import (
 )
 
 router = APIRouter()
+
+_CALENDAR_NOT_SYNCED = ("CALENDAR_NOT_SYNCED", "交易日历数据缺失，请先同步交易日历")
+
+
+@router.get("/next", response_model=TradingDayResponse)
+def get_next_trading_day(
+    from_date: date = Query(..., description="起始日期"),
+    days: int = Query(1, ge=1, le=365, description="向后第 N 个交易日"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """查询 from_date 之后第 days 个交易日"""
+    result = trading_utils.get_next_trading_day(db, from_date, days)
+    # days>=1 时成功结果必严格晚于 from_date；等于 from_date 说明日历数据缺失
+    if result is None or result == from_date:
+        raise BusinessError(*_CALENDAR_NOT_SYNCED, http_status=422)
+    return TradingDayResponse(from_date=from_date, trading_day=result)
+
+
+@router.get("/prev", response_model=TradingDayResponse)
+def get_prev_trading_day(
+    from_date: date = Query(..., description="起始日期"),
+    days: int = Query(1, ge=1, le=365, description="向前第 N 个交易日"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """查询 from_date 之前第 days 个交易日"""
+    result = trading_utils.get_prev_trading_day(db, from_date, days)
+    if result is None or result == from_date:
+        raise BusinessError(*_CALENDAR_NOT_SYNCED, http_status=422)
+    return TradingDayResponse(from_date=from_date, trading_day=result)
+
+
+@router.get("/is-open", response_model=TradingDayIsOpenResponse)
+def get_is_trading_day(
+    query_date: date = Query(..., alias="date", description="查询日期"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """查询指定日期是否为交易日"""
+    # 区分“非交易日”与“日历未同步”：无该日期记录视为日历数据缺失
+    exists = (
+        db.query(TradingCalendar)
+        .filter(TradingCalendar.calendar_date == query_date)
+        .first()
+    )
+    if exists is None:
+        raise BusinessError(*_CALENDAR_NOT_SYNCED, http_status=422)
+    return TradingDayIsOpenResponse(
+        date=query_date, is_open=trading_utils.is_trading_day(db, query_date)
+    )
 
 
 @router.get("", response_model=List[TradingCalendarResponse])

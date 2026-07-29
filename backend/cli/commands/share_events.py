@@ -54,7 +54,12 @@ def create_event(
     notes: Optional[str] = typer.Option(None, "--notes"),
     force_cover: bool = typer.Option(False, "--force-cover", help="平台覆盖不全时降为 warning"),
 ):
-    """创建份额变动事件（校验/平台分级约束由服务层统一处理）"""
+    """创建份额变动事件（校验/平台分级约束由服务层统一处理）
+
+    \b
+    示例:
+      ir share-event create --portfolio-code PORT001 --product-code 022959.OF --market CN_OTC --event-type cash_dividend --ex-date 2026-06-05 --entitlement-date 2026-06-04 --platform-code ALIPAY --entitlement-shares 10000 --div-cash 0.05
+    """
     with cli_context() as db:
         from app.services.share_change_event_service import (
             create_share_change_event as create_event_service,

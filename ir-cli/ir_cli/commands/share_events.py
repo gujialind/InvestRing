@@ -41,7 +41,12 @@ def create(
     force_cover: bool = typer.Option(False, "--force-cover", help="平台覆盖不全时降为 warning（默认阻断）"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
-    """创建份额变动事件"""
+    """创建份额变动事件
+
+    \b
+    示例:
+      ir share-event create --portfolio-code PORT001 --event-type cash_dividend --ex-date 2026-06-05 --entitlement-date 2026-06-04 --product-code 022959.OF --platform-code ALIPAY --entitlement-shares 10000 --div-cash 0.05
+    """
     client = APIClient.from_config()
     body = resolve_body(
         json_body,

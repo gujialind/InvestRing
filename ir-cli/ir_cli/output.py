@@ -19,7 +19,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, NoReturn, Optional
 
-from ir_cli.hints import ERROR_HINTS
+from ir_cli.hints import get_hint
 
 
 class InvestRingEncoder(json.JSONEncoder):
@@ -79,7 +79,7 @@ def error(
         message: 人类可读错误描述
         details: 额外详情
         exit_code: 退出码（1=业务 2=认证 3=连接）
-        hints: 补救指引；缺省时按错误码自动查 ERROR_HINTS 附加
+        hints: 补救指引；缺省时按 code+details 自动生成（get_hint，issue #86）
     """
     result: dict = {
         "ok": False,
@@ -88,7 +88,7 @@ def error(
     if details:
         result["error"]["details"] = details
     if hints is None:
-        auto_hint = ERROR_HINTS.get(code)
+        auto_hint = get_hint(code, details)
         hints = [auto_hint] if auto_hint else None
     if hints:
         result["error"]["hints"] = hints

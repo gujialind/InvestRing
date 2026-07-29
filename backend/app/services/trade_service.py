@@ -18,6 +18,7 @@ from app.models.price_record import PriceRecord
 from app.models.portfolio import Portfolio
 from app.services.trading_utils import get_next_trading_day, is_trading_day, get_latest_snapshot_date
 from app.services.position_service import calculate_available_cash, calculate_available_shares
+from app.services.product_service import resolve_product_market
 from app.services.exceptions import BusinessError, NotFoundError
 from app.utils.quantize import quantize_shares
 
@@ -417,11 +418,24 @@ def create_trade(
             f"交易日必须晚于最新快照日（{latest_snapshot_date}）",
         )
 
+    # #83：market 省略时按产品唯一市场自动补全；LOF 一码多市场抛 MARKET_AMBIGUOUS
+    product_code, market = resolve_product_market(db, product_code, market)
+
     product = db.query(Product).filter(
         Product.code == product_code, Product.market == market
     ).first()
     if not product:
-        raise NotFoundError("NOT_FOUND", f"产品 {product_code}({market}) 不存在")
+        # details 携带 product_code 与同 code 其他市场，供 CLI hints 消费
+        details = {"product_code": product_code, "market": market}
+        other_markets = sorted(
+            row[0] or ""
+            for row in db.query(Product.market).filter(Product.code == product_code).all()
+        )
+        if other_markets:
+            details["available_markets"] = other_markets
+        raise NotFoundError(
+            "NOT_FOUND", f"产品 {product_code}({market}) 不存在", details=details
+        )
 
     # 禁止直接创建裸 CASH 交易：现金变动只能来自申赎/调仓配对/现金转移
     if product_code == "CASH":

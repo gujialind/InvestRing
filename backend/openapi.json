@@ -1223,6 +1223,54 @@
         }
       }
     },
+    "/api/products/{code}": {
+      "get": {
+        "tags": [
+          "产品管理"
+        ],
+        "summary": "Get Product Auto Market",
+        "description": "不带 market 的产品详情（#83）：唯一市场自动补全；\nLOF 一码多市场抛 MARKET_AMBIGUOUS，交全局 BusinessError handler 返回 422。",
+        "operationId": "get_product_auto_market_api_products__code__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/platforms": {
       "get": {
         "tags": [
@@ -1466,6 +1514,187 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/trading-calendar/next": {
+      "get": {
+        "tags": [
+          "交易日历"
+        ],
+        "summary": "Get Next Trading Day",
+        "description": "查询 from_date 之后第 days 个交易日",
+        "operationId": "get_next_trading_day_api_trading_calendar_next_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "起始日期",
+              "title": "From Date"
+            },
+            "description": "起始日期"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "向后第 N 个交易日",
+              "default": 1,
+              "title": "Days"
+            },
+            "description": "向后第 N 个交易日"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradingDayResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/trading-calendar/prev": {
+      "get": {
+        "tags": [
+          "交易日历"
+        ],
+        "summary": "Get Prev Trading Day",
+        "description": "查询 from_date 之前第 days 个交易日",
+        "operationId": "get_prev_trading_day_api_trading_calendar_prev_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "起始日期",
+              "title": "From Date"
+            },
+            "description": "起始日期"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "向前第 N 个交易日",
+              "default": 1,
+              "title": "Days"
+            },
+            "description": "向前第 N 个交易日"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradingDayResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/trading-calendar/is-open": {
+      "get": {
+        "tags": [
+          "交易日历"
+        ],
+        "summary": "Get Is Trading Day",
+        "description": "查询指定日期是否为交易日",
+        "operationId": "get_is_trading_day_api_trading_calendar_is_open_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "查询日期",
+              "title": "Date"
+            },
+            "description": "查询日期"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradingDayIsOpenResponse"
+                }
               }
             }
           },
@@ -4369,11 +4598,55 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TaskExecutionLogResponse"
-                  },
-                  "title": "Response Get Task Logs Api System Tasks  Code  Logs Get"
+                  "$ref": "#/components/schemas/PaginatedTaskLogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/tasks/{code}": {
+      "get": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "Get Task",
+        "description": "查看任务详情：任务全字段 + 最近一次执行记录（last_execution 可为 null）",
+        "operationId": "get_task_api_system_tasks__code__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDetailResponse"
                 }
               }
             }
@@ -4642,6 +4915,102 @@
         ]
       }
     },
+    "/api/v1/snapshots/catch-up": {
+      "post": {
+        "tags": [
+          "快照管理",
+          "snapshots"
+        ],
+        "summary": "Catch Up",
+        "description": "逐交易日追平快照至 to_date（issue #84）\n\nservice 内部逐日 checkpoint commit（编排层例外），router 不再重复 commit；\n单日失败仅回滚当日，已成功日保留，响应附 failed_date/error。\n\n权限：仅admin",
+        "operationId": "catch_up_api_v1_snapshots_catch_up_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCatchUpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotCatchUpResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/snapshots/generate-next": {
+      "post": {
+        "tags": [
+          "快照管理",
+          "snapshots"
+        ],
+        "summary": "Generate Next",
+        "description": "生成最新快照日的下一个交易日快照（issue #84）\n\nservice 内部 commit（编排层例外），router 不再重复 commit。\n\n权限：仅admin",
+        "operationId": "generate_next_api_v1_snapshots_generate_next_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotGenerateNextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotGenerateNextResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/snapshots/validation": {
       "get": {
         "tags": [
@@ -4818,7 +5187,7 @@
           "snapshots"
         ],
         "summary": "Delete Snapshots Bulk",
-        "description": "批量删除从 from_date 开始的所有快照（含 from_date）\n\n从最新快照日开始倒序删除，确保级联回退的顺序正确。\n每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。\n必须显式传 confirm=true，否则返回 422 CONFIRM_REQUIRED（兼作影响面预览）。\n\n权限：仅admin",
+        "description": "批量删除从 from_date 开始的所有快照（含 from_date）\n\n从最新快照日开始倒序删除，确保级联回退的顺序正确。\n每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。\n必须显式传 confirm=true，否则返回 422 CONFIRM_REQUIRED（兼作影响面预览）。\ndry_run=true 时纯预览（issue #75）：返回将删除的日期列表，不校验 confirm、零副作用。\n\n权限：仅admin",
         "operationId": "delete_snapshots_bulk_api_v1_snapshots__portfolio_code__bulk__from_date__delete",
         "security": [
           {
@@ -4856,6 +5225,18 @@
               "title": "Confirm"
             },
             "description": "必须显式传 confirm=true 才执行删除"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "仅预览将删除的快照日期，不执行删除",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "仅预览将删除的快照日期，不执行删除"
           }
         ],
         "responses": {
@@ -5725,6 +6106,37 @@
           "snapshot_date"
         ],
         "title": "NavHistoryRecord"
+      },
+      "PaginatedTaskLogResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskExecutionLogResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "PaginatedTaskLogResponse"
       },
       "PlatformCreate": {
         "properties": {
@@ -7299,6 +7711,192 @@
         "type": "object",
         "title": "ShareChangeEventUpdate"
       },
+      "SnapshotCatchUpRequest": {
+        "properties": {
+          "portfolio_code": {
+            "type": "string",
+            "title": "Portfolio Code"
+          },
+          "to_date": {
+            "type": "string",
+            "format": "date",
+            "title": "To Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_code",
+          "to_date"
+        ],
+        "title": "SnapshotCatchUpRequest",
+        "description": "快照追平请求（issue #84）"
+      },
+      "SnapshotCatchUpResult": {
+        "properties": {
+          "portfolio_code": {
+            "type": "string",
+            "title": "Portfolio Code"
+          },
+          "to_date": {
+            "type": "string",
+            "title": "To Date"
+          },
+          "generated_count": {
+            "type": "integer",
+            "title": "Generated Count"
+          },
+          "generated_dates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Generated Dates"
+          },
+          "latest_snapshot_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Snapshot Date"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "failed_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Date"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_code",
+          "to_date",
+          "generated_count",
+          "generated_dates"
+        ],
+        "title": "SnapshotCatchUpResult",
+        "description": "快照追平结果（issue #84）\n\n逐日 checkpoint 语义：失败时 generated_dates 中已成功的日子已落库，\nfailed_date/error 标记中断点。"
+      },
+      "SnapshotGenerateNextRequest": {
+        "properties": {
+          "portfolio_code": {
+            "type": "string",
+            "title": "Portfolio Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_code"
+        ],
+        "title": "SnapshotGenerateNextRequest",
+        "description": "生成下一交易日快照请求（issue #84）"
+      },
+      "SnapshotGenerateNextResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "portfolio_code": {
+            "type": "string",
+            "title": "Portfolio Code"
+          },
+          "generated_date": {
+            "type": "string",
+            "title": "Generated Date"
+          },
+          "total_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Value"
+          },
+          "total_shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Shares"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "portfolio_code",
+          "generated_date"
+        ],
+        "title": "SnapshotGenerateNextResult",
+        "description": "生成下一交易日快照结果（issue #84）"
+      },
       "SnapshotGenerateRequest": {
         "properties": {
           "portfolio_code": {
@@ -7910,6 +8508,125 @@
           "status"
         ],
         "title": "SyncJobResponse"
+      },
+      "TaskDetailResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "cron_expr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Expr"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "default": true
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run Status"
+          },
+          "next_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run At"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "title": "Timeout Seconds",
+            "default": 300
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "last_execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskExecutionLogResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "TaskDetailResponse"
       },
       "TaskExecutionLogResponse": {
         "properties": {
@@ -8622,6 +9339,47 @@
         ],
         "title": "TradingCalendarSyncResponse",
         "description": "交易日历同步响应"
+      },
+      "TradingDayIsOpenResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "is_open": {
+            "type": "boolean",
+            "title": "Is Open"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "is_open"
+        ],
+        "title": "TradingDayIsOpenResponse",
+        "description": "是否交易日查询响应"
+      },
+      "TradingDayResponse": {
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "format": "date",
+            "title": "From Date"
+          },
+          "trading_day": {
+            "type": "string",
+            "format": "date",
+            "title": "Trading Day"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_date",
+          "trading_day"
+        ],
+        "title": "TradingDayResponse",
+        "description": "交易日偏移查询响应（next/prev）"
       },
       "UserInfo": {
         "properties": {

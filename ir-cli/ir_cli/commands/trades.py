@@ -42,7 +42,7 @@ def create(
     actual_amount: Optional[float] = typer.Option(None, "--actual-amount", help="实际金额"),
     fee: float = typer.Option(0, "--fee", help="手续费"),
     platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
-    market: Optional[str] = typer.Option(None, "--market", help="市场类型"),
+    market: Optional[str] = typer.Option(None, "--market", help="市场类型（省略时自动解析；LOF 多市场须显式指定）"),
     price: Optional[float] = typer.Option(None, "--price", help="价格"),
     shares: Optional[float] = typer.Option(None, "--shares", help="份额"),
     amount: Optional[float] = typer.Option(None, "--amount", help="金额"),
@@ -52,7 +52,12 @@ def create(
     auto_confirm: bool = typer.Option(False, "--confirm", help="创建成功后立即确认（快捷组合）"),
     quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
 ):
-    """创建交易（--confirm 可链式创建+确认）"""
+    """创建交易（--confirm 可链式创建+确认）
+
+    \b
+    示例:
+      ir trade create --portfolio-code PORT001 --product-code 022959.OF --type buy --amount 10000 --trade-date 2026-06-05 --platform-code ALIPAY
+    """
     client = APIClient.from_config()
     body = resolve_body(
         json_body,

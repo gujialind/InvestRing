@@ -1,6 +1,7 @@
 """
 ir position - 持仓管理命令组
 """
+import sys
 import typer
 from typing import Optional
 from decimal import Decimal
@@ -11,6 +12,16 @@ from cli.output import success, error
 from cli.utils import serialize_model, paginate, pagination_meta, parse_date
 
 app = typer.Typer(no_args_is_help=True)
+
+
+def _resolve_required(option_value: Optional[str], arg_value: Optional[str], flag: str) -> str:
+    """option 优先；位置参数已弃用（issue #81），仅向 stderr 告警避免污染 stdout JSON"""
+    if option_value is not None:
+        return option_value
+    if arg_value is not None:
+        print(f"[warning] 位置参数已弃用，请改用 {flag} 选项", file=sys.stderr)
+        return arg_value
+    error("VALIDATION_ERROR", f"缺少 {flag}")
 
 
 @app.command("list")
@@ -69,30 +80,36 @@ def get_position(
 
 @app.command("available-cash")
 def available_cash(
-    portfolio_code: str = typer.Argument(...),
+    portfolio_code_arg: Optional[str] = typer.Argument(None, metavar="[PORTFOLIO_CODE]", help="[deprecated] 请改用 --portfolio-code"),
+    portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码"),
 ):
     """查看组合可用现金（实时计算）"""
+    code = _resolve_required(portfolio_code, portfolio_code_arg, "--portfolio-code")
     with cli_context() as db:
         from app.services.position_service import calculate_available_cash
 
-        cash = calculate_available_cash(db, portfolio_code)
-        success(data={"portfolio_code": portfolio_code, "available_cash": float(cash)})
+        cash = calculate_available_cash(db, code)
+        success(data={"portfolio_code": code, "available_cash": float(cash)})
 
 
 @app.command("available-shares")
 def available_shares(
-    portfolio_code: str = typer.Argument(...),
-    product_code: str = typer.Argument(...),
+    portfolio_code_arg: Optional[str] = typer.Argument(None, metavar="[PORTFOLIO_CODE]", help="[deprecated] 请改用 --portfolio-code"),
+    product_code_arg: Optional[str] = typer.Argument(None, metavar="[PRODUCT_CODE]", help="[deprecated] 请改用 --product-code"),
+    portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码"),
+    product_code: Optional[str] = typer.Option(None, "--product-code", help="产品代码"),
     market: Optional[str] = typer.Option(None, "--market"),
 ):
     """查看产品可用份额（实时计算）"""
+    pf_code = _resolve_required(portfolio_code, portfolio_code_arg, "--portfolio-code")
+    prod_code = _resolve_required(product_code, product_code_arg, "--product-code")
     with cli_context() as db:
         from app.services.position_service import calculate_available_shares
 
-        shares = calculate_available_shares(db, portfolio_code, product_code, market)
+        shares = calculate_available_shares(db, pf_code, prod_code, market)
         success(data={
-            "portfolio_code": portfolio_code,
-            "product_code": product_code,
+            "portfolio_code": pf_code,
+            "product_code": prod_code,
             "market": market,
             "available_shares": float(shares),
         })

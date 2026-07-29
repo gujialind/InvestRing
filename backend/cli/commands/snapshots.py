@@ -17,7 +17,12 @@ def generate_snapshot(
     portfolio_code: str = typer.Option(..., "--portfolio-code"),
     target_date: str = typer.Option(..., "--target-date", help="YYYY-MM-DD"),
 ):
-    """生成单日快照"""
+    """生成单日快照
+
+    \b
+    示例:
+      ir snapshot generate --portfolio-code PORT001 --target-date 2026-06-05
+    """
     with cli_context() as db:
         from app.services.snapshot_service import generate_daily_snapshots
 
@@ -40,6 +45,32 @@ def recalculate_snapshots(
         if any(r["errors"] for r in result["results"]):
             db.rollback()
             error("RECALCULATE_FAILED", "区间重算存在失败日期，已整体回滚", details=result)
+        success(data=result)
+
+
+@app.command("catch-up")
+def catch_up(
+    portfolio_code: str = typer.Option(..., "--portfolio-code"),
+    to_date: str = typer.Option(..., "--to-date", help="YYYY-MM-DD"),
+):
+    """逐交易日追平快照至目标日期（service 内逐日 checkpoint commit，失败日之前的成果保留）"""
+    with cli_context() as db:
+        from app.services.snapshot_service import catch_up_snapshots
+
+        # service 内逐日 commit（编排层例外），cli_context 的收尾 commit 无害
+        result = catch_up_snapshots(db, portfolio_code, parse_date(to_date))
+        success(data=result)
+
+
+@app.command("generate-next")
+def generate_next(
+    portfolio_code: str = typer.Option(..., "--portfolio-code"),
+):
+    """生成最新快照日的下一个交易日快照（无需显式指定日期）"""
+    with cli_context() as db:
+        from app.services.snapshot_service import generate_next_snapshot
+
+        result = generate_next_snapshot(db, portfolio_code)
         success(data=result)
 
 
@@ -120,10 +151,11 @@ def delete_snapshots_bulk(
     portfolio_code: str = typer.Argument(...),
     from_date: str = typer.Argument(..., help="YYYY-MM-DD，含当日"),
     yes: bool = typer.Option(False, "--yes", help="跳过确认，未提供则拒绝执行"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="仅预览将删除的快照日期，不执行删除"),
 ):
     """批量删除从 from_date 起（含当日）的所有快照，从最新日倒序级联回退"""
-    if not yes:
-        error("CONFIRM_REQUIRED", "批量删除快照不可逆，请追加 --yes 确认")
+    if not yes and not dry_run:
+        error("CONFIRM_REQUIRED", "批量删除快照不可逆，请追加 --yes 确认，可先用 --dry-run 预览")
     with cli_context() as db:
         from app.services.snapshot_service import _delete_existing_snapshots
         from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
@@ -138,6 +170,16 @@ def delete_snapshots_bulk(
             .order_by(PortfolioValueSnapshot.snapshot_date.desc())
             .all()
         ]
+
+        # dry-run 纯预览（issue #75）：与 REST 端点同构输出，不删除、零副作用
+        if dry_run:
+            success(data={
+                "dry_run": True,
+                "portfolio_code": portfolio_code,
+                "from_date": fd.isoformat(),
+                "count": len(snapshot_dates),
+                "snapshot_dates": [d.isoformat() for d in snapshot_dates],
+            })
 
         if not snapshot_dates:
             success(data={

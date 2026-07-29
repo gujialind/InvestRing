@@ -177,16 +177,16 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 ### 4.2 路由与 API 前缀总表
 
-`main.py` 注册 **18 个 router，约 90 个端点**。注意前缀不完全统一：
+`main.py` 注册 **18 个 router，约 98 个端点**。注意前缀不完全统一：
 
 | Router | 前缀 | 端点数 | 权限 | 主要端点 |
 |--------|------|:---:|------|----------|
 | `auth` | `/api/auth` | 3 | 公开/登录态 | login / logout / password |
 | `investors` | `/api/investors` | 5 | admin | CRUD（DELETE 校验持仓） |
 | `portfolios` | `/api/portfolios` | 9 | user/admin | CRUD、close、reactivate、nav-history、returns、cash-flow |
-| `products` | `/api/products` | 5 | user/admin | CRUD（自动算 confirm_days） |
+| `products` | `/api/products` | 6 | user/admin | CRUD（自动算 confirm_days）、GET /{code}（不带 market 自动解析） |
 | `platforms` | `/api/platforms` | 5 | user/admin | CRUD |
-| `trading_calendar` | `/api/trading-calendar` | 2 | user/admin | GET、POST /sync |
+| `trading_calendar` | `/api/trading-calendar` | 5 | user/admin | GET、POST /sync、next / prev / is-open |
 | `data_sources` | `/api/system/data-sources` | 2 | user/admin | GET、PUT /{name} |
 | `market_data` | `/api/market-data` | 4 | 公开 | price-data、nav-coverage、sync-price-data、sync-history |
 | `subscriptions` | `/api/subscriptions` | 8 | user/admin | CRUD + confirm/cancel/unconfirm |
@@ -194,9 +194,9 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 | `share_change_events` | `/api/share-change-events` | 8 | user/admin | CRUD + confirm/cancel/unconfirm |
 | `positions` | `/api/positions` | 8 | user/admin | 列表、available-cash、available-shares、cash-position（CRUD 被保护） |
 | `logs` | `/api/system/logs` | 3 | admin | login / audit / error |
-| `tasks` | `/api/system/tasks` | 5 | admin | 列表、run、enable、disable、logs |
+| `tasks` | `/api/system/tasks` | 6 | admin | 列表、describe、run、enable、disable、logs |
 | `notifications` | `/api/system/notifications` | 3 | user | 列表、read、read-all |
-| `snapshots` | **`/api/v1/snapshots`** | 6 | user/admin | generate、recalculate、validation、status、delete、bulk delete |
+| `snapshots` | **`/api/v1/snapshots`** | 8 | user/admin | generate、recalculate、catch-up、generate-next、validation、status、delete、bulk delete（支持 `dry_run`） |
 | `cash_transfers` | **`/api`** | 3 | admin | cash-transfer 创建、confirm、列表 |
 | `sync_jobs` | `/api/sync-jobs` | 3 | admin | price、job 状态、details |
 
@@ -234,7 +234,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 - **数据库**：`config.py` 默认 `mysql+pymysql://{user}:{pwd}@{host}:{port}/{db}?charset=utf8mb4`；生产用 QueuePool（`pool_size=10`、`max_overflow=20`、`pool_pre_ping`、`pool_recycle=3600`、`pool_timeout=30`）。配置经 `.env` 覆盖。
 - **迁移**：`alembic/`；`main.py` 启动时自动 `upgrade head`。
-- **调度**：`scheduler_enabled`；`init_tasks.py` 确保 3 个任务记录存在（见附录 B）。
+- **调度**：`scheduler_enabled`；`init_tasks.py` 确保 3 个任务记录存在（见附录 B）；启动时同步任务 name/description 文案，但不覆盖已有 cron_expr。
 - **数据源**：Tushare（`TUSHARE_TOKEN`，限流/重试可配）、AkShare（`AKSHARE_ENABLED`）；`data_sources` 路由读写 `.env`。
 - **安全**：`token_expire_days=7`；登录失败锁定、Token 黑名单、改密后强制重登。
 
@@ -341,6 +341,7 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 | 场内交易缺有效价格 | `MISSING_OR_INVALID_PRICE` |
 | 场外基金确认传入价格与 T 日净值不一致 | `PRICE_NAV_MISMATCH` |
 | 交易日 ≤ 最新快照日 | `DATE_BEFORE_SNAPSHOT` |
+| 仅给 product_code 且一码多市场（LOF） | `MARKET_AMBIGUOUS`（`details.available_markets` 列出可选市场，需显式指定 market） |
 | 场内 trade cancel | `CANNOT_CANCEL_EXCHANGE` |
 | 直接创建 CASH 交易（`product_code=CASH`） | `CASH_TRADE_FORBIDDEN`（REST 422 / CLI；须走申赎/现金转移/调仓配对） |
 
@@ -438,6 +439,10 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 | `PORTFOLIO_NOT_ACTIVE` / `PENDING_TRANSACTIONS_EXIST` / `INVESTOR_HAS_SHARES` | 组合/投资人生命周期 |
 | `CANNOT_MODIFY_CONFIRMED` / `CANNOT_DELETE_CONFIRMED` / `CANNOT_CANCEL_EXCHANGE` / `CANNOT_UNCONFIRM_CHILD` | 状态保护 |
 | `CASH_TRADE_FORBIDDEN` | 直接创建裸 CASH 交易（须走申赎/现金转移/调仓配对入口） |
+| `PRODUCT_NOT_FOUND` | 产品不存在（`details` 携查询的 code/market） |
+| `MARKET_AMBIGUOUS` | 产品代码对应多个市场（如 LOF），未显式指定 market（`details.available_markets` 列出可选市场） |
+| `NO_SNAPSHOT_BASELINE` | 快照 catch-up / generate-next 时组合无任何快照基线 |
+| `CALENDAR_NOT_SYNCED` | 交易日推算/快照推进涉及的年份交易日历未同步 |
 
 **HTTP 状态码**：400 参数错误 / 401 未认证 / 403 无权限 / 404 不存在 / 409 冲突 / 422 业务校验失败 / 500 内部错误。
 

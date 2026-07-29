@@ -77,6 +77,24 @@ def get_product(
     return product
 
 
+@router.get("/{code}", response_model=ProductResponse)
+def get_product_auto_market(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """不带 market 的产品详情（#83）：唯一市场自动补全；
+    LOF 一码多市场抛 MARKET_AMBIGUOUS，交全局 BusinessError handler 返回 422。"""
+    _, market = product_service.resolve_product_market(db, code)
+    product = db.query(Product).filter(
+        Product.code == code,
+        Product.market == market
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product
+
+
 @router.put("/{code}/{market}", response_model=ProductResponse)
 def update_product(
     code: str,

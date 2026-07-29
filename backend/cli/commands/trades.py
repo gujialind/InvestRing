@@ -37,7 +37,7 @@ def list_trades(
 def create_trade(
     portfolio_code: str = typer.Option(..., "--portfolio-code"),
     product_code: str = typer.Option(..., "--product-code"),
-    market: str = typer.Option(..., "--market"),
+    market: Optional[str] = typer.Option(None, "--market", help="市场类型（省略时自动解析；LOF 多市场须显式指定）"),
     trade_type: str = typer.Option(..., "--type", help="buy/sell"),
     actual_amount: Optional[float] = typer.Option(None, "--actual-amount"),
     fee: float = typer.Option(0.0, "--fee"),
@@ -50,7 +50,12 @@ def create_trade(
         False, "--allow-duplicate", help="强制创建与既有 pending/confirmed 交易同参数的重复交易"
     ),
 ):
-    """创建买入/卖出交易（校验/配对 CASH 腿由服务层统一处理）"""
+    """创建买入/卖出交易（校验/配对 CASH 腿由服务层统一处理）
+
+    \b
+    示例:
+      ir trade create --portfolio-code PORT001 --product-code 022959.OF --type buy --actual-amount 10000 --trade-date 2026-06-05 --platform-code ALIPAY
+    """
     with cli_context() as db:
         from app.services.trade_service import create_trade as create_trade_service
 

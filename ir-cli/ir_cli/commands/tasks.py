@@ -20,6 +20,14 @@ def list_tasks(
     run_list(client, "/api/system/tasks", page=page, page_size=page_size, all_pages=all_pages, fields=fields)
 
 
+@app.command("describe")
+def describe(code: str = typer.Argument(..., help="任务代码")):
+    """查看任务详情（含作用说明与最近一次执行记录）"""
+    client = APIClient.from_config()
+    result = client.get(f"/api/system/tasks/{code}")
+    success(data=result["data"])
+
+
 @app.command("run")
 def run(code: str = typer.Argument(..., help="任务代码")):
     """手动执行任务"""

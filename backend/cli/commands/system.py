@@ -10,6 +10,63 @@ from cli.utils import serialize_model, paginate, pagination_meta, parse_date
 
 app = typer.Typer(no_args_is_help=True)
 
+# 交易日查询嵌套子命令组：ir system trading-day next|prev|is-open
+td_app = typer.Typer(no_args_is_help=True)
+app.add_typer(td_app, name="trading-day", help="交易日查询")
+
+
+@td_app.command("next")
+def trading_day_next(
+    from_date: str = typer.Option(..., "--from-date", help="起始日期(YYYY-MM-DD)"),
+    days: int = typer.Option(1, "--days", min=1, max=365, help="向后第 N 个交易日"),
+):
+    """查询起始日期之后第 N 个交易日"""
+    with cli_context() as db:
+        from app.services import trading_utils
+        from app.services.exceptions import BusinessError
+
+        d = parse_date(from_date)
+        result = trading_utils.get_next_trading_day(db, d, days)
+        # days>=1 时成功结果必严格晚于 from_date；等于 from_date 说明日历数据缺失
+        if result is None or result == d:
+            raise BusinessError("CALENDAR_NOT_SYNCED", "交易日历数据缺失，请先同步交易日历")
+        success(data={"from_date": d, "trading_day": result})
+
+
+@td_app.command("prev")
+def trading_day_prev(
+    from_date: str = typer.Option(..., "--from-date", help="起始日期(YYYY-MM-DD)"),
+    days: int = typer.Option(1, "--days", min=1, max=365, help="向前第 N 个交易日"),
+):
+    """查询起始日期之前第 N 个交易日"""
+    with cli_context() as db:
+        from app.services import trading_utils
+        from app.services.exceptions import BusinessError
+
+        d = parse_date(from_date)
+        result = trading_utils.get_prev_trading_day(db, d, days)
+        if result is None or result == d:
+            raise BusinessError("CALENDAR_NOT_SYNCED", "交易日历数据缺失，请先同步交易日历")
+        success(data={"from_date": d, "trading_day": result})
+
+
+@td_app.command("is-open")
+def trading_day_is_open(
+    date: str = typer.Argument(..., help="查询日期(YYYY-MM-DD)"),
+):
+    """查询指定日期是否为交易日"""
+    with cli_context() as db:
+        from app.models.trading_calendar import TradingCalendar
+        from app.services import trading_utils
+        from app.services.exceptions import BusinessError
+
+        d = parse_date(date)
+        # 区分“非交易日”与“日历未同步”：无该日期记录视为日历数据缺失
+        exists = db.query(TradingCalendar).filter(TradingCalendar.calendar_date == d).first()
+        if exists is None:
+            raise BusinessError("CALENDAR_NOT_SYNCED", "交易日历数据缺失，请先同步交易日历")
+        success(data={"date": d, "is_open": trading_utils.is_trading_day(db, d)})
+
 
 @app.command("calendar")
 def get_calendar(
