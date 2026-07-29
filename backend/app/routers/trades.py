@@ -218,8 +218,8 @@ def update_trade(
         )
 
     update_data = trade.dict(exclude_unset=True)
-    # 记录是否改动与配对同步相关的字段（confirm_date 不开放直改，见 TradeUpdate）
-    sync_fields = {"status", "trade_date"}
+    # 记录是否改动与配对同步相关的字段（status/confirm_date 不开放直改，见 TradeUpdate）
+    sync_fields = {"trade_date"}
     needs_sync = bool(update_data.keys() & sync_fields)
 
     for field, value in update_data.items():

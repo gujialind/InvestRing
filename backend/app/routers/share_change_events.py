@@ -12,6 +12,7 @@ from app.schemas.share_change_event import (
 from app.dependencies import get_current_user, get_current_admin
 from app.services.share_change_event_service import (
     create_share_change_event as create_event_service,
+    update_share_change_event as update_event_service,
     confirm_share_change_event as confirm_event_service,
     cancel_share_change_event as cancel_event_service,
     unconfirm_share_change_event as unconfirm_event_service,
@@ -153,8 +154,8 @@ def update_share_change_event(
     if not db_event:
         raise HTTPException(status_code=404, detail="Share change event not found")
 
-    for field, value in event.dict(exclude_unset=True).items():
-        setattr(db_event, field, value)
+    # confirmed 阻断、日期重校验均在 service 单点实现（REST/CLI 共用）
+    update_event_service(db, db_event, event.dict(exclude_unset=True))
 
     db.commit()
     db.refresh(db_event)

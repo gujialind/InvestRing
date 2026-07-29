@@ -435,6 +435,68 @@ class TestUpdateDeletePairedSync:
             Trade.transfer_group == tg, Trade.id != trade_id
         ).first()
         assert cash_leg.confirm_date == date(2025, 10, 8)
+        # CASH 腿 trade_date 随基金腿同步（组内不变量）
+        assert cash_leg.trade_date == date(2025, 10, 8)
+
+        # 改日期后 confirm → unconfirm，CASH 腿确认日按新 trade_date 重算，与基金腿一致
+        conf = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
+        assert conf.status_code == 200
+        unconf = client.post(f"/api/trades/{trade_id}/unconfirm", headers=admin_headers)
+        assert unconf.status_code == 200
+        test_db.expire_all()
+        fund_leg = test_db.query(Trade).get(trade_id)
+        cash_leg = test_db.query(Trade).filter(
+            Trade.transfer_group == tg, Trade.id != trade_id
+        ).first()
+        assert fund_leg.status == "pending" and cash_leg.status == "pending"
+        assert cash_leg.trade_date == date(2025, 10, 8)
+        assert cash_leg.confirm_date == fund_leg.confirm_date == date(2025, 10, 8)
+
+    def test_update_trade_status_field_ignored(self, client, admin_headers, test_db):
+        """PUT 传 status 被忽略（状态流转只走 confirm/cancel/unconfirm 端点）"""
+        create_portfolio(test_db, code="UPD_P2", status="active")
+        create_product(test_db, code="ETF_UPD2", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       confirm_days=0)
+        create_platform(test_db, code="UPD_PLAT2")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        create_trade(
+            test_db, "UPD_P2", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="UPD_PLAT2", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "UPD_P2",
+                "product_code": "ETF_UPD2",
+                "market": "CN_EXCHANGE",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "price": 1.5,
+                "platform_code": "UPD_PLAT2",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        trade_id = resp.json()["id"]
+
+        upd = client.put(
+            f"/api/trades/{trade_id}",
+            json={"status": "confirmed"},
+            headers=admin_headers,
+        )
+        assert upd.status_code == 200
+        test_db.expire_all()
+        fund_leg = test_db.query(Trade).get(trade_id)
+        cash_leg = test_db.query(Trade).filter(
+            Trade.transfer_group == fund_leg.transfer_group,
+            Trade.id != trade_id,
+        ).first()
+        # status 字段被 schema 忽略，两腿均保持 pending
+        assert fund_leg.status == "pending"
+        assert cash_leg.status == "pending"
 
     def test_delete_trade_cascades_cash_leg(self, client, admin_headers, test_db):
         """delete 主腿时级联删除配对 CASH 腿"""
