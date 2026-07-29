@@ -23,7 +23,12 @@ def create_cash_transfer(
     cross_day: bool = typer.Option(False, "--cross-day", help="跨天到账（T+1确认）"),
     notes: Optional[str] = typer.Option(None, "--notes"),
 ):
-    """创建平台间现金转移（对称状态模型由服务层统一处理）"""
+    """创建平台间现金转移（对称状态模型由服务层统一处理）
+
+    \b
+    示例:
+      ir cash-transfer create --portfolio-code PORT001 --from ALIPAY --to CITIC --amount 5000 --date 2026-06-05
+    """
     with cli_context() as db:
         from app.services.cash_transfer_service import (
             create_cash_transfer as create_transfer_service,

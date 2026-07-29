@@ -19,7 +19,12 @@ def create(
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
-    """创建平台间现金转移"""
+    """创建平台间现金转移
+
+    \b
+    示例:
+      ir cash-transfer create --portfolio-code PORT001 --from ALIPAY --to CITIC --amount 5000 --date 2026-06-05
+    """
     client = APIClient.from_config()
     body = resolve_body(
         json_body,

@@ -49,7 +49,12 @@ def create(
     auto_confirm: bool = typer.Option(False, "--confirm", help="创建成功后立即确认（快捷组合）"),
     quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
 ):
-    """创建申赎申请（--confirm 可链式创建+确认）"""
+    """创建申赎申请（--confirm 可链式创建+确认）
+
+    \b
+    示例:
+      ir sub create --portfolio-code PORT001 --investor-code INV001 --type subscribe --amount 10000 --apply-date 2026-06-05 --platform-code ALIPAY
+    """
     client = APIClient.from_config()
     body = resolve_body(
         json_body,

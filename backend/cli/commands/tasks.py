@@ -29,6 +29,31 @@ def list_tasks(
         )
 
 
+@app.command("describe")
+def describe_task(
+    code: str = typer.Argument(...),
+):
+    """查看任务详情（含作用说明与最近一次执行记录）"""
+    with cli_context() as db:
+        from app.models.scheduled_task import ScheduledTask
+        from app.models.task_execution_log import TaskExecutionLog
+
+        task = db.query(ScheduledTask).filter(ScheduledTask.code == code).first()
+        if not task:
+            error("NOT_FOUND", f"任务 {code} 不存在")
+
+        last_execution = (
+            db.query(TaskExecutionLog)
+            .filter(TaskExecutionLog.task_code == code)
+            .order_by(TaskExecutionLog.created_at.desc(), TaskExecutionLog.id.desc())
+            .first()
+        )
+
+        data = serialize_model(task)
+        data["last_execution"] = serialize_model(last_execution) if last_execution else None
+        success(data=data)
+
+
 @app.command("run")
 def run_task(
     code: str = typer.Argument(...),

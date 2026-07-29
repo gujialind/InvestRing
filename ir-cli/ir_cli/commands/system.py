@@ -7,8 +7,44 @@ from ir_cli.output import success
 
 app = typer.Typer(no_args_is_help=True)
 
+# 交易日查询嵌套子命令组：ir system trading-day next|prev|is-open
+td_app = typer.Typer(no_args_is_help=True)
+app.add_typer(td_app, name="trading-day", help="交易日查询")
+
 # 整年日历基本不变，本地缓存 7 天，calendar-sync 后自动失效
 CALENDAR_CACHE_TTL = 7 * 86400
+
+
+@td_app.command("next")
+def trading_day_next(
+    from_date: str = typer.Option(..., "--from-date", help="起始日期(YYYY-MM-DD)"),
+    days: int = typer.Option(1, "--days", help="向后第 N 个交易日"),
+):
+    """查询起始日期之后第 N 个交易日"""
+    client = APIClient.from_config()
+    result = client.get("/api/trading-calendar/next", params={"from_date": from_date, "days": days})
+    success(data=result["data"])
+
+
+@td_app.command("prev")
+def trading_day_prev(
+    from_date: str = typer.Option(..., "--from-date", help="起始日期(YYYY-MM-DD)"),
+    days: int = typer.Option(1, "--days", help="向前第 N 个交易日"),
+):
+    """查询起始日期之前第 N 个交易日"""
+    client = APIClient.from_config()
+    result = client.get("/api/trading-calendar/prev", params={"from_date": from_date, "days": days})
+    success(data=result["data"])
+
+
+@td_app.command("is-open")
+def trading_day_is_open(
+    date: str = typer.Argument(..., help="查询日期(YYYY-MM-DD)"),
+):
+    """查询指定日期是否为交易日"""
+    client = APIClient.from_config()
+    result = client.get("/api/trading-calendar/is-open", params={"date": date})
+    success(data=result["data"])
 
 
 @app.command("calendar")

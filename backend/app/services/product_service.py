@@ -26,6 +26,36 @@ def calculate_confirm_days(market: Optional[str], is_qdii: bool) -> int:
     return 1
 
 
+def resolve_product_market(
+    db: Session, product_code: str, market: Optional[str] = None
+) -> tuple:
+    """解析产品市场（issue #83，单一实现，供 trade/product 各入口复用）：
+    - market 非空：原样返回 (product_code, market)
+    - 省略且该 code 仅存在一个市场：自动补全
+    - 省略且存在多个市场（LOF 一码多市场）：抛 MARKET_AMBIGUOUS（422）
+    - code 不存在：抛 PRODUCT_NOT_FOUND（404）
+    """
+    if market:
+        return product_code, market
+    markets = sorted(
+        row[0] or ""
+        for row in db.query(Product.market).filter(Product.code == product_code).all()
+    )
+    if not markets:
+        raise NotFoundError(
+            "PRODUCT_NOT_FOUND",
+            f"产品 {product_code} 不存在",
+            details={"product_code": product_code},
+        )
+    if len(markets) > 1:
+        raise BusinessError(
+            "MARKET_AMBIGUOUS",
+            f"产品 {product_code} 存在多个市场，请指定 market",
+            details={"product_code": product_code, "available_markets": markets},
+        )
+    return product_code, markets[0]
+
+
 def create_product(
     db: Session,
     *,

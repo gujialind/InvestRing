@@ -59,7 +59,7 @@ WORKFLOWS = {
     },
     "调仓买入/卖出": {
         "steps": [
-            "ir position available-cash <code>（买入前）/ ir position available-shares <code> <product>（卖出前）",
+            "ir position available-cash --portfolio-code X（买入前）/ ir position available-shares --portfolio-code X --product-code F（卖出前）",
             "ir trade create --portfolio-code X --product-code F --type buy|sell --trade-date D --actual-amount N [--price P 场内必填]",
             "ir trade confirm <id>（到 confirm_date 当日执行，场外需 T 日净值已同步）",
             "ir snapshot generate --portfolio-code X --target-date <confirm_date>",
@@ -78,6 +78,7 @@ WORKFLOWS = {
     "快照回退重算": {
         "steps": [
             "ir snapshot status <code>（确认当前快照范围）",
+            "ir snapshot delete-bulk <code> <from_date> --dry-run（先预览将删除的快照日期）",
             "ir snapshot delete-bulk <code> <from_date> --yes",
             "修改/补录相关记录",
             "ir snapshot recalculate --start-date <from_date> --end-date <最新交易日> --portfolio-code <code>",
@@ -100,6 +101,35 @@ WORKFLOWS = {
             "ir snapshot generate --target-date <ex_date>",
         ],
         "notes": "ex_date > entitlement_date 且均为交易日；基金级事件（拆分/合并/送股）不传 platform_code，平台级（分红等）必传",
+    },
+    "快照追平": {
+        "steps": [
+            "ir snapshot status <code>（查看最新快照日与落后天数）",
+            "ir snapshot catch-up --portfolio-code X --to-date <目标日>（批量逐日追平）或 ir snapshot generate-next --portfolio-code X（只推进一个交易日）",
+        ],
+        "notes": "catch-up 从最新快照日的次一交易日逐日生成到 to_date；组合无任何快照时报 NO_SNAPSHOT_BASELINE，先用 snapshot generate 建首日基线",
+    },
+    "交易日查询": {
+        "steps": [
+            "ir system trading-day is-open <date>（判断是否交易日）",
+            "ir system trading-day next --from-date D [--days N] / prev --from-date D [--days N]（推算前后第 N 个交易日）",
+        ],
+        "notes": "用于确定 apply_date/trade_date/confirm_date；年份日历缺失报 CALENDAR_NOT_SYNCED，先 ir system calendar-sync --year <year>",
+    },
+    "任务诊断": {
+        "steps": [
+            "ir task list（总览各任务启用状态与最近运行结果）",
+            "ir task describe <code>（单任务详情：cron/最近执行/失败原因）",
+            "ir task logs <code>（分页执行日志）",
+        ],
+        "notes": "nav_sync 失败会导致净值与快照中断，排查后可 ir task run <code> 手动补跑",
+    },
+    "LOF市场歧义处理": {
+        "steps": [
+            "ir product get <code> 或 ir trade create 不带 --market（一码一市场时自动解析）",
+            "报 MARKET_AMBIGUOUS 时，从 error.details.available_markets 选择并显式加 --market 重试",
+        ],
+        "notes": "LOF 等一码多市场产品必须显式指定 --market（CN_EX 场内 / CN_OTC 场外），两者净值与确认规则不同",
     },
 }
 

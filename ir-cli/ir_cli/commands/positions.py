@@ -1,11 +1,22 @@
 """持仓管理命令组"""
+import sys
 import typer
 from typing import Optional
 from ir_cli.client import APIClient
-from ir_cli.output import success
+from ir_cli.output import error, success
 from ir_cli.utils import SUMMARY_FIELDS, build_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
+
+
+def _resolve_required(option_value: Optional[str], arg_value: Optional[str], flag: str) -> str:
+    """option 优先；位置参数已弃用（issue #81），仅向 stderr 告警避免污染 stdout JSON"""
+    if option_value is not None:
+        return option_value
+    if arg_value is not None:
+        print(f"[warning] 位置参数已弃用，请改用 {flag} 选项", file=sys.stderr)
+        return arg_value
+    error("VALIDATION_ERROR", f"缺少 {flag}")
 
 
 @app.command("list")
@@ -38,27 +49,33 @@ def get(id: int = typer.Argument(..., help="持仓ID")):
 
 @app.command("available-cash")
 def available_cash(
-    portfolio_code: str = typer.Argument(..., help="组合代码"),
+    portfolio_code_arg: Optional[str] = typer.Argument(None, metavar="[PORTFOLIO_CODE]", help="[deprecated] 请改用 --portfolio-code"),
+    portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码"),
 ):
     """获取组合可用现金（实时）"""
+    code = _resolve_required(portfolio_code, portfolio_code_arg, "--portfolio-code")
     client = APIClient.from_config()
-    result = client.get(f"/api/positions/portfolio/{portfolio_code}/available-cash")
+    result = client.get(f"/api/positions/portfolio/{code}/available-cash")
     success(data=result["data"])
 
 
 @app.command("available-shares")
 def available_shares(
-    portfolio_code: str = typer.Argument(..., help="组合代码"),
-    product_code: str = typer.Argument(..., help="产品代码"),
+    portfolio_code_arg: Optional[str] = typer.Argument(None, metavar="[PORTFOLIO_CODE]", help="[deprecated] 请改用 --portfolio-code"),
+    product_code_arg: Optional[str] = typer.Argument(None, metavar="[PRODUCT_CODE]", help="[deprecated] 请改用 --product-code"),
+    portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码"),
+    product_code: Optional[str] = typer.Option(None, "--product-code", help="产品代码"),
     market: Optional[str] = typer.Option(None, "--market", help="市场类型"),
 ):
     """获取基金可用份额（实时）"""
+    pf_code = _resolve_required(portfolio_code, portfolio_code_arg, "--portfolio-code")
+    prod_code = _resolve_required(product_code, product_code_arg, "--product-code")
     client = APIClient.from_config()
     params = {}
     if market is not None:
         params["market"] = market
     result = client.get(
-        f"/api/positions/portfolio/{portfolio_code}/product/{product_code}/available-shares",
+        f"/api/positions/portfolio/{pf_code}/product/{prod_code}/available-shares",
         params=params,
     )
     success(data=result["data"])

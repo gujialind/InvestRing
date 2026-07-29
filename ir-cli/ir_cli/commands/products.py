@@ -61,11 +61,12 @@ def create(
 @app.command("get")
 def get(
     code: str = typer.Argument(..., help="产品代码"),
-    market: str = typer.Argument(..., help="市场类型"),
+    market: Optional[str] = typer.Argument(None, help="市场类型（省略时自动解析；LOF 多市场须显式指定）"),
 ):
     """获取产品详情"""
     client = APIClient.from_config()
-    result = client.get(f"/api/products/{code}/{market}")
+    path = f"/api/products/{code}/{market}" if market else f"/api/products/{code}"
+    result = client.get(path)
     success(data=result["data"])
 
 

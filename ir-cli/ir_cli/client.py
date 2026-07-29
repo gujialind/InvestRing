@@ -88,6 +88,8 @@ class APIClient:
             }.get(resp.status_code, "SERVER_ERROR" if resp.status_code >= 500 else "HTTP_ERROR")
             code = self._extract_error_code(resp, default_code)
             detail = self._extract_detail(resp)
+            # 合并后端结构化 details，供 get_hint 动态插值就近提示（issue #86）
+            merged_details = {**self._extract_details(resp), "http_status": resp.status_code}
             # 后端无结构化 message 时使用友好提示兜底
             if detail.startswith(f"HTTP {resp.status_code}"):
                 fallback = {
@@ -97,11 +99,11 @@ class APIClient:
                 if fallback:
                     detail = fallback
             if raise_errors:
-                raise ApiError(code, detail, {"http_status": resp.status_code})
+                raise ApiError(code, detail, merged_details)
             error(
                 code,
                 detail,
-                details={"http_status": resp.status_code},
+                details=merged_details,
                 exit_code=EXIT_AUTH if resp.status_code == 401 else 1,
             )
 
@@ -140,6 +142,17 @@ class APIClient:
             return str(detail) if detail else f"HTTP {resp.status_code}"
         except Exception:
             return f"HTTP {resp.status_code}: {resp.text[:200]}"
+
+    def _extract_details(self, resp: httpx.Response) -> dict:
+        """从错误响应中提取后端结构化详情（detail.details），缺失时返回空 dict"""
+        try:
+            body = resp.json()
+            detail = body.get("detail", {})
+            if isinstance(detail, dict) and isinstance(detail.get("details"), dict):
+                return detail["details"]
+        except Exception:
+            pass
+        return {}
 
     def _extract_error_code(self, resp: httpx.Response, default: str) -> str:
         """从错误响应中提取后端结构化业务错误码（detail.error），缺失时用默认码"""

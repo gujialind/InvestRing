@@ -48,7 +48,12 @@ def create_subscription(
     apply_date: str = typer.Option(..., "--apply-date", help="YYYY-MM-DD"),
     notes: Optional[str] = typer.Option(None, "--notes"),
 ):
-    """创建申购/赎回（校验由服务层统一处理）"""
+    """创建申购/赎回（校验由服务层统一处理）
+
+    \b
+    示例:
+      ir sub create --portfolio-code PORT001 --investor-code INV001 --type subscribe --amount 10000 --apply-date 2026-06-05 --platform-code ALIPAY
+    """
     with cli_context() as db:
         from app.services.subscription_service import create_subscription as create_subscription_service
 

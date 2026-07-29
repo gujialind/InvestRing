@@ -4,17 +4,24 @@
 后端业务错误码是稳定契约（见 AGENTS.md 附录 D），此表将常见错误码映射为
 下一步可直接执行的 ir 命令或操作指引，随错误 JSON 一并输出（error.hints），
 帮助 AI agent 一次失败即收敛到正确路径，无需反复试错。
+
+get_hint() 在静态表基础上按 error.details 动态插值（issue #86）：
+如 MARKET_AMBIGUOUS 直接列出可选市场、INSUFFICIENT_SHARES 直接给出当前
+可用份额，让提示"就近"贴合本次失败的具体上下文。
 """
+from typing import Optional
 
 ERROR_HINTS: dict = {
     "DATE_BEFORE_SNAPSHOT": "日期须晚于最新快照日，用 ir snapshot status <portfolio_code> 查询最新快照日",
     "SNAPSHOT_DEPENDENCY": "记录已被快照纳入，先删除确认日及之后快照: ir snapshot delete-bulk <portfolio_code> <date> --yes，操作完成后需重新生成/重算快照",
-    "SNAPSHOT_NOT_CONTINUOUS": "目标日须为最新快照日或其下一交易日，用 ir snapshot status <portfolio_code> 查询后按交易日顺序逐日生成",
-    "NAV_NOT_AVAILABLE": "申请日组合净值快照缺失: ir snapshot status <portfolio_code> 查询最新快照日后，用 ir snapshot generate 按交易日顺序逐日生成至申请日",
+    "SNAPSHOT_NOT_CONTINUOUS": "目标日须为最新快照日或其下一交易日，用 ir snapshot status <portfolio_code> 查询最新快照日后，执行 ir snapshot catch-up --portfolio-code <code> --to-date <date> 逐交易日追平",
+    "NAV_NOT_AVAILABLE": "申请日组合净值快照缺失: ir snapshot status <portfolio_code> 查询最新快照日后，用 ir snapshot catch-up --portfolio-code <code> --to-date <申请日> 追平至申请日",
+    "NO_SNAPSHOT_BASELINE": "组合尚无任何快照基线，先生成首日快照: ir snapshot generate --portfolio-code <code> --target-date <首个交易日>",
     "NON_TRADING_DAY": "仅交易日可操作: ir system calendar 查询交易日历",
-    "INSUFFICIENT_CASH": "ir position available-cash <portfolio_code> 查询实时可用现金；pending 卖出不增加可用现金，须先卖出确认后再买入；现金在其他平台时先转入对应平台: ir cash-transfer create",
+    "CALENDAR_NOT_SYNCED": "交易日历未同步: ir system calendar-sync --year <year> 同步后重试",
+    "INSUFFICIENT_CASH": "ir position available-cash --portfolio-code <code> 查询实时可用现金；pending 卖出不增加可用现金，须先卖出确认后再买入；现金在其他平台时先转入对应平台: ir cash-transfer create",
     "DUPLICATE_TRADE": "疑似重复交易（details.existing_trade_id 为已存在记录），先 ir trade list --portfolio-code <code> 核查；确需重复录入时加 --allow-duplicate 重发",
-    "INSUFFICIENT_SHARES": "ir position available-shares <portfolio_code> <product_code> 查询实时可用份额",
+    "INSUFFICIENT_SHARES": "ir position available-shares --portfolio-code <code> --product-code <product_code> 查询实时可用份额",
     "CANNOT_MODIFY_CONFIRMED": "confirmed 记录不可直接修改，先执行 unconfirm 回退至 pending",
     "CANNOT_DELETE_CONFIRMED": "confirmed 记录不可直接删除，先执行 unconfirm 回退至 pending",
     "PENDING_TRANSACTIONS_EXIST": "存在 pending 申赎/交易，先逐笔 confirm 或 cancel 后重试",
@@ -28,4 +35,30 @@ ERROR_HINTS: dict = {
     "PLATFORM_NOT_COVERED": "平台级事件未覆盖全部有持仓平台，补录其余平台事件，或传 --force-cover 降级为 warning",
     "CANNOT_UNCONFIRM_CHILD": "基金级事件的子记录不可单独 unconfirm，请对父事件执行 unconfirm",
     "AUTH_REQUIRED": "执行 ir auth login 登录后重试",
+    "NOT_FOUND": "检查资源标识拼写；产品类先用 ir product list 查询可用产品代码与市场",
+    "PRODUCT_NOT_FOUND": "检查产品代码与市场，如 --product-code 022959.OF --market CN_OTC，用 ir product list 查询可用产品",
+    "MARKET_AMBIGUOUS": "产品存在多个市场，请指定 --market；用 ir product list 查询产品可用市场",
+    "CONFIRM_REQUIRED": "不可逆操作需 --yes 确认，可先加 --dry-run 预览影响范围",
 }
+
+
+def get_hint(code: str, details: Optional[dict] = None) -> Optional[str]:
+    """按 code+details 动态生成就近提示，无匹配动态规则时回退静态表（issue #86）"""
+    details = details or {}
+    if code == "MARKET_AMBIGUOUS":
+        markets = details.get("available_markets")
+        if markets:
+            return f"产品存在多个市场，请指定 --market，可选: {', '.join(markets)}"
+    if code in ("PRODUCT_NOT_FOUND", "NOT_FOUND"):
+        markets = details.get("available_markets")
+        if markets:
+            product = details.get("product_code") or "<product_code>"
+            return f"产品 {product} 在指定市场不存在，可选市场: {', '.join(markets)}，请改用 --market 指定"
+    if code == "INSUFFICIENT_SHARES":
+        shares = details.get("available_shares")
+        if shares is not None:
+            return (
+                f"当前可用份额为 {shares}，请调低份额后重试；"
+                "实时查询: ir position available-shares --portfolio-code <code> --product-code <product_code>"
+            )
+    return ERROR_HINTS.get(code)

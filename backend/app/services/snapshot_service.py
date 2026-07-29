@@ -3,6 +3,11 @@
 
 提供组合快照的生成、重算和校验功能。
 三张快照表按固定顺序生成：portfolio_position → portfolio_value_snapshot → investor_holding
+
+注意：catch_up_snapshots / generate_next_snapshot 属编排层函数（issue #84），
+采用逐日 checkpoint commit/rollback，是 AGENTS.md §4.1「service 不 commit」
+的编排层例外（与 task_runner._generate_snapshots_for_date 语义一致）：
+多日回补中已完成的日子须保留，失败日仅回滚当日。
 """
 import logging
 from datetime import date, datetime, timedelta
@@ -17,8 +22,12 @@ from app.models import (
     Trade, Subscription, ShareChangeEvent, PriceRecord, Product,
     TradingCalendar, Investor, AssetClassification
 )
-from app.services.trading_utils import is_trading_day as _trading_utils_is_trading_day, get_next_trading_day
-from app.services.exceptions import BusinessError
+from app.services.trading_utils import (
+    is_trading_day as _trading_utils_is_trading_day,
+    get_next_trading_day,
+    get_latest_snapshot_date,
+)
+from app.services.exceptions import BusinessError, NotFoundError
 from app.services.subscription_service import unconfirm_single_subscription
 from app.models.manual_market_value import ManualMarketValue
 from app.utils.quantize import quantize_shares
@@ -287,6 +296,145 @@ def recalculate_snapshots(
         "success": True,
         "message": f"重算完成，共处理{len(portfolios)}个组合",
         "results": results
+    }
+
+
+def catch_up_snapshots(
+    db: Session,
+    portfolio_code: str,
+    to_date: date,
+) -> Dict[str, Any]:
+    """
+    从最新快照日的下一交易日起，逐交易日追平快照至 to_date（含）。
+
+    每日 generate_daily_snapshots + auto_confirm_after_snapshot + commit
+    （编排层 checkpoint，AGENTS.md §4.1 例外）；单日失败 rollback 当日并停止，
+    已成功的日子保留，结果附 failed_date 与 error。
+
+    Raises:
+        NotFoundError: PORTFOLIO_NOT_FOUND——组合不存在
+        BusinessError: NO_SNAPSHOT_BASELINE——组合尚无快照基线；
+            CALENDAR_NOT_SYNCED——交易日历缺少最新快照日之后的交易日
+    """
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise NotFoundError(
+            code="PORTFOLIO_NOT_FOUND", message=f"组合 {portfolio_code} 不存在"
+        )
+
+    latest = get_latest_snapshot_date(db, portfolio_code)
+    if latest is None:
+        raise BusinessError(
+            code="NO_SNAPSHOT_BASELINE",
+            message="组合尚无快照基线，请先用 snapshot generate 生成首日快照",
+        )
+
+    # 幂等：已追平（或 to_date 早于最新快照日）直接返回，零副作用
+    if latest >= to_date:
+        return {
+            "portfolio_code": portfolio_code,
+            "to_date": to_date.isoformat(),
+            "generated_count": 0,
+            "generated_dates": [],
+            "latest_snapshot_date": latest.isoformat(),
+            "message": "已追平",
+        }
+
+    result: Dict[str, Any] = {
+        "portfolio_code": portfolio_code,
+        "to_date": to_date.isoformat(),
+        "generated_count": 0,
+        "generated_dates": [],
+    }
+
+    current = get_next_trading_day(db, latest, days=1)
+    # get_next_trading_day 日历耗尽时回退返回 from_date 本身
+    if not current or current <= latest:
+        raise BusinessError(
+            code="CALENDAR_NOT_SYNCED",
+            message=f"交易日历中找不到 {latest} 之后的交易日，请先同步交易日历",
+        )
+
+    while current and current <= to_date:
+        try:
+            generate_daily_snapshots(db, portfolio_code, current)
+            auto_confirm_after_snapshot(db, portfolio_code, current)
+            # 逐日 checkpoint commit：已完成日立即落库
+            db.commit()
+            result["generated_dates"].append(current.isoformat())
+            result["generated_count"] += 1
+        except Exception as e:
+            db.rollback()
+            result["failed_date"] = current.isoformat()
+            result["error"] = str(e)
+            logger.error(
+                f"追平快照失败: portfolio={portfolio_code}, date={current}, error={str(e)}"
+            )
+            break
+        # 防死循环：日历耗尽时 get_next_trading_day 返回 None 或 current 本身
+        nxt = get_next_trading_day(db, current, days=1)
+        if not nxt or nxt == current:
+            break
+        current = nxt
+
+    final_latest = get_latest_snapshot_date(db, portfolio_code)
+    result["latest_snapshot_date"] = final_latest.isoformat() if final_latest else None
+    if "failed_date" in result:
+        result["message"] = (
+            f"追平中断于 {result['failed_date']}，已生成 {result['generated_count']} 日快照"
+        )
+    else:
+        result["message"] = f"追平完成，共生成 {result['generated_count']} 日快照"
+    return result
+
+
+def generate_next_snapshot(
+    db: Session,
+    portfolio_code: str,
+) -> Dict[str, Any]:
+    """
+    生成最新快照日的下一个交易日快照（单日顺延）。
+
+    生成 + auto_confirm 后即 commit（编排层 checkpoint，AGENTS.md §4.1 例外）。
+
+    Raises:
+        NotFoundError: PORTFOLIO_NOT_FOUND——组合不存在
+        BusinessError: NO_SNAPSHOT_BASELINE——组合尚无快照基线；
+            CALENDAR_NOT_SYNCED——交易日历缺少最新快照日之后的交易日
+    """
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise NotFoundError(
+            code="PORTFOLIO_NOT_FOUND", message=f"组合 {portfolio_code} 不存在"
+        )
+
+    latest = get_latest_snapshot_date(db, portfolio_code)
+    if latest is None:
+        raise BusinessError(
+            code="NO_SNAPSHOT_BASELINE",
+            message="组合尚无快照基线，请先用 snapshot generate 生成首日快照",
+        )
+
+    next_day = get_next_trading_day(db, latest, days=1)
+    if not next_day or next_day <= latest:
+        raise BusinessError(
+            code="CALENDAR_NOT_SYNCED",
+            message=f"交易日历中找不到 {latest} 之后的交易日，请先同步交易日历",
+        )
+
+    gen_result = generate_daily_snapshots(db, portfolio_code, next_day)
+    auto_confirm_after_snapshot(db, portfolio_code, next_day)
+    db.commit()
+
+    return {
+        "success": True,
+        "message": gen_result["message"],
+        "portfolio_code": portfolio_code,
+        "generated_date": next_day.isoformat(),
+        "total_value": gen_result["total_value"],
+        "total_shares": gen_result["total_shares"],
+        "unit_price": gen_result["unit_price"],
+        "warnings": gen_result.get("warnings"),
     }
 
 

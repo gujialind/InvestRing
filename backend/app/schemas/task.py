@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
 
@@ -34,6 +34,23 @@ class TaskExecutionLogResponse(BaseModel):
     error_message: Optional[str] = None
     error_stack: Optional[str] = None
     created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PaginatedTaskLogResponse(BaseModel):
+    items: List[TaskExecutionLogResponse]
+    total: int
+    page: int
+    page_size: int
+
+    class Config:
+        from_attributes = True
+
+
+class TaskDetailResponse(TaskResponse):
+    last_execution: Optional[TaskExecutionLogResponse] = None
 
     class Config:
         from_attributes = True

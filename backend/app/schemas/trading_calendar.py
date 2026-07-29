@@ -35,3 +35,15 @@ class TradingCalendarSyncResponse(BaseModel):
     synced_count: int
     year: int
     message: str
+
+
+class TradingDayResponse(BaseModel):
+    """交易日偏移查询响应（next/prev）"""
+    from_date: date
+    trading_day: date
+
+
+class TradingDayIsOpenResponse(BaseModel):
+    """是否交易日查询响应"""
+    date: date
+    is_open: bool

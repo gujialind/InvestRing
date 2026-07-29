@@ -86,6 +86,10 @@ ir portfolio create --help   # 查看具体命令的参数帮助
 | `INSUFFICIENT_SHARES` | 卖出/赎回份额超过可用份额 |
 | `NON_TRADING_DAY` | 提交日期不是交易日 |
 | `MISSING_NAV` | 确认时缺少净值数据 |
+| `PRODUCT_NOT_FOUND` | 产品不存在（`details` 含查询的 code/market） |
+| `MARKET_AMBIGUOUS` | 产品代码对应多个市场（如 LOF），需显式指定 market（`details.available_markets` 列出可选市场） |
+| `NO_SNAPSHOT_BASELINE` | 组合无任何快照基线，无法追平/推进（先用 `snapshot generate` 建首日快照） |
+| `CALENDAR_NOT_SYNCED` | 目标年份交易日历未同步（先执行 `system calendar-sync --year <年份>`） |
 | `PENDING_TRANSACTIONS_EXIST` | 存在未处理的交易 |
 | `PORTFOLIO_NOT_ACTIVE` | 组合未激活 |
 | `INVESTOR_HAS_SHARES` | 投资人仍持有份额，不可删除 |
@@ -328,16 +332,20 @@ ir position list --portfolio-code <组合代码> [--snapshot-date YYYY-MM-DD] [-
 查看组合可用现金（实时计算，非快照数据）。
 
 ```bash
-ir position available-cash <PORTFOLIO_CODE>
+ir position available-cash --portfolio-code <组合代码>
 ```
+
+> 旧版位置参数写法 `ir position available-cash <PORTFOLIO_CODE>` 仍兼容但已弃用，请改用 `--portfolio-code`。
 
 #### `ir position available-shares`
 
 查看产品可用份额（实时计算）。
 
 ```bash
-ir position available-shares <PORTFOLIO_CODE> <PRODUCT_CODE> [--market <市场>]
+ir position available-shares --portfolio-code <组合代码> --product-code <产品代码> [--market <市场>]
 ```
+
+> 旧版位置参数写法 `ir position available-shares <PORTFOLIO_CODE> <PRODUCT_CODE>` 仍兼容但已弃用，请改用 option 风格。
 
 #### `ir position update-cash`
 
@@ -452,12 +460,12 @@ ir trade list [--portfolio-code <组合>] [--page N] [--page-size N] [--all]
 
 ```bash
 # 买入
-ir trade create --portfolio-code <组合> --product-code <产品> --market <市场> \
+ir trade create --portfolio-code <组合> --product-code <产品> [--market <市场>] \
   --type buy --actual-amount <实际金额> --fee <手续费> --price <价格> \
   --trade-date YYYY-MM-DD [--platform-code <平台>] [--shares <份额>] [--notes <备注>]
 
 # 卖出
-ir trade create --portfolio-code <组合> --product-code <产品> --market <市场> \
+ir trade create --portfolio-code <组合> --product-code <产品> [--market <市场>] \
   --type sell --shares <份额> --trade-date YYYY-MM-DD [--actual-amount <实际金额>] \
   [--fee <手续费>] [--platform-code <平台>] [--notes <备注>]
 ```
@@ -466,7 +474,7 @@ ir trade create --portfolio-code <组合> --product-code <产品> --market <市�
 |------|:----:|------|
 | `--portfolio-code` | 是 | 组合代码（必须为 `active` 状态） |
 | `--product-code` | 是 | 产品代码 |
-| `--market` | 是 | 市场类型：`CN_OTC` / `CN_EXCHANGE` / `HK_MUTUAL` |
+| `--market` | 否 | 市场类型：`CN_OTC` / `CN_EXCHANGE` / `HK_MUTUAL`；省略时自动解析，一码多市场（如 LOF）返回 `MARKET_AMBIGUOUS`，需显式指定 |
 | `--type` | 是 | `buy`（买入）或 `sell`（卖出） |
 | `--actual-amount` | 买入时必填 | 实际支付金额（必须 > 0，不超过可用现金） |
 | `--fee` | 否（默认0） | 手续费 |
@@ -761,8 +769,10 @@ ir product create --code <代码> --market <市场> --name <名称> --product-ty
 查看产品详情（复合主键：代码 + 市场）。
 
 ```bash
-ir product get <CODE> <MARKET>
+ir product get <CODE> [MARKET]
 ```
+
+> `MARKET` 可省略：一码一市场时自动解析；一码多市场（如 LOF 同时存在 `CN_EXCHANGE`/`CN_OTC`）返回 `MARKET_AMBIGUOUS`，需显式指定。对应 REST 新增端点 `GET /api/products/{code}`（不带 market）。
 
 #### `ir product update`
 
@@ -854,6 +864,28 @@ ir snapshot recalculate --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--portfol
 | `--end-date` | 截止日期（必填） |
 | `--force` | 跳过校验强制重算 |
 
+#### `ir snapshot catch-up`
+
+快照追平：从最新快照日的次一交易日逐日生成到目标日期。
+
+```bash
+ir snapshot catch-up --portfolio-code <组合> --to-date YYYY-MM-DD
+```
+
+返回 `generated_count`（生成数）、`generated_dates`（升序日期列表）、`latest_snapshot_date`；逐日 checkpoint 语义，失败时已成功的日子已落库，`failed_date`/`error` 标记中断点。
+
+> 组合无任何快照时返回 `NO_SNAPSHOT_BASELINE`，需先用 `ir snapshot generate` 建首日基线。
+
+#### `ir snapshot generate-next`
+
+生成下一交易日快照（只推进一天，日期由服务端自动推算）。
+
+```bash
+ir snapshot generate-next --portfolio-code <组合>
+```
+
+返回 `generated_date`（本次生成日）及 `total_value` / `total_shares` / `unit_price`。
+
 #### `ir snapshot validate`
 
 校验指定日期的快照依赖数据是否齐全。
@@ -888,17 +920,41 @@ ir snapshot delete <PORTFOLIO_CODE> <SNAPSHOT_DATE> [--yes]
 
 ```bash
 ir snapshot delete-bulk <PORTFOLIO_CODE> <FROM_DATE> --yes
+ir snapshot delete-bulk <PORTFOLIO_CODE> <FROM_DATE> --dry-run   # 仅预览，不执行删除
 ```
 
 | 参数 | 默认值 | 说明 |
 |------|:------:|------|
 | `--yes` | false | 必传。不带 `--yes` 时拒绝执行（`CONFIRM_REQUIRED`） |
+| `--dry-run` | false | 仅预览将删除的快照日期列表，不执行删除（无需 `--yes`） |
 
-> **破坏性操作**：逐日 commit，不可中途回滚。对应的 REST 端点 `DELETE /api/v1/snapshots/{portfolio_code}/bulk/{from_date}` 同样要求显式传 `confirm=true`，否则返回 422 `CONFIRM_REQUIRED`（兼作影响面预览）。
+> **破坏性操作**：逐日 commit，不可中途回滚；建议先用 `--dry-run` 预览影响面。对应的 REST 端点 `DELETE /api/v1/snapshots/{portfolio_code}/bulk/{from_date}` 同样支持 `dry_run=true` Query 参数，且真删除时要求显式传 `confirm=true`，否则返回 422 `CONFIRM_REQUIRED`（兼作影响面预览）。
 
 ---
 
 ### 4.12 `ir system` — 系统管理
+
+#### `ir system trading-day` — 交易日查询
+
+嵌套子命令组，推算/判断交易日（对应 REST 端点 `GET /api/trading-calendar/next|prev|is-open`）。
+
+```bash
+# 起始日期之后第 N 个交易日（默认 N=1）
+ir system trading-day next --from-date YYYY-MM-DD [--days N]
+
+# 起始日期之前第 N 个交易日（默认 N=1）
+ir system trading-day prev --from-date YYYY-MM-DD [--days N]
+
+# 判断指定日期是否为交易日
+ir system trading-day is-open <DATE>
+```
+
+| 参数 | 说明 |
+|------|------|
+| `--from-date` | 起始日期（next/prev 必填） |
+| `--days` | 前/后第 N 个交易日，范围 1–365，默认 1 |
+
+> 目标年份日历未同步时返回 `CALENDAR_NOT_SYNCED`，先执行 `ir system calendar-sync --year <年份>`。
 
 #### `ir system calendar`
 
@@ -981,6 +1037,16 @@ ir log error [--page N] [--page-size N]
 ir task list [--page N] [--page-size N]
 ```
 
+#### `ir task describe`
+
+查看单个任务详情（含最近一次执行记录，用于失败诊断）。
+
+```bash
+ir task describe <CODE>
+```
+
+返回任务基本信息（cron 表达式、启用状态、上次/下次运行时间）+ `last_execution`（最近一次执行日志，含耗时、成功/失败记录数、错误信息）。对应 REST 新增端点 `GET /api/system/tasks/{code}`。
+
 #### `ir task run`
 
 手动执行任务。
@@ -1046,7 +1112,7 @@ ir sub create --portfolio-code PORT001 --investor-code INV001 \
 ir sub confirm 1
 
 # 6. 查看可用现金
-ir position available-cash PORT001
+ir position available-cash --portfolio-code PORT001
 
 # 7. 创建买入交易
 ir trade create --portfolio-code PORT001 --product-code 000051.OF --market CN_OTC \

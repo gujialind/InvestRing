@@ -17,6 +17,45 @@ class SnapshotRecalculateRequest(BaseModel):
     end_date: date
 
 
+class SnapshotCatchUpRequest(BaseModel):
+    """快照追平请求（issue #84）"""
+    portfolio_code: str
+    to_date: date
+
+
+class SnapshotGenerateNextRequest(BaseModel):
+    """生成下一交易日快照请求（issue #84）"""
+    portfolio_code: str
+
+
+class SnapshotCatchUpResult(BaseModel):
+    """快照追平结果（issue #84）
+
+    逐日 checkpoint 语义：失败时 generated_dates 中已成功的日子已落库，
+    failed_date/error 标记中断点。
+    """
+    portfolio_code: str
+    to_date: str  # ISO格式
+    generated_count: int
+    generated_dates: List[str]  # ISO格式日期列表（升序）
+    latest_snapshot_date: Optional[str] = None
+    message: Optional[str] = None
+    failed_date: Optional[str] = None
+    error: Optional[str] = None
+
+
+class SnapshotGenerateNextResult(BaseModel):
+    """生成下一交易日快照结果（issue #84）"""
+    success: bool
+    message: str
+    portfolio_code: str
+    generated_date: str  # ISO格式
+    total_value: Optional[float] = None
+    total_shares: Optional[float] = None
+    unit_price: Optional[float] = None
+    warnings: Optional[List[Dict[str, Any]]] = None
+
+
 class ValidationCheckResult(BaseModel):
     """数据校验结果"""
     check_type: str  # "trading_day", "pending_transactions", "price_data", "share_change_events"

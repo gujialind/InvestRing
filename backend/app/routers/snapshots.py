@@ -11,6 +11,10 @@ from app.models import Investor, Portfolio, PortfolioPosition, PortfolioValueSna
 from app.schemas.snapshot import (
     SnapshotGenerateRequest,
     SnapshotRecalculateRequest,
+    SnapshotCatchUpRequest,
+    SnapshotCatchUpResult,
+    SnapshotGenerateNextRequest,
+    SnapshotGenerateNextResult,
     SnapshotValidationResult,
     SnapshotGenerationResult,
     RecalculationResult,
@@ -18,7 +22,9 @@ from app.schemas.snapshot import (
 )
 from app.services.exceptions import BusinessError
 from app.services.snapshot_service import (
+    catch_up_snapshots,
     generate_daily_snapshots,
+    generate_next_snapshot,
     recalculate_snapshots,
     validate_snapshot_dependencies,
 )
@@ -102,6 +108,69 @@ def recalculate(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "RECALCULATION_FAILED", "message": str(e)},
+        )
+
+
+@router.post("/catch-up", response_model=SnapshotCatchUpResult)
+def catch_up(
+    request: SnapshotCatchUpRequest,
+    db: Session = Depends(get_db),
+    current_user: Investor = Depends(get_current_admin),
+):
+    """
+    逐交易日追平快照至 to_date（issue #84）
+
+    service 内部逐日 checkpoint commit（编排层例外），router 不再重复 commit；
+    单日失败仅回滚当日，已成功日保留，响应附 failed_date/error。
+
+    权限：仅admin
+    """
+    try:
+        result = catch_up_snapshots(
+            db=db,
+            portfolio_code=request.portfolio_code,
+            to_date=request.to_date,
+        )
+        return SnapshotCatchUpResult(**result)
+    except BusinessError:
+        # 领域异常（如 NO_SNAPSHOT_BASELINE）交给全局 handler 映射
+        db.rollback()
+        raise
+
+
+@router.post("/generate-next", response_model=SnapshotGenerateNextResult)
+def generate_next(
+    request: SnapshotGenerateNextRequest,
+    db: Session = Depends(get_db),
+    current_user: Investor = Depends(get_current_admin),
+):
+    """
+    生成最新快照日的下一个交易日快照（issue #84）
+
+    service 内部 commit（编排层例外），router 不再重复 commit。
+
+    权限：仅admin
+    """
+    try:
+        result = generate_next_snapshot(
+            db=db,
+            portfolio_code=request.portfolio_code,
+        )
+        return SnapshotGenerateNextResult(**result)
+    except BusinessError:
+        db.rollback()
+        raise
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "VALIDATION_FAILED", "message": str(e)},
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "SNAPSHOT_GENERATION_FAILED", "message": str(e)},
         )
 
 
@@ -238,6 +307,7 @@ def delete_snapshots_bulk(
     portfolio_code: str,
     from_date: date,
     confirm: bool = Query(False, description="必须显式传 confirm=true 才执行删除"),
+    dry_run: bool = Query(False, description="仅预览将删除的快照日期，不执行删除"),
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_admin),
 ):
@@ -247,6 +317,7 @@ def delete_snapshots_bulk(
     从最新快照日开始倒序删除，确保级联回退的顺序正确。
     每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。
     必须显式传 confirm=true，否则返回 422 CONFIRM_REQUIRED（兼作影响面预览）。
+    dry_run=true 时纯预览（issue #75）：返回将删除的日期列表，不校验 confirm、零副作用。
     
     权限：仅admin
     """
@@ -269,13 +340,24 @@ def delete_snapshots_bulk(
         .all()
     ]
     
+    # dry-run 纯预览（issue #75）：不校验 confirm、不删除、零副作用
+    if dry_run:
+        return {
+            "dry_run": True,
+            "portfolio_code": portfolio_code,
+            "from_date": from_date.isoformat(),
+            "count": len(snapshot_dates),
+            "snapshot_dates": [d.isoformat() for d in snapshot_dates],
+        }
+    
     # 破坏性操作守卫：逐日 commit 不可中途回滚，必须显式确认
     if not confirm:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "error": "CONFIRM_REQUIRED",
-                "message": f"将删除组合 {portfolio_code} 从 {from_date} 起的 {len(snapshot_dates)} 个快照，请携带 confirm=true 确认",
+                "message": f"将删除组合 {portfolio_code} 从 {from_date} 起的 {len(snapshot_dates)} 个快照，"
+                           f"请携带 confirm=true 确认，可先加 dry_run=true 预览",
             },
         )
     
