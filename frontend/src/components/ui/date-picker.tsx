@@ -3,9 +3,8 @@
 import * as React from "react"
 import { format } from "date-fns"
 import { CalendarIcon, X } from "lucide-react"
-import { zhCN } from "date-fns/locale"
 
-import { cn } from "@/lib/utils"
+import { cn, toDateOnly } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import {
@@ -13,6 +12,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { useTradingCalendar } from "@/hooks/useTradingCalendar"
 
 interface DatePickerProps {
   date?: Date
@@ -20,6 +20,8 @@ interface DatePickerProps {
   placeholder?: string
   className?: string
   disabled?: boolean
+  /** 标注交易日（绿色圆点），数据来自后端 trading-calendar，未加载时不标注 */
+  showTradingDays?: boolean
 }
 
 export function DatePicker({
@@ -28,8 +30,48 @@ export function DatePicker({
   placeholder = "选择日期",
   className,
   disabled = false,
+  showTradingDays = false,
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false)
+  // 跟踪日历当前展示的月份，切换年份时按年拉取交易日历
+  const [month, setMonth] = React.useState<Date>(() => date ?? new Date())
+
+  React.useEffect(() => {
+    if (open) setMonth(date ?? new Date())
+  }, [open, date])
+
+  const { data: calendarDays } = useTradingCalendar(
+    month.getFullYear(),
+    showTradingDays && open
+  )
+
+  const { tradingDaySet, loadedYears } = React.useMemo(() => {
+    const daySet = new Set<string>()
+    const yearSet = new Set<number>()
+    calendarDays?.forEach((d) => {
+      if (d.is_open) daySet.add(d.calendar_date)
+      yearSet.add(Number(d.calendar_date.slice(0, 4)))
+    })
+    return { tradingDaySet: daySet, loadedYears: yearSet }
+  }, [calendarDays])
+
+  const hasCalendarData = showTradingDays && tradingDaySet.size > 0
+  const modifiers = hasCalendarData
+    ? {
+        tradingDay: (day: Date) => tradingDaySet.has(toDateOnly(day)),
+        // 仅对已加载年份的日期置灰，避免切换年份时新年数据未到位被误标非交易日
+        nonTradingDay: (day: Date) =>
+          loadedYears.has(day.getFullYear()) && !tradingDaySet.has(toDateOnly(day)),
+      }
+    : undefined
+  const modifiersClassNames = hasCalendarData
+    ? {
+        // 交易日：日期下方绿色小圆点（day 单元格自带 relative 定位）
+        tradingDay:
+          "after:absolute after:bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:rounded-full after:bg-green-500 after:pointer-events-none",
+        nonTradingDay: "text-muted-foreground/60",
+      }
+    : undefined
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -71,6 +113,10 @@ export function DatePicker({
         <Calendar
           mode="single"
           selected={date}
+          month={month}
+          onMonthChange={setMonth}
+          modifiers={modifiers}
+          modifiersClassNames={modifiersClassNames}
           onSelect={(newDate) => {
             onSelect?.(newDate)
             if (newDate) {
@@ -78,8 +124,13 @@ export function DatePicker({
             }
           }}
           autoFocus
-          locale={zhCN}
         />
+        {hasCalendarData && (
+          <div className="flex items-center gap-1.5 border-t px-3 py-2 text-xs text-muted-foreground">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+            交易日
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   )

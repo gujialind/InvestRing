@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from datetime import date, datetime
 
 
@@ -27,6 +27,39 @@ class PortfolioResponse(PortfolioBase):
 
     class Config:
         from_attributes = True
+
+
+class PortfolioListItem(PortfolioResponse):
+    """列表项：附聚合字段（issue #69），无快照时为 None/0。"""
+    total_value: Optional[float] = None
+    cumulative_return: Optional[float] = None
+    investor_count: int = 0
+
+
+class PaginatedPortfolioResponse(BaseModel):
+    items: List[PortfolioListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class PortfolioValueSnapshotResponse(BaseModel):
+    id: int
+    portfolio_code: str
+    snapshot_date: date
+    total_value: float
+    total_shares: float
+    unit_price: float
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PortfolioInvestorItem(BaseModel):
+    investor_code: str
+    name: str
+    shares: float
 
 
 class NavHistoryRecord(BaseModel):

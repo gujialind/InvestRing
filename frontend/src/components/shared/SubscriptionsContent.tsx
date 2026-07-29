@@ -50,6 +50,7 @@ import {
 import { useInvestorList } from "@/hooks/useInvestor";
 import { usePlatformList } from "@/hooks/usePlatform";
 import { usePortfolio } from "@/hooks/usePortfolio";
+import { useInvestorAvailableShares } from "@/hooks/usePosition";
 import { useUIStore } from "@/stores/uiStore";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
@@ -111,6 +112,20 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
   });
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [editHint, setEditHint] = useState(false);
+
+  // 投资人可用份额（赎回口径，issue #67）：仅赎回模式且已选投资人时查询
+  const { data: availableData, isFetching: availableFetching } = useInvestorAvailableShares(
+    code,
+    formData.investor_code,
+    subType === "redeem"
+  );
+  const availableShares = availableData?.available_shares;
+
+  // 全部赎回：直接填入后端返回的精确可用份额，不做任何舍入/格式化
+  const handleRedeemAll = () => {
+    if (availableShares === undefined || availableShares <= 0) return;
+    setFormData({ ...formData, shares: String(availableShares) });
+  };
 
   const deleteSubscriptionMutation = useMutation({
     mutationFn: (id: number) => subscriptionApi.delete(id),
@@ -263,15 +278,38 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <Label htmlFor="shares">份额</Label>
-                    <Input
-                      id="shares"
-                      type="number"
-                      step="0.01"
-                      value={formData.shares}
-                      onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
-                      required
-                    />
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="shares">份额</Label>
+                      {formData.investor_code && availableShares !== undefined && (
+                        <span className="text-xs text-muted-foreground">
+                          可用 {formatNumber(availableShares, 2)} 份
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        id="shares"
+                        type="number"
+                        step="0.01"
+                        value={formData.shares}
+                        onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
+                        required
+                        className="flex-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleRedeemAll}
+                        disabled={
+                          !formData.investor_code ||
+                          availableFetching ||
+                          availableShares === undefined ||
+                          availableShares <= 0
+                        }
+                      >
+                        {availableFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : "全部赎回"}
+                      </Button>
+                    </div>
                   </div>
                 )}
                 <div className="space-y-2">
@@ -281,6 +319,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                     onSelect={(date) => {
                       setFormData({ ...formData, apply_date: toDateOnly(date) });
                     }}
+                    showTradingDays
                   />
                 </div>
               </div>

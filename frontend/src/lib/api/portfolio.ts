@@ -30,13 +30,6 @@ export const portfolioApi = {
   remove: (code: string) =>
     request<{ message: string }>({ method: "DELETE", url: `/portfolios/${code}` }),
 
-  getSnapshots: (code: string, params?: { page?: number; page_size?: number }) =>
-    request<PaginatedResponse<PortfolioValueSnapshot>>({
-      method: "GET",
-      url: `/portfolios/${code}/snapshots`,
-      params,
-    }),
-
   getLatestSnapshot: (code: string) =>
     request<PortfolioValueSnapshot>({ method: "GET", url: `/portfolios/${code}/snapshots/latest` }),
 
@@ -59,25 +52,31 @@ export const positionApi = {
       params: { portfolio_code: portfolioCode, ...params },
     }),
 
-  getLatest: (portfolioCode: string) =>
-    request<Position[]>({ method: "GET", url: `/portfolios/${portfolioCode}/positions/latest` }),
-
   create: (data: PositionCreate) =>
     request<Position>({ method: "POST", url: "/positions", data }),
 
   update: (id: number, data: PositionUpdate) =>
     request<Position>({ method: "PUT", url: `/positions/${id}`, data }),
 
+  // 产品可用份额（卖出口径，issue #67）
+  getAvailableShares: (portfolioCode: string, productCode: string, market?: string) =>
+    request<{ portfolio_code: string; product_code: string; market?: string; available_shares: number }>({
+      method: "GET",
+      url: `/positions/portfolio/${portfolioCode}/product/${productCode}/available-shares`,
+      params: market ? { market } : undefined,
+    }),
+
+  // 投资人可用份额（赎回口径，issue #67）
+  getInvestorAvailableShares: (portfolioCode: string, investorCode: string) =>
+    request<{ portfolio_code: string; investor_code: string; available_shares: number }>({
+      method: "GET",
+      url: `/positions/portfolio/${portfolioCode}/investor/${investorCode}/available-shares`,
+    }),
+
   updateCashPosition: (portfolioCode: string, amount: number, platformCode: string, updateDate?: string) =>
     request<{ success: boolean; message: string; portfolio_code: string; platform_code: string; cash_amount: number; update_date: string }>({
       method: "POST",
       url: `/positions/portfolio/${portfolioCode}/cash-position`,
       data: { cash_amount: amount, platform_code: platformCode, update_date: updateDate },
-    }),
-
-  getAttribution: (portfolioCode: string) =>
-    request<{ asset_type: string; value: number; weight: number }[]>({
-      method: "GET",
-      url: `/portfolios/${portfolioCode}/attribution`,
     }),
 };

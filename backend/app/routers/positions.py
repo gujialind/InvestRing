@@ -11,6 +11,7 @@ from app.schemas.position import PositionCreate, PositionUpdate, PositionRespons
 from app.services.position_service import (
     calculate_available_cash,
     calculate_available_shares,
+    calculate_investor_available_shares,
 )
 from app.dependencies import get_current_user, get_current_admin
 
@@ -158,6 +159,31 @@ def get_available_shares(
         "portfolio_code": portfolio_code,
         "product_code": product_code,
         "market": market,
+        "available_shares": float(shares),
+    }
+
+
+@router.get("/portfolio/{portfolio_code}/investor/{investor_code}/available-shares")
+def get_investor_available_shares(
+    portfolio_code: str,
+    investor_code: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.models.investor import Investor
+    from app.models.portfolio import Portfolio
+
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    investor = db.query(Investor).filter(Investor.code == investor_code).first()
+    if not investor:
+        raise HTTPException(status_code=404, detail="Investor not found")
+
+    shares = calculate_investor_available_shares(db, portfolio_code, investor_code)
+    return {
+        "portfolio_code": portfolio_code,
+        "investor_code": investor_code,
         "available_shares": float(shares),
     }
 

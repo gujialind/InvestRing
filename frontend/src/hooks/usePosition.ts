@@ -19,21 +19,23 @@ export function usePositionList(
   });
 }
 
-export function useLatestPositions(portfolioCode: string) {
+// 产品可用份额（卖出口径，issue #67）——后端实时计算，短缓存
+export function useAvailableShares(portfolioCode: string, productCode: string, enabled = true) {
   return useQuery({
-    queryKey: [POSITION_QUERY_KEY, portfolioCode, "latest"],
-    queryFn: () => positionApi.getLatest(portfolioCode),
-    enabled: !!portfolioCode,
-    staleTime: 30 * 1000,
+    queryKey: [POSITION_QUERY_KEY, portfolioCode, "available-shares", productCode],
+    queryFn: () => positionApi.getAvailableShares(portfolioCode, productCode),
+    enabled: enabled && !!portfolioCode && !!productCode,
+    staleTime: 10 * 1000,
   });
 }
 
-export function usePositionAttribution(portfolioCode: string) {
+// 投资人可用份额（赎回口径，issue #67）
+export function useInvestorAvailableShares(portfolioCode: string, investorCode: string, enabled = true) {
   return useQuery({
-    queryKey: [POSITION_QUERY_KEY, portfolioCode, "attribution"],
-    queryFn: () => positionApi.getAttribution(portfolioCode),
-    enabled: !!portfolioCode,
-    staleTime: 60 * 1000,
+    queryKey: [POSITION_QUERY_KEY, portfolioCode, "investor-available-shares", investorCode],
+    queryFn: () => positionApi.getInvestorAvailableShares(portfolioCode, investorCode),
+    enabled: enabled && !!portfolioCode && !!investorCode,
+    staleTime: 10 * 1000,
   });
 }
 

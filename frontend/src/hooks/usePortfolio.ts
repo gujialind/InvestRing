@@ -157,19 +157,6 @@ export function useDeletePortfolio() {
   });
 }
 
-// 组合净值快照列表 Hook
-export function usePortfolioSnapshots(
-  code: string,
-  params?: { page?: number; page_size?: number }
-) {
-  return useQuery({
-    queryKey: [PORTFOLIO_QUERY_KEY, code, SNAPSHOT_QUERY_KEY, params],
-    queryFn: () => portfolioApi.getSnapshots(code, params),
-    enabled: !!code,
-    staleTime: 60 * 1000,
-  });
-}
-
 // 最新净值快照 Hook
 export function useLatestSnapshot(code: string) {
   return useQuery({
@@ -212,25 +199,5 @@ export function usePositionList(
     queryFn: () => positionApi.list(portfolioCode, params),
     enabled: !!portfolioCode,
     staleTime: 30 * 1000,
-  });
-}
-
-// 最新持仓 Hook
-export function useLatestPositions(portfolioCode: string) {
-  return useQuery({
-    queryKey: [POSITION_QUERY_KEY, portfolioCode, "latest"],
-    queryFn: () => positionApi.getLatest(portfolioCode),
-    enabled: !!portfolioCode,
-    staleTime: 30 * 1000,
-  });
-}
-
-// 持仓归因分析 Hook
-export function usePositionAttribution(portfolioCode: string) {
-  return useQuery({
-    queryKey: [POSITION_QUERY_KEY, portfolioCode, "attribution"],
-    queryFn: () => positionApi.getAttribution(portfolioCode),
-    enabled: !!portfolioCode,
-    staleTime: 60 * 1000,
   });
 }
