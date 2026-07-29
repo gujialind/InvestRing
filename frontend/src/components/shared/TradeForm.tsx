@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
-import { toDateOnly, parseDateOnly } from "@/lib/utils";
+import { formatNumber, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { usePlatformList } from "@/hooks/usePlatform";
+import { useAvailableShares } from "@/hooks/usePosition";
 
 interface TradeFormProps {
   portfolioCode: string;
@@ -38,6 +39,26 @@ export default function TradeForm({ portfolioCode, onSubmit, isSubmitting }: Tra
     price: "",
     trade_date: toDateOnly(new Date()),
   });
+
+  // 防抖产品代码，避免每次敲键都请求可用份额（issue #67）
+  const [debouncedProduct, setDebouncedProduct] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedProduct(formData.product_code.trim()), 500);
+    return () => clearTimeout(timer);
+  }, [formData.product_code]);
+
+  const { data: availableData, isFetching: availableFetching } = useAvailableShares(
+    portfolioCode,
+    debouncedProduct,
+    tradeType === "sell"
+  );
+  const availableShares = availableData?.available_shares;
+
+  // 全部卖出：直接填入后端返回的精确可用份额，不做任何舍入/格式化
+  const handleSellAll = () => {
+    if (availableShares === undefined || availableShares <= 0) return;
+    setFormData({ ...formData, shares: String(availableShares) });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,15 +150,38 @@ export default function TradeForm({ portfolioCode, onSubmit, isSubmitting }: Tra
             </div>
           ) : (
             <div className="space-y-2">
-              <Label htmlFor="shares">卖出份额</Label>
-              <Input
-                id="shares"
-                type="number"
-                step="0.01"
-                value={formData.shares}
-                onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
-                required
-              />
+              <div className="flex items-center justify-between">
+                <Label htmlFor="shares">卖出份额</Label>
+                {debouncedProduct && availableShares !== undefined && (
+                  <span className="text-xs text-muted-foreground">
+                    可用 {formatNumber(availableShares, 2)} 份
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  id="shares"
+                  type="number"
+                  step="0.01"
+                  value={formData.shares}
+                  onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
+                  required
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSellAll}
+                  disabled={
+                    !debouncedProduct ||
+                    availableFetching ||
+                    availableShares === undefined ||
+                    availableShares <= 0
+                  }
+                >
+                  {availableFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : "全部卖出"}
+                </Button>
+              </div>
             </div>
           )}
           <div className="space-y-2">
@@ -147,6 +191,7 @@ export default function TradeForm({ portfolioCode, onSubmit, isSubmitting }: Tra
               onSelect={(date) => {
                 setFormData({ ...formData, trade_date: toDateOnly(date) })
               }}
+              showTradingDays
             />
           </div>
           <Button type="submit" className="w-full" disabled={isSubmitting}>

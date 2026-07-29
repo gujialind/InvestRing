@@ -313,6 +313,7 @@ export default function PortfolioSnapshotsPage() {
                 date={singleDate}
                 onSelect={setSingleDate}
                 placeholder="选择日期"
+                showTradingDays
               />
             </div>
 
@@ -414,6 +415,7 @@ export default function PortfolioSnapshotsPage() {
                 date={startDate}
                 onSelect={setStartDate}
                 placeholder="起始日期"
+                showTradingDays
               />
             </div>
 
@@ -423,6 +425,7 @@ export default function PortfolioSnapshotsPage() {
                 date={endDate}
                 onSelect={setEndDate}
                 placeholder="结束日期"
+                showTradingDays
               />
             </div>
 

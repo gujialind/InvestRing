@@ -198,17 +198,21 @@ export default function PortfolioDetailPage() {
         )}
 
         <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="overview">概览</TabsTrigger>
-            {!isDraft && <TabsTrigger value="positions">持仓</TabsTrigger>}
-            {!isDraft && <TabsTrigger value="investors">投资人</TabsTrigger>}
-            {!isDraft && <TabsTrigger value="nav">净值历史</TabsTrigger>}
+          <div className="flex items-center gap-2">
+            <TabsList>
+              <TabsTrigger value="overview">概览</TabsTrigger>
+              {!isDraft && <TabsTrigger value="positions">持仓</TabsTrigger>}
+              {!isDraft && <TabsTrigger value="investors">投资人</TabsTrigger>}
+              {!isDraft && <TabsTrigger value="nav">净值历史</TabsTrigger>}
+            </TabsList>
+            {/* 快照管理是独立页面而非 Tab：不能用 Link 包 TabsTrigger，
+                首次点击会被 Tabs 激活逻辑拦截导致需点两次才能进入 */}
             {isAdmin && !isDraft && (
               <Link href={`/portfolio/${code}/snapshots`}>
-                <TabsTrigger value="snapshots">快照管理</TabsTrigger>
+                <Button variant="outline" size="sm">快照管理</Button>
               </Link>
             )}
-          </TabsList>
+          </div>
 
           <TabsContent value="overview" className="space-y-4">
             <Card>

@@ -445,7 +445,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedPortfolioResponse"
+                }
               }
             }
           },
@@ -766,6 +768,104 @@
                     "$ref": "#/components/schemas/NavHistoryRecord"
                   },
                   "title": "Response Get Nav History Api Portfolios  Code  Nav History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{code}/snapshots/latest": {
+      "get": {
+        "tags": [
+          "组合管理"
+        ],
+        "summary": "Get Latest Snapshot",
+        "operationId": "get_latest_snapshot_api_portfolios__code__snapshots_latest_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioValueSnapshotResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{code}/investors": {
+      "get": {
+        "tags": [
+          "组合管理"
+        ],
+        "summary": "Get Portfolio Investors",
+        "operationId": "get_portfolio_investors_api_portfolios__code__investors_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioInvestorItem"
+                  },
+                  "title": "Response Get Portfolio Investors Api Portfolios  Code  Investors Get"
                 }
               }
             }
@@ -4064,6 +4164,60 @@
         }
       }
     },
+    "/api/positions/portfolio/{portfolio_code}/investor/{investor_code}/available-shares": {
+      "get": {
+        "tags": [
+          "持仓管理"
+        ],
+        "summary": "Get Investor Available Shares",
+        "operationId": "get_investor_available_shares_api_positions_portfolio__portfolio_code__investor__investor_code__available_shares_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          },
+          {
+            "name": "investor_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Investor Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/positions/portfolio/{portfolio_code}/cash-position": {
       "post": {
         "tags": [
@@ -6107,6 +6261,37 @@
         ],
         "title": "NavHistoryRecord"
       },
+      "PaginatedPortfolioResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioListItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "PaginatedPortfolioResponse"
+      },
       "PaginatedTaskLogResponse": {
         "properties": {
           "items": {
@@ -6265,6 +6450,139 @@
         ],
         "title": "PortfolioCreate"
       },
+      "PortfolioInvestorItem": {
+        "properties": {
+          "investor_code": {
+            "type": "string",
+            "title": "Investor Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "shares": {
+            "type": "number",
+            "title": "Shares"
+          }
+        },
+        "type": "object",
+        "required": [
+          "investor_code",
+          "name",
+          "shares"
+        ],
+        "title": "PortfolioInvestorItem"
+      },
+      "PortfolioListItem": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "draft"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "total_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Value"
+          },
+          "cumulative_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cumulative Return"
+          },
+          "investor_count": {
+            "type": "integer",
+            "title": "Investor Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "PortfolioListItem",
+        "description": "列表项：附聚合字段（issue #69），无快照时为 None/0。"
+      },
       "PortfolioResponse": {
         "properties": {
           "code": {
@@ -6374,6 +6692,57 @@
         },
         "type": "object",
         "title": "PortfolioUpdate"
+      },
+      "PortfolioValueSnapshotResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "portfolio_code": {
+            "type": "string",
+            "title": "Portfolio Code"
+          },
+          "snapshot_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Snapshot Date"
+          },
+          "total_value": {
+            "type": "number",
+            "title": "Total Value"
+          },
+          "total_shares": {
+            "type": "number",
+            "title": "Total Shares"
+          },
+          "unit_price": {
+            "type": "number",
+            "title": "Unit Price"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "portfolio_code",
+          "snapshot_date",
+          "total_value",
+          "total_shares",
+          "unit_price"
+        ],
+        "title": "PortfolioValueSnapshotResponse"
       },
       "PositionCreate": {
         "properties": {

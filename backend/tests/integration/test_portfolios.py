@@ -3,7 +3,14 @@
 # ============================================================================
 
 import pytest
-from tests.factories import create_portfolio, create_investor
+from datetime import date
+
+from tests.factories import (
+    create_portfolio,
+    create_investor,
+    create_investor_holding,
+    create_value_snapshot,
+)
 from app.models.portfolio import Portfolio
 
 
@@ -113,3 +120,113 @@ class TestPortfolioStatus:
         assert resp.status_code == 200
         port = test_db.query(Portfolio).filter(Portfolio.code == "P_REACT").first()
         assert port.status == "active"
+
+
+class TestPortfolioListAggregates:
+    """组合列表聚合字段测试（issue #69）"""
+
+    def test_list_with_snapshots_returns_aggregates(self, client, admin_headers, test_db):
+        """有快照的组合应返回 total_value / cumulative_return / investor_count"""
+        create_portfolio(test_db, code="P_AGG", status="active")
+        create_investor(test_db, code="INV_AGG1", name="聚合投资人1")
+        create_investor(test_db, code="INV_AGG2", name="聚合投资人2")
+        create_value_snapshot(test_db, "P_AGG", date(2025, 1, 6), 10000.0, 10000.0, 1.0)
+        create_value_snapshot(test_db, "P_AGG", date(2025, 1, 7), 11000.0, 10000.0, 1.1)
+        create_investor_holding(test_db, "P_AGG", "INV_AGG1", date(2025, 1, 7), 6000.0)
+        create_investor_holding(test_db, "P_AGG", "INV_AGG2", date(2025, 1, 7), 4000.0)
+
+        resp = client.get("/api/portfolios", headers=admin_headers)
+        assert resp.status_code == 200
+        items = {item["code"]: item for item in resp.json()["items"]}
+        agg = items["P_AGG"]
+        assert agg["total_value"] == 11000.0
+        assert agg["cumulative_return"] == pytest.approx(10.0, abs=1e-4)
+        assert agg["investor_count"] == 2
+
+    def test_list_draft_without_snapshot_returns_none(self, client, admin_headers, test_db):
+        """无快照的 draft 组合聚合字段为 None/0"""
+        create_portfolio(test_db, code="P_AGG_DR", status="draft")
+        resp = client.get("/api/portfolios", headers=admin_headers)
+        assert resp.status_code == 200
+        items = {item["code"]: item for item in resp.json()["items"]}
+        agg = items["P_AGG_DR"]
+        assert agg["total_value"] is None
+        assert agg["cumulative_return"] is None
+        assert agg["investor_count"] == 0
+
+    def test_investor_count_excludes_zero_shares(self, client, admin_headers, test_db):
+        """investor_count 不计最新快照日份额为 0 的投资人"""
+        create_portfolio(test_db, code="P_AGG_Z", status="active")
+        create_investor(test_db, code="INV_AGG_Z1", name="持仓投资人")
+        create_investor(test_db, code="INV_AGG_Z2", name="清仓投资人")
+        create_value_snapshot(test_db, "P_AGG_Z", date(2025, 1, 6), 5000.0, 5000.0, 1.0)
+        create_investor_holding(test_db, "P_AGG_Z", "INV_AGG_Z1", date(2025, 1, 6), 5000.0)
+        create_investor_holding(test_db, "P_AGG_Z", "INV_AGG_Z2", date(2025, 1, 6), 0.0)
+
+        resp = client.get("/api/portfolios", headers=admin_headers)
+        assert resp.status_code == 200
+        items = {item["code"]: item for item in resp.json()["items"]}
+        assert items["P_AGG_Z"]["investor_count"] == 1
+
+
+class TestLatestSnapshotEndpoint:
+    """GET /api/portfolios/{code}/snapshots/latest 测试（issue #69）"""
+
+    def test_latest_snapshot(self, client, admin_headers, test_db):
+        """返回最新一条市值快照"""
+        create_portfolio(test_db, code="P_SNAP_L", status="active")
+        create_value_snapshot(test_db, "P_SNAP_L", date(2025, 1, 6), 10000.0, 10000.0, 1.0)
+        create_value_snapshot(test_db, "P_SNAP_L", date(2025, 1, 7), 10500.0, 10000.0, 1.05)
+
+        resp = client.get("/api/portfolios/P_SNAP_L/snapshots/latest", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["snapshot_date"] == "2025-01-07"
+        assert data["total_value"] == 10500.0
+        assert data["unit_price"] == 1.05
+
+    def test_latest_snapshot_no_snapshot_404(self, client, admin_headers, test_db):
+        """无快照返回 404"""
+        create_portfolio(test_db, code="P_SNAP_N", status="draft")
+        resp = client.get("/api/portfolios/P_SNAP_N/snapshots/latest", headers=admin_headers)
+        assert resp.status_code == 404
+
+    def test_latest_snapshot_portfolio_not_found(self, client, admin_headers):
+        """组合不存在返回 404"""
+        resp = client.get("/api/portfolios/NO_SUCH/snapshots/latest", headers=admin_headers)
+        assert resp.status_code == 404
+
+
+class TestPortfolioInvestorsEndpoint:
+    """GET /api/portfolios/{code}/investors 测试（issue #69）"""
+
+    def test_investors_from_latest_snapshot(self, client, admin_headers, test_db):
+        """返回最新快照日的投资人份额列表"""
+        create_portfolio(test_db, code="P_INV_L", status="active")
+        create_investor(test_db, code="INV_L1", name="投资人A")
+        create_investor(test_db, code="INV_L2", name="投资人B")
+        # 旧快照日有三人，最新快照日只剩两人
+        create_investor_holding(test_db, "P_INV_L", "INV_L1", date(2025, 1, 6), 3000.0)
+        create_investor_holding(test_db, "P_INV_L", "INV_L1", date(2025, 1, 7), 6000.0)
+        create_investor_holding(test_db, "P_INV_L", "INV_L2", date(2025, 1, 7), 4000.0)
+
+        resp = client.get("/api/portfolios/P_INV_L/investors", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["investor_code"] == "INV_L1"
+        assert data[0]["name"] == "投资人A"
+        assert data[0]["shares"] == 6000.0
+        assert data[1]["investor_code"] == "INV_L2"
+
+    def test_investors_empty_without_holdings(self, client, admin_headers, test_db):
+        """无投资人快照返回空列表"""
+        create_portfolio(test_db, code="P_INV_E", status="draft")
+        resp = client.get("/api/portfolios/P_INV_E/investors", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_investors_portfolio_not_found(self, client, admin_headers):
+        """组合不存在返回 404"""
+        resp = client.get("/api/portfolios/NO_SUCH/investors", headers=admin_headers)
+        assert resp.status_code == 404

@@ -6,9 +6,12 @@ from app.database import get_db
 from app.models.portfolio import Portfolio
 from app.schemas.portfolio import (
     NavHistoryRecord,
+    PaginatedPortfolioResponse,
     PortfolioCreate,
+    PortfolioInvestorItem,
     PortfolioUpdate,
     PortfolioResponse,
+    PortfolioValueSnapshotResponse,
 )
 from app.dependencies import get_current_user, get_current_admin
 from app.services import portfolio_service
@@ -16,7 +19,7 @@ from app.services import portfolio_service
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", response_model=PaginatedPortfolioResponse)
 def get_portfolios(
     status: Optional[str] = None,
     page: Optional[int] = 1,
@@ -24,17 +27,7 @@ def get_portfolios(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(Portfolio)
-    if status:
-        query = query.filter(Portfolio.status == status)
-    total = query.count()
-    items = query.offset((page - 1) * page_size).limit(page_size).all()
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
+    return portfolio_service.list_portfolios(db, status=status, page=page, page_size=page_size)
 
 
 @router.post("", response_model=PortfolioResponse)
@@ -110,6 +103,24 @@ def get_nav_history(
     current_user=Depends(get_current_user),
 ):
     return portfolio_service.get_nav_history(db, code, start_date, end_date)
+
+
+@router.get("/{code}/snapshots/latest", response_model=PortfolioValueSnapshotResponse)
+def get_latest_snapshot(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return portfolio_service.get_latest_value_snapshot(db, code)
+
+
+@router.get("/{code}/investors", response_model=list[PortfolioInvestorItem])
+def get_portfolio_investors(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return portfolio_service.get_portfolio_investors(db, code)
 
 
 @router.get("/{code}/returns")

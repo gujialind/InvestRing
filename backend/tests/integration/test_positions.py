@@ -118,3 +118,68 @@ class TestAvailableShares:
         )
         # 端点计算的是产品份额而非投资人份额，这里只验证端点可达
         assert resp.status_code in (200, 404)
+
+
+class TestInvestorAvailableShares:
+    """投资人可用份额端点测试（issue #67）"""
+
+    def test_investor_available_shares_basic(self, client, admin_headers, test_db):
+        """无在途赎回时，可用份额 = 最新快照份额"""
+        create_portfolio(test_db, code="IAS_P", status="active")
+        create_investor(test_db, code="IAS_I")
+        create_investor_holding(test_db, "IAS_P", "IAS_I", date(2025, 11, 3), shares=10000.50)
+
+        resp = client.get(
+            "/api/positions/portfolio/IAS_P/investor/IAS_I/available-shares",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["portfolio_code"] == "IAS_P"
+        assert data["investor_code"] == "IAS_I"
+        assert data["available_shares"] == 10000.50
+
+    def test_investor_available_shares_minus_pending_redeem(self, client, admin_headers, test_db):
+        """pending 赎回应扣减可用份额"""
+        create_portfolio(test_db, code="IAS_PR", status="active")
+        create_investor(test_db, code="IAS_IR")
+        create_investor_holding(test_db, "IAS_PR", "IAS_IR", date(2025, 11, 3), shares=10000)
+        create_subscription(
+            test_db, "IAS_PR", "IAS_IR",
+            sub_type="redeem", shares=3000, amount=3000,
+            apply_date=date(2025, 11, 4), status="pending",
+        )
+
+        resp = client.get(
+            "/api/positions/portfolio/IAS_PR/investor/IAS_IR/available-shares",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["available_shares"] == 7000.0
+
+    def test_investor_available_shares_zero_without_holding(self, client, admin_headers, test_db):
+        """无持仓快照时可用份额为 0"""
+        create_portfolio(test_db, code="IAS_Z", status="active")
+        create_investor(test_db, code="IAS_IZ")
+
+        resp = client.get(
+            "/api/positions/portfolio/IAS_Z/investor/IAS_IZ/available-shares",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["available_shares"] == 0.0
+
+    def test_investor_available_shares_not_found(self, client, admin_headers, test_db):
+        """组合或投资人不存在返回 404"""
+        create_portfolio(test_db, code="IAS_NF", status="active")
+        resp = client.get(
+            "/api/positions/portfolio/NO_SUCH/investor/IAS_X/available-shares",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
+        resp = client.get(
+            "/api/positions/portfolio/IAS_NF/investor/NO_SUCH_INV/available-shares",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
