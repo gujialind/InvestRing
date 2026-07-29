@@ -34,8 +34,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # 构建时注入环境变量
+# API_BASE_URL：Next.js rewrites 在 build 时固化，必须构建期注入
+# 魔搭 Studio 不支持自定义 --build-arg，故默认值即为生产后端地址
+ARG API_BASE_URL=http://<server-ip>:8000
 ENV NEXT_TELEMETRY_DISABLED=1 \
-    NODE_ENV=production
+    NODE_ENV=production \
+    API_BASE_URL=$API_BASE_URL
 
 # Next.js 构建（生成 .next/ 目录）
 RUN npm run build
@@ -47,9 +51,9 @@ FROM node:20-alpine AS runtime
 
 WORKDIR /app
 
-# 安全：创建非 root 用户
+# 安全：创建非 root 用户（魔搭平台用 su 切换用户，必须指定有效 shell）
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+    adduser --system --uid 1001 --shell /bin/sh nextjs
 
 # Standalone 模式（next.config.js 中 output: 'standalone'）：
 # 只拷贝运行所需的最小产物，无需完整 node_modules
@@ -58,21 +62,21 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# 环境变量
+# 环境变量（魔搭 Studio 强制要求端口 7860、监听 0.0.0.0）
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME="0.0.0.0" \
-    PORT=3000
+    PORT=7860
 
 # 切换到非 root 用户
 USER nextjs
 
-# 暴露 Next.js 端口
-EXPOSE 3000
+# 暴露 Next.js 端口（魔搭 Studio 要求 7860）
+EXPOSE 7860
 
 # 健康检查（用 127.0.0.1：alpine 下 localhost 解析到 IPv6，而 Next 仅监听 IPv4）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/login || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:7860/login || exit 1
 
 # 启动 standalone 服务器（next build 生成的自包含 server.js）
 CMD ["node", "server.js"]
