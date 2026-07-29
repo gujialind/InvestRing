@@ -5,7 +5,7 @@
 - [frontend/src/components/ui/button.tsx](file://frontend/src/components/ui/button.tsx)
 - [frontend/src/components/ui/input.tsx](file://frontend/src/components/ui/input.tsx)
 - [frontend/src/components/ui/dialog.tsx](file://frontend/src/components/ui/dialog.tsx)
-- [frontend/src/components/ui/table.tsx](file://frontend/src/components/ui/table.tsx)
+- [frontend/src/components/ui/table.tsx](file://frontend/src/components/table.tsx)
 - [frontend/src/components/ui/badge.tsx](file://frontend/src/components/ui/badge.tsx)
 - [frontend/src/components/ui/card.tsx](file://frontend/src/components/ui/card.tsx)
 - [frontend/src/components/ui/select.tsx](file://frontend/src/components/ui/select.tsx)
@@ -20,6 +20,13 @@
 - [frontend/tailwind.config.ts](file://frontend/tailwind.config.ts)
 - [frontend/src/lib/utils.ts](file://frontend/src/lib/utils.ts)
 </cite>
+
+## 更新摘要
+**所做更改**
+- 更新了日期选择器 DatePicker 组件的增强功能，包括 showTradingDays 属性连接交易日历 API
+- 新增交易日显示功能：绿色圆点标记交易日，非交易日灰色显示
+- 添加年度缓存机制优化交易日历数据获取性能
+- 更新了相关依赖分析和故障排查指南
 
 ## 目录
 1. [简介](#简介)
@@ -141,7 +148,7 @@ DATE_PICKER --> TW
 - 提示 Tooltip：提供轻提示，支持定位与动画。
 - 警告 Alert：强调性信息块，支持默认与破坏性样式。
 - **确认对话框 AlertDialog**：用于重要操作的确认流程，包含覆盖层、内容、标题、描述、操作按钮与取消按钮，支持破坏性操作提示。
-- **日期选择器 DatePicker**：基于 Popover 和 Calendar 组合的日期选择组件，支持中文本地化、占位符、禁用状态与回调处理。
+- **日期选择器 DatePicker**：基于 Popover 和 Calendar 组合的日期选择组件，支持中文本地化、占位符、禁用状态与回调处理。**已增强支持交易日历功能，可通过 showTradingDays 属性启用交易日显示。**
 
 **章节来源**
 - [frontend/src/components/ui/button.tsx:35-56](file://frontend/src/components/ui/button.tsx#L35-L56)
@@ -471,16 +478,21 @@ AlertDialog --> AlertDialogComponents : "包含组件"
   - 内置中文本地化支持，使用 zhCN 语言包。
   - 支持占位符文本、禁用状态与回调处理。
   - 集成日历图标，提供直观的操作提示。
+  - **已增强交易日历功能：通过 showTradingDays 属性连接交易日历 API，显示绿色圆点标记交易日，非交易日灰色显示。**
+  - **年度缓存机制：缓存交易日历数据以提升性能，避免重复请求。**
 - 可定制性
   - 通过 className 覆盖按钮与弹出层样式。
   - 支持禁用状态与自定义样式类。
+  - **showTradingDays 属性控制是否显示交易日标记。**
 - 无障碍与交互
   - 基于 Popover 的键盘导航与焦点管理。
   - 日历组件支持键盘操作与屏幕阅读器识别。
   - 防止在日历内部点击时意外关闭 Popover。
+  - **交易日标记提供清晰的视觉反馈，辅助投资决策。**
 - 性能
   - 轻量组件组合，渲染与交互开销低。
   - 仅在打开时渲染日历内容。
+  - **交易日历数据年度缓存，减少网络请求频率。**
 
 ```mermaid
 flowchart TD
@@ -490,6 +502,11 @@ DP --> PC["Popover 内容"]
 PC --> CL["Calendar 日历"]
 BC --> CI["日历图标"]
 CL --> ZHCN["中文本地化"]
+DP --> TC["交易日历功能"]
+TC --> API["交易日历 API"]
+API --> CACHE["年度缓存"]
+CACHE --> GREEN["绿色圆点<br/>交易日"]
+CACHE --> GRAY["灰色显示<br/>非交易日"]
 ```
 
 **图表来源**
@@ -509,6 +526,7 @@ CL --> ZHCN["中文本地化"]
   - 组件彼此独立，通过组合使用实现复杂界面；未发现循环依赖。
   - DatePicker 依赖 Popover、Calendar、Button 组件。
   - AlertDialog 依赖 Button 组件的变体系统。
+  - **增强的 DatePicker 组件现在依赖交易日历 API 服务。**
 
 ```mermaid
 graph LR
@@ -546,6 +564,8 @@ DATE_PICKER --> POPOVER
 DATE_PICKER --> CALENDAR
 DATE_PICKER --> BUTTON
 ALERT_DIALOG --> BUTTON
+DATE_PICKER --> TRADING_API["交易日历API"]
+TRADING_API --> CACHE["年度缓存"]
 ```
 
 **图表来源**
@@ -581,6 +601,9 @@ ALERT_DIALOG --> BUTTON
   - 建议在数据量较大时采用虚拟滚动或分页策略，避免一次性渲染过多行。
 - 新增组件性能
   - AlertDialog 和 DatePicker 均采用 Portal 渲染，仅在需要时加载相关资源，避免不必要的性能开销。
+- **交易日历缓存优化**
+  - **年度缓存机制显著减少 API 请求频率，提升响应速度。**
+  - **交易日标记渲染采用条件渲染，仅在启用 showTradingDays 时执行。**
 
 ## 故障排查指南
 - 样式不生效或冲突
@@ -598,6 +621,10 @@ ALERT_DIALOG --> BUTTON
 - **日期选择器无法打开或选择无效**
   - 确认 Popover 触发器与 Calendar 组件的交互逻辑；检查 onSelect 回调是否正确处理。
   - 验证中文本地化配置与日历图标显示。
+- **交易日标记不显示**
+  - **检查 showTradingDays 属性是否正确传递。**
+  - **验证交易日历 API 连接状态与缓存数据。**
+  - **确认绿色圆点和灰色显示的 CSS 类名正确应用。**
 
 **章节来源**
 - [frontend/src/lib/utils.ts:8-10](file://frontend/src/lib/utils.ts#L8-L10)
@@ -614,7 +641,7 @@ ALERT_DIALOG --> BUTTON
 
 **新增组件总结**
 - **AlertDialog**：为重要操作提供明确的确认流程，支持破坏性操作提示与完整的无障碍支持。
-- **DatePicker**：基于 Popover 和 Calendar 的日期选择解决方案，内置中文本地化与良好的用户体验。
+- **DatePicker**：基于 Popover 和 Calendar 的日期选择解决方案，内置中文本地化与良好的用户体验。**现已增强交易日历功能，支持交易日可视化显示与年度缓存优化。**
 
 建议在实际业务中遵循组件组合与最小依赖原则，结合性能优化策略，持续完善表单验证、无障碍与国际化支持。
 
@@ -632,14 +659,17 @@ ALERT_DIALOG --> BUTTON
   - 大数据场景采用虚拟化或分页；避免在渲染路径中进行昂贵计算。
   - 合理使用 Portal 与动画，减少不必要的重绘与重排。
   - 新组件应避免不必要的状态管理与副作用。
+  - **对于需要频繁访问的外部数据，实施适当的缓存策略。**
 - 组件组合模式
   - 对话框 + 表单：在 DialogContent 内部组合 Input、Select、Alert 等组件。
   - 下拉菜单 + 表格：在表格操作列使用 DropdownMenu 提供批量操作入口。
   - 卡片 + 表格：在 Card 内放置 Table，形成信息区块化布局。
   - **确认对话框 + 表单：在 AlertDialogContent 内部组合表单组件，用于重要操作的二次确认。**
   - **日期选择器 + 表单：在表单中使用 DatePicker 进行日期输入，支持中文本地化。**
+  - **日期选择器 + 交易日历：启用 showTradingDays 属性，获得交易日可视化支持。**
 - 无障碍与国际化
   - 为交互组件提供可访问性标签与键盘操作；必要时引入 i18n 文案。
   - 日历等组件可按需切换语言与地区化设置。
   - **AlertDialog 应提供明确的 ARIA 标签与键盘导航支持。**
   - **DatePicker 应支持屏幕阅读器与键盘操作。**
+  - **交易日标记应考虑色盲用户的可访问性需求。**

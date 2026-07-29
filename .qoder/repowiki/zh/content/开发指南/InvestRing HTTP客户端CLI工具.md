@@ -29,20 +29,12 @@
 
 ## 更新摘要
 **变更内容**   
-- **交易预览功能HTTP化**：在ir-cli/ir_cli/commands/trades.py中增强了交易预览功能，通过HTTP接口暴露相同的功能，为客户端应用提供Web访问能力
-- **Schema验证系统**：新增完整的schema验证机制，支持请求和响应数据的自动验证
-- **响应字段契约系统**：实现自动生成响应字段功能，确保前后端数据契约一致性
-- **OpenAPI规范集成**：通过gen_response_fields.py脚本从后端openapi.json自动生成响应字段契约
-- **索引模式优化**：CLI工具新增--index模式进行高效schema加载，提升性能
-- **UTF-8编码处理增强**：CLI配置系统增强了UTF-8编码处理和错误处理机制，提升国际化支持能力
-- **市场数据命令改进**：市场数据CLI命令改进了帮助文本和数据限制警告，提供更清晰的用户指导
-- **净值覆盖率检查**：新增了nav-coverage相关命令用于净值覆盖率检查，完善市场数据管理功能
-- **智能重试机制**：HTTP客户端新增智能重试逻辑，支持指数退避和最大重试次数配置
-- **新环境变量**：新增IR_TOKEN、IR_DEBUG、IR_RETRY三个环境变量，增强配置灵活性
-- **本地数据验证**：请求前进行数据格式验证，减少无效请求和网络开销
-- **系统日历缓存**：交易日历数据本地缓存，提升查询性能
-- **安全配置文件管理**：增强的配置文件权限控制和敏感信息保护
-- **输出序列化优化**：改进JSON序列化处理，支持更多数据类型和格式化选项
+- **网络错误处理增强**：实现了结构化的NETWORK_ERROR和TIMEOUT_ERROR错误输出，提供更清晰的错误信息
+- **退出码标准化**：为网络失败场景引入专门的退出码3，便于脚本处理和自动化集成
+- **链式命令执行改进**：增强了--confirm标志的链式命令执行功能，提升批量操作的安全性
+- **快照重计算优化**：改进了recalculate命令的回滚操作，确保数据一致性
+- **智能重试机制**：HTTP客户端新增指数退避重试逻辑，支持IR_RETRY环境变量配置
+- **结构化错误分类**：统一的错误处理系统，区分网络连接、超时、认证等不同类型错误
 
 ## 目录
 1. [简介](#简介)
@@ -63,7 +55,7 @@ InvestRing HTTP客户端CLI是一个轻量级命令行工具，通过REST API与
 - 认证：JWT token持久化到本地~/.ir/token.json，自动携带Authorization头
 - 配置：IR_BASE_URL环境变量优先，其次~/.ir/config，默认http://localhost:8000
 - **超时配置**：IR_HTTP_TIMEOUT环境变量支持，默认300秒，可自定义调整
-- **结构化退出码**：统一的错误分类系统，便于脚本处理和自动化集成
+- **结构化退出码**：统一的错误分类系统，包括exit code 3用于网络失败场景
 - **JSON数据处理**：支持--json标志进行结构化数据输入输出
 - **分页与字段选择**：所有列表命令支持--all和--fields参数
 - **智能重试机制**：新增指数退避重试逻辑，提高网络请求的稳定性
@@ -77,11 +69,13 @@ InvestRing HTTP客户端CLI是一个轻量级命令行工具，通过REST API与
 - **OpenAPI集成**：通过脚本自动生成响应字段，简化开发流程
 - **索引模式优化**：--index模式提供高效的schema加载机制
 - **交易预览HTTP化**：交易预览功能现在可以通过HTTP接口访问，为客户端应用提供Web访问能力
+- **链式命令执行**：增强的--confirm标志支持安全的批量操作
+- **结构化错误处理**：NETWORK_ERROR和TIMEOUT_ERROR的专门处理
 - 输出：统一JSON协议{"ok": true/false, "data": ..., "meta": ...}
 - 入口：ir命令（与现有直连版CLI同名但不同环境）
 
 ## 项目结构
-顶层ir-cli为独立包，包含Typer应用入口、HTTP客户端封装、配置与token管理、统一输出协议、共享工具模块以及按业务域划分的命令组。**新增的交易预览HTTP功能和schema验证系统进一步增强了数据一致性和开发效率**。
+顶层ir-cli为独立包，包含Typer应用入口、HTTP客户端封装、配置与token管理、统一输出协议、共享工具模块以及按业务域划分的命令组。**新增的网络错误处理、退出码标准化和链式命令执行功能进一步增强了工具的可靠性和用户体验**。
 
 ```mermaid
 graph TB
@@ -111,6 +105,9 @@ D --> X["ir_cli/schema.py<br/>Schema验证系统"]
 X --> Y["ir_cli/response_fields.py<br/>响应字段契约"]
 Y --> Z["scripts/gen_response_fields.py<br/>OpenAPI生成脚本"]
 X --> AA["--index模式<br/>高效schema加载"]
+D --> BB["网络错误处理<br/>NETWORK_ERROR/TIMEOUT_ERROR"]
+D --> CC["退出码标准化<br/>exit code 3 for network failures"]
+C --> DD["链式命令执行<br/>--confirm标志增强"]
 ```
 
 **图表来源**
@@ -138,9 +135,12 @@ X --> AA["--index模式<br/>高效schema加载"]
   - **超时配置**：支持IR_HTTP_TIMEOUT环境变量，默认300秒
   - **智能重试**：支持IR_RETRY环境变量，指数退避重试机制
   - **调试模式**：IR_DEBUG环境变量启用详细日志输出
+  - **网络错误处理**：专门的NETWORK_ERROR和TIMEOUT_ERROR处理，返回结构化错误信息
+  - **退出码标准化**：网络失败时返回exit code 3，便于脚本处理
 - 输出协议（output.py）
   - success/error统一返回格式，自定义编码器处理Decimal/date/datetime
   - **序列化优化**：支持更多数据类型和格式化选项
+  - **结构化错误输出**：统一的错误格式，包含code、message和details字段
 - **Schema验证系统（schema.py）**
   - 完整的schema验证机制，支持请求和响应数据的自动验证
   - 集成OpenAPI规范，确保API契约一致性
@@ -155,10 +155,12 @@ X --> AA["--index模式<br/>高效schema加载"]
   - 提供JSON数据处理、分页控制、字段过滤等通用功能
   - 支持--json标志解析和--all/--fields参数处理
   - **数据验证**：请求前数据格式校验功能
+  - **链式命令支持**：增强的--confirm标志处理，支持安全的批量操作
 - 命令组（commands/*）
   - auth、investor、portfolio、position、sub、trade、share-event、market、product、platform、system、log、task、snapshot、notification共15个组，覆盖CRUD与业务流程操作
   - **交易预览HTTP化**：trades.py中的交易预览功能现在通过HTTP接口暴露，为客户端应用提供Web访问能力
   - **市场数据增强**：market_data.py新增nav-coverage命令，改进帮助文本和数据限制警告
+  - **快照重计算优化**：improved recalculate command rollback operations
 
 **章节来源**
 - [config.py:1-109](file://ir-cli/ir_cli/config.py#L1-L109)
@@ -172,7 +174,7 @@ X --> AA["--index模式<br/>高效schema加载"]
 - [trades.py:1-106](file://ir-cli/ir_cli/commands/trades.py#L1-L106)
 
 ## 架构总览
-CLI作为HTTP客户端，通过REST API与后端交互。所有命令均经APIClient发起请求，统一错误处理与响应解析，最终由output模块输出结构化JSON。**新增的交易预览HTTP功能和schema验证系统进一步确保了数据一致性和开发效率，OpenAPI集成简化了前后端协作**。
+CLI作为HTTP客户端，通过REST API与后端交互。所有命令均经APIClient发起请求，统一错误处理与响应解析，最终由output模块输出结构化JSON。**新增的网络错误处理、退出码标准化和链式命令执行功能进一步确保了系统的稳定性和用户体验**。
 
 ```mermaid
 sequenceDiagram
@@ -204,6 +206,15 @@ alt 首次失败
 C->>C : 指数退避重试
 C->>S : 重试请求
 end
+alt 网络连接错误
+C->>C : 返回NETWORK_ERROR
+C-->>CMD : exit code 3
+CMD-->>U : 结构化错误输出
+else 连接超时
+C->>C : 返回TIMEOUT_ERROR
+C-->>CMD : exit code 3
+CMD-->>U : 结构化错误输出
+else 正常响应
 S-->>C : 200 {preview_data : {...}, validation_result : {...}}
 C->>SCHEMA : 验证响应数据
 C->>CACHE : 更新缓存
@@ -254,10 +265,11 @@ Note over CMD,U : 错误时返回对应退出码
 - 响应处理：
   - 401/403/404/409/422/5xx分别映射为AUTH_REQUIRED/FORBIDDEN/NOT_FOUND/CONFLICT/VALIDATION_ERROR/SERVER_ERROR
   - 2xx成功：若响应体含items+total则包装为data+meta的分页结构
-- 网络异常：ConnectError/TimeoutException转换为CONNECTION_ERROR/TIMEOUT_ERROR，触发重试机制
+- **网络异常处理**：ConnectError/TimeoutException转换为NETWORK_ERROR/TIMEOUT_ERROR，触发重试机制
+- **退出码标准化**：网络相关错误返回exit code 3，便于脚本处理和自动化集成
 - 分页聚合：get_all将page_size固定为100，循环翻页直至拉完
 
-**更新** 新增智能重试机制，支持指数退避和最大重试次数配置，显著提升网络请求的稳定性
+**更新** 新增智能重试机制和网络错误处理，支持指数退避和最大重试次数配置，显著提升网络请求的稳定性，并为网络失败场景提供专门的退出码
 
 ```mermaid
 flowchart TD
@@ -282,6 +294,10 @@ ServerErr --> End
 HttpErr --> End
 WrapPage --> End
 ReturnData --> End
+NetworkErr["网络连接错误"] --> NetExit["exit code 3"]
+TimeoutErr["连接超时"] --> TimeExit["exit code 3"]
+NetExit --> End
+TimeExit --> End
 ```
 
 **图表来源**
@@ -348,6 +364,7 @@ ReturnData --> End
 - 失败：{"ok": false, "error": {"code": ..., "message": ...[, "details": ...]}}，exit code 1
 - 自定义编码器：Decimal转float(保留4位小数)，date/datetime转ISO字符串
 - **序列化优化**：支持更多数据类型和格式化选项，提升输出质量
+- **结构化错误输出**：统一的错误格式，包含code、message和details字段
 
 **章节来源**
 - [output.py:15-24](file://ir-cli/ir_cli/output.py#L15-L24)
@@ -361,8 +378,9 @@ ReturnData --> End
 - **错误分类**：统一的错误码和退出码处理
 - **通用函数**：提供各命令组复用的工具方法
 - **数据验证**：新增请求前数据格式验证功能，减少无效请求
+- **链式命令支持**：增强的--confirm标志处理，支持安全的批量操作
 
-**更新** utils.py模块新增数据验证功能，进一步提升CLI的稳定性和用户体验
+**更新** utils.py模块新增数据验证功能和链式命令支持，进一步提升CLI的稳定性和用户体验
 
 **章节来源**
 - [utils.py:1-100](file://ir-cli/ir_cli/utils.py#L1-L100)
@@ -384,7 +402,7 @@ ReturnData --> End
 - 快照（snapshot）：generate/recalculate/validate/status/delete
 - **通知（notification）**：**新增**：list/create/get/update/delete/mark-read/mark-unread/batch-delete
 
-**更新** 交易命令组新增preview功能的HTTP化，用于交易预览的Web访问；市场数据命令组新增nav-coverage命令，用于净值覆盖率检查；改进了帮助文本和数据限制警告
+**更新** 交易命令组新增preview功能的HTTP化，用于交易预览的Web访问；市场数据命令组新增nav-coverage命令，用于净值覆盖率检查；改进了帮助文本和数据限制警告；快照命令组优化了recalculate命令的回滚操作
 
 **章节来源**
 - [main.py:15-46](file://ir-cli/ir_cli/main.py#L15-L46)
@@ -612,6 +630,9 @@ SNP --> UT
 NOTI --> UT
 CFG --> CACHE["本地缓存"]
 CFG --> UTF8["UTF-8编码处理"]
+CL --> NETERR["网络错误处理<br/>NETWORK_ERROR/TIMEOUT_ERROR"]
+CL --> EXITCODE["退出码标准化<br/>exit code 3"]
+UT --> CHAIN["链式命令支持<br/>--confirm标志"]
 ```
 
 **图表来源**
@@ -628,12 +649,12 @@ CFG --> UTF8["UTF-8编码处理"]
 
 ## 性能与可靠性
 - **网络超时**：默认300秒（5分钟），可通过IR_HTTP_TIMEOUT环境变量自定义调整，避免长时间阻塞
-- **连接错误与超时**：统一转换为CONNECTION_ERROR/TIMEOUT_ERROR，便于上层处理
+- **连接错误与超时**：统一转换为NETWORK_ERROR/TIMEOUT_ERROR，便于上层处理
 - **智能重试机制**：新增指数退避重试逻辑，支持IR_RETRY环境变量配置，显著提升网络请求稳定性
 - **分页聚合**：get_all采用page_size=100，减少往返次数，适合中小规模数据一次性拉取
 - **Token有效期**：提前24小时发出警告，降低因过期导致的批量失败风险
 - **幂等性**：由后端保障，CLI侧不重复提交（建议上游幂等接口配合）
-- **结构化退出码**：提供明确的错误分类，便于脚本处理和自动化集成
+- **结构化退出码**：提供明确的错误分类，包括exit code 3用于网络失败，便于脚本处理和自动化集成
 - **JSON数据处理**：支持--json标志进行高效的数据输入输出
 - **本地数据验证**：请求前进行数据格式校验，减少无效请求和网络开销
 - **系统日历缓存**：交易日历数据本地缓存，提升查询性能
@@ -642,16 +663,17 @@ CFG --> UTF8["UTF-8编码处理"]
 - **Schema验证优化**：--index模式提供高效的schema加载机制，减少内存占用
 - **响应字段缓存**：响应字段契约缓存机制，提升验证性能
 - **交易预览HTTP化**：通过HTTP接口暴露交易预览功能，提升系统的可集成性
+- **链式命令执行**：增强的--confirm标志支持安全的批量操作
 
-**更新** 新增的智能重试机制、数据验证、缓存功能、UTF-8编码处理和交易预览HTTP化显著提升了工具的可靠性和性能表现，schema验证系统和响应字段契约系统进一步增强了数据一致性和开发效率
+**更新** 新增的智能重试机制、网络错误处理、退出码标准化、数据验证、缓存功能、UTF-8编码处理和交易预览HTTP化显著提升了工具的可靠性和性能表现，schema验证系统和响应字段契约系统进一步增强了数据一致性和开发效率
 
 ## 故障排查指南
 - 未登录或token过期
   - 现象：AUTH_REQUIRED错误
   - 处理：执行ir auth login重新获取token；检查~/.ir/token.json是否存在且未过期
 - 无法连接后端
-  - 现象：CONNECTION_ERROR
-  - 处理：确认IR_BASE_URL或~/.ir/config中base_url正确，后端服务可达
+  - 现象：NETWORK_ERROR
+  - 处理：确认IR_BASE_URL或~/.ir/config中base_url正确，后端服务可达；检查网络连接状态
 - **请求超时**
   - 现象：TIMEOUT_ERROR
   - 处理：检查网络延迟与后端负载；设置IR_HTTP_TIMEOUT环境变量调整超时时间（默认300秒）；必要时优化后端接口性能
@@ -697,11 +719,17 @@ CFG --> UTF8["UTF-8编码处理"]
 - **交易预览HTTP化问题**
   - 现象：交易预览功能无法通过HTTP访问
   - 处理：检查后端服务是否正常运行；确认API端点是否正确配置；查看详细的错误信息和日志
+- **退出码问题**
+  - 现象：脚本无法正确处理错误
+  - 处理：检查exit code是否为3（网络失败）；确认脚本逻辑正确处理不同的退出码
+- **链式命令执行问题**
+  - 现象：批量操作执行失败
+  - 处理：确认--confirm标志正确使用；检查命令间的依赖关系；查看详细的错误信息
 
-**更新** 增加了智能重试、调试模式、缓存、UTF-8编码、净值覆盖率、schema验证、响应字段契约、OpenAPI集成和交易预览HTTP化相关的故障排查指导
+**更新** 增加了智能重试、调试模式、缓存、UTF-8编码、净值覆盖率、schema验证、响应字段契约、OpenAPI集成、交易预览HTTP化、退出码标准化和链式命令执行相关的故障排查指导
 
 ## 结论
-InvestRing HTTP客户端CLI以最小依赖实现了完整的投资管理系统命令行能力，具备良好的可移植性与易用性。通过统一的认证、配置、错误处理与输出协议，CLI能够稳定地与后端协作，满足日常运维与自动化场景需求。**新增的智能重试机制、数据验证、系统日历缓存、安全配置管理和UTF-8编码处理功能进一步增强了CLI的功能性和用户体验，使其更适合生产环境的自动化集成和高可用性要求。新增的schema验证系统和响应字段契约系统大幅提升了数据一致性和开发效率，OpenAPI集成简化了前后端协作流程。交易预览功能的HTTP化使得客户端应用可以直接通过REST API访问交易预览功能，提升了系统的可集成性和扩展性**。
+InvestRing HTTP客户端CLI以最小依赖实现了完整的投资管理系统命令行能力，具备良好的可移植性与易用性。通过统一的认证、配置、错误处理与输出协议，CLI能够稳定地与后端协作，满足日常运维与自动化场景需求。**新增的网络错误处理、退出码标准化、智能重试机制、数据验证、系统日历缓存、安全配置管理和UTF-8编码处理功能进一步增强了CLI的功能性和用户体验，使其更适合生产环境的自动化集成和高可用性要求。新增的schema验证系统和响应字段契约系统大幅提升了数据一致性和开发效率，OpenAPI集成简化了前后端协作流程。交易预览功能的HTTP化使得客户端应用可以直接通过REST API访问交易预览功能，提升了系统的可集成性和扩展性。链式命令执行的增强和快照重计算的优化进一步提升了批量操作的安全性和数据一致性**。
 
 ## 附录：命令清单与API映射
 - 认证
@@ -797,3 +825,15 @@ InvestRing HTTP客户端CLI以最小依赖实现了完整的投资管理系统�
   - 通过HTTP接口暴露交易预览功能
   - 为客户端应用提供Web访问能力
   - 保持与原有CLI预览功能一致的逻辑
+- **网络错误处理**：**新增**
+  - 专门的NETWORK_ERROR和TIMEOUT_ERROR处理
+  - 结构化错误输出，包含详细信息
+  - 智能重试机制，支持指数退避
+- **退出码标准化**：**新增**
+  - exit code 3用于网络失败场景
+  - 统一的错误分类系统
+  - 便于脚本处理和自动化集成
+- **链式命令执行**：**新增**
+  - 增强的--confirm标志支持
+  - 安全的批量操作处理
+  - 改进的错误处理和回滚机制

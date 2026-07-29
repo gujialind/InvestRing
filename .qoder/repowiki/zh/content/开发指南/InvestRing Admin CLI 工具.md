@@ -36,9 +36,10 @@
 
 ## 更新摘要
 **变更内容**   
-- **增强后端CLI份额变动事件管理**：在 backend/cli/commands/share_events.py 中增强了CLI接口，提供了统一的REST/CLI功能，确保API调用和命令行操作之间的一致性行为
-- **统一接口行为**：实现了前后端CLI功能的统一化，使份额变动事件管理在REST API和命令行界面中具有一致的用户体验
-- **改进错误处理**：增强了错误处理和验证机制，提供更好的用户反馈和调试支持
+- **新增系统交易日历命令组**：在 ir system 下新增了 trading-day 子命令，支持从命令行查询交易日历信息
+- **增强高频创建命令帮助输出**：为所有高频 create 命令添加了完整的示例说明，提升 --help 输出的实用性
+- **标准化参数处理**：统一了选项风格，确保参数处理的 consistency
+- **动态错误提示功能**：通过 get_hint() 函数实现了智能的错误提示和解决方案建议
 
 ## 目录
 1. [简介](#简介)
@@ -55,7 +56,7 @@
 ## 简介
 InvestRing Admin CLI 是一个专为 AI Agent 设计的现代化命令行工具，基于 Typer 构建，采用独立的 ir-cli 包架构。该工具提供完整的 OpenAPI schema 自描述系统、智能错误提示、静默输出模式和预定义工作流配方，是面向程序化交互和企业级自动化的理想选择。
 
-**最新更新**：增强了后端CLI份额变动事件管理功能，提供了统一的REST/CLI接口，确保API调用和命令行操作之间的一致性行为，显著提升了份额变动事件管理的用户体验和操作效率。
+**最新更新**：新增了系统交易日历查询功能，增强了所有高频创建命令的帮助输出，标准化了参数处理方式，并引入了动态错误提示机制，显著提升了用户体验和操作效率。
 
 ## 项目结构
 CLI 位于 ir-cli/ir_cli 目录，采用现代化的分层架构设计，包含入口点、上下文管理、输出协议、schema 系统、错误提示、配置管理和命令组等核心组件。
@@ -119,7 +120,7 @@ Cfg --> PyProj
 - **HTTP 客户端**：封装的后端 API 调用，支持重试、超时和错误处理。
 - **后端CLI集成**：新增的后端CLI命令模块，提供直接的服务器端交易操作能力。
 
-**更新**：增强了后端CLI份额变动事件管理功能，现在可以通过 ir-cli 直接调用统一的REST/CLI接口进行份额变动事件管理，确保API调用和命令行操作的一致性。
+**更新**：新增了系统交易日历查询功能和动态错误提示机制，增强了所有高频创建命令的帮助输出，提供了更完善的用户指导。
 
 章节来源
 - [ir-cli/ir_cli/main.py:1-100](file://ir-cli/ir_cli/main.py#L1-L100)
@@ -141,22 +142,21 @@ participant Ctx as "ir_cli/context.py"
 participant Sch as "ir_cli/schema.py"
 participant Hnt as "ir_cli/hints.py"
 participant Cli as "ir_cli/client.py"
-participant BackendCLI as "backend/cli/commands/share_events.py"
+participant SystemCmd as "ir system trading-day"
 participant API as "后端API"
-User->>CLI : 运行 ir share-event list
+User->>CLI : 运行 ir system trading-day
 CLI->>Ctx : 进入 cli_context()
 Ctx->>Sch : 加载并验证schema
 Sch-->>Ctx : schema验证结果
 Ctx->>Hnt : 初始化错误提示系统
 Hnt-->>Ctx : hints配置
-CLI->>Cli : 发送HTTP请求
-Cli->>BackendCLI : 调用后端份额变动事件管理
-BackendCLI->>API : 执行份额变动事件逻辑
-API-->>BackendCLI : 返回份额变动事件数据
-BackendCLI-->>Cli : 返回统一格式的响应数据
-Cli-->>CLI : 解析响应数据
-CLI->>Out : success(data=份额变动事件信息)
-Out-->>User : 输出份额变动事件信息
+CLI->>SystemCmd : 调用交易日历查询
+SystemCmd->>Cli : 发送HTTP请求
+Cli->>API : 查询交易日历信息
+API-->>Cli : 返回交易日历数据
+Cli-->>SystemCmd : 解析响应数据
+SystemCmd->>Out : success(data=交易日历信息)
+Out-->>User : 输出交易日历信息
 Ctx->>API : 清理资源
 ```
 
@@ -166,58 +166,61 @@ Ctx->>API : 清理资源
 - [ir-cli/ir_cli/schema.py:1-150](file://ir-cli/ir_cli/schema.py#L1-L150)
 - [ir-cli/ir_cli/hints.py:1-120](file://ir-cli/ir_cli/hints.py#L1-L120)
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
-- [backend/cli/commands/share_events.py:1-100](file://backend/cli/commands/share_events.py#L1-L100)
+- [ir-cli/ir_cli/commands/system.py:1-100](file://ir-cli/ir_cli/commands/system.py#L1-L100)
 
 ## 详细组件分析
 
-### 后端CLI份额变动事件管理（backend/cli/commands/share_events.py）**已增强**
-**功能**：增强的后端份额变动事件CLI模块，提供统一的REST/CLI接口功能。
+### 系统交易日历查询（ir system trading-day）**新增功能**
+**功能**：新增的系统交易日历查询命令，支持从命令行获取交易日历信息。
 
-- `list`：查询份额变动事件列表，支持分页和过滤
-- `create`：创建新的份额变动事件，支持分红、拆股等多种类型
-- `get`：获取特定份额变动事件的详细信息
-- `update`：更新份额变动事件的状态和配置
-- `delete`：删除指定的份额变动事件
-- `confirm`：确认份额变动事件生效
-- `cancel`：取消待处理的份额变动事件
+- `list`：查询指定日期范围内的交易日历
+- `is-trading-day`：检查特定日期是否为交易日
+- `next-trading-day`：获取下一个交易日
+- `previous-trading-day`：获取上一个交易日
+- `get-holiday`：查询节假日信息
 
-**更新**：现在提供了统一的REST/CLI接口，确保API调用和命令行操作之间的一致性行为，改进了错误处理和验证机制。
+**新增**：该功能为用户提供了便捷的交易日历查询能力，支持各种常见的交易日历相关操作。
 
 ```mermaid
 flowchart TD
-Start(["开始份额变动事件操作"]) --> ParseParams["解析操作参数"]
+Start(["开始交易日历查询"]) --> ParseParams["解析查询参数"]
 ParseParams --> ValidateData["验证数据类型"]
 ValidateData --> CheckAuth["检查权限验证"]
-CheckAuth --> |通过| ExecuteOp["执行具体操作"]
+CheckAuth --> |通过| ExecuteQuery["执行查询操作"]
 CheckAuth --> |失败| AuthError["返回权限错误"]
-ExecuteOp --> ValidateBusiness["业务逻辑验证"]
-ValidateBusiness --> |通过| ProcessData["处理数据"]
-ValidateBusiness --> |失败| BusinessError["返回业务错误"]
+ExecuteQuery --> QueryCalendar["查询交易日历"]
+QueryCalendar --> ProcessData["处理数据"]
 ProcessData --> GenerateResponse["生成统一响应"]
 GenerateResponse --> OutputResult["输出结果"]
-OutputResult --> Success["success(data=操作结果)"]
+OutputResult --> Success["success(data=交易日历信息)"]
 AuthError --> End(["结束"])
-BusinessError --> End
 Success --> End
 ```
 
 **图表来源**
-- [backend/cli/commands/share_events.py:1-100](file://backend/cli/commands/share_events.py#L1-L100)
+- [ir-cli/ir_cli/commands/system.py:1-100](file://ir-cli/ir_cli/commands/system.py#L1-L100)
+
+### 高频创建命令增强**已增强**
+**功能**：所有高频 create 命令现在都包含了完整的示例说明。
+
+- **投资组合创建**：增加了完整的使用示例，包括必填参数和可选参数的说明
+- **投资人创建**：提供了详细的参数配置示例
+- **产品创建**：包含了产品类型和配置的完整示例
+- **订阅创建**：展示了申购赎回的各种场景
+- **交易创建**：提供了不同类型交易的创建示例
+
+**更新**：所有 create 命令的 --help 输出现在都包含了丰富的使用示例，帮助用户快速上手。
 
 章节来源
-- [backend/cli/commands/share_events.py:1-100](file://backend/cli/commands/share_events.py#L1-L100)
-
-### 调仓交易（trade）**保持不变**
-**功能**：CASH交易自动配对腿生成、转账组创建和确认日期计算。
-
-- list/create/get/confirm/cancel/unconfirm
-- CASH交易自动处理配对腿生成、转账组创建和确认日期计算，确保与REST API行为完全一致。支持后端CLI预览功能。
-
-章节来源
+- [ir-cli/ir_cli/commands/system.py:1-100](file://ir-cli/ir_cli/commands/system.py#L1-L100)
+- [ir-cli/ir_cli/commands/portfolios.py:1-300](file://ir-cli/ir_cli/commands/portfolios.py#L1-L300)
+- [ir-cli/ir_cli/commands/investors.py:1-150](file://ir-cli/ir_cli/commands/investors.py#L1-L150)
+- [ir-cli/ir_cli/commands/products.py:1-180](file://ir-cli/ir_cli/commands/products.py#L1-L180)
+- [ir-cli/ir_cli/commands/subscriptions.py:1-250](file://ir-cli/ir_cli/commands/subscriptions.py#L1-L250)
 - [ir-cli/ir_cli/commands/trades.py:1-300](file://ir-cli/ir_cli/commands/trades.py#L1-L300)
 
 ### 其他组件保持不变
-其他CLI组件保持原有功能不变，包括认证、投资人管理、组合管理、申购赎回、持仓服务、任务管理、快照管理、通知管理、同步作业管理、市场数据管理、产品管理、资金转账、日志管理、系统管理、平台管理等。
+其他CLI组件保持原有功能不变，包括认证、持仓服务、任务管理、快照管理、通知管理、同步作业管理、市场数据管理、资金转账、日志管理、平台管理等。
 
 ## 依赖关系分析
 - CLI 层对后端服务层为单向依赖，通过 HTTP API 通信，避免直接数据库访问。
@@ -226,9 +229,8 @@ Success --> End
 - schema 层提供完整的接口文档和参数验证。
 - hints 层提供智能错误提示和解决方案建议。
 - pyproject.toml 定义包配置和 entry point，使安装后可直接使用 ir 命令。
-- **增强**：后端CLI份额变动事件管理模块提供了统一的REST/CLI接口，增强了份额变动事件管理的一致性和可靠性。
 
-**更新**：增强了后端CLI份额变动事件管理的依赖关系，现在 ir-cli 可以直接调用统一的REST/CLI接口进行份额变动事件管理。
+**更新**：新增了系统交易日历查询功能的依赖关系，增强了动态错误提示机制的集成。
 
 ```mermaid
 graph LR
@@ -241,12 +243,13 @@ Main --> Config["ir_cli/config.py"]
 Main --> Client["ir_cli/client.py"]
 Main --> Cmds["ir_cli/commands/*"]
 Cmds --> Services["后端API服务"]
-Client --> BackendCLI["backend/cli/commands/share_events.py"]
+Client --> BackendCLI["backend/cli/commands/*"]
 BackendCLI --> API["OpenAPI规范"]
 Config --> PyProj["pyproject.toml"]
 Schema --> API
-ShareEventOps["份额变动事件操作"] --> BackendCLI
-TradePreview["交易预览功能"] --> trades["backend/cli/commands/trades.py"]
+SystemTradingDay["系统交易日历查询"] --> system["ir_cli/commands/system.py"]
+EnhancedHelp["增强的帮助输出"] --> commands["ir_cli/commands/*"]
+DynamicHints["动态错误提示"] --> hints["ir_cli/hints.py"]
 ```
 
 **图表来源**
@@ -257,8 +260,7 @@ TradePreview["交易预览功能"] --> trades["backend/cli/commands/trades.py"]
 - [ir-cli/ir_cli/hints.py:1-120](file://ir-cli/ir_cli/hints.py#L1-L120)
 - [ir-cli/ir_cli/config.py:1-90](file://ir-cli/ir_cli/config.py#L1-L90)
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
-- [backend/cli/commands/share_events.py:1-100](file://backend/cli/commands/share_events.py#L1-L100)
-- [backend/cli/commands/trades.py:1-100](file://backend/cli/commands/trades.py#L1-L100)
+- [ir-cli/ir_cli/commands/system.py:1-100](file://ir-cli/ir_cli/commands/system.py#L1-L100)
 
 章节来源
 - [ir-cli/ir_cli/main.py:1-100](file://ir-cli/ir_cli/main.py#L1-L100)
@@ -272,9 +274,8 @@ TradePreview["交易预览功能"] --> trades["backend/cli/commands/trades.py"]
 - **插件架构**：支持自定义命令组和中间件扩展。
 - **批处理优化**：支持批量操作和并行处理，提升大规模数据处理效率。
 - **配置缓存**：配置信息本地缓存，减少重复加载开销。
-- **后端CLI优化**：增强的后端CLI份额变动事件管理提供了高效的统一接口处理能力，减少了网络往返开销。
 
-**更新**：增强的后端CLI份额变动事件管理提供了更高效的统一接口处理能力，支持一致的REST/CLI行为，减少了不必要的网络请求和状态不一致问题。
+**更新**：新增的系统交易日历查询功能采用了高效的缓存机制，减少了重复查询的开销。增强的帮助输出功能不会影响运行时性能。
 
 章节来源
 - [ir-cli/ir_cli/client.py:1-110](file://ir-cli/ir_cli/client.py#L1-L110)
@@ -308,14 +309,14 @@ TradePreview["交易预览功能"] --> trades["backend/cli/commands/trades.py"]
   - COMMAND_DEPRECATED_ERROR：使用了已弃用的命令。
   - TRADE_PREVIEW_ERROR：交易预览失败。
   - BACKEND_CLI_ERROR：后端CLI命令执行失败。
-  - **新增** SHARE_EVENT_OPERATION_ERROR：份额变动事件操作失败。
-  - **新增** SHARE_EVENT_API_MISMATCH_ERROR：份额变动事件API不一致错误。
+  - TRADING_DAY_QUERY_ERROR：交易日历查询失败。
+  - HINT_FUNCTION_ERROR：动态错误提示函数执行失败。
 
-**更新**：新增了份额变动事件相关的错误处理和调试支持：
-- **份额变动事件操作错误**：当份额变动事件操作失败时提供详细的错误信息和修复建议
-- **API不一致错误**：当前端CLI无法正确调用后端份额变动事件API时的错误处理
-- **参数验证增强**：份额变动事件参数的预验证和错误检测
-- **调试建议**：使用 --verbose 模式查看份额变动事件操作的详细执行过程
+**更新**：新增了交易日历查询相关的错误处理和调试支持：
+- **交易日历查询错误**：当交易日历查询失败时提供详细的错误信息和修复建议
+- **动态提示函数错误**：当 get_hint() 函数执行失败时的错误处理
+- **参数验证增强**：交易日历查询参数的预验证和错误检测
+- **调试建议**：使用 --verbose 模式查看详细调试信息
 
 - **调试建议**
   - 查看 stderr 堆栈：context 在非 SystemExit 异常时会打印完整堆栈到 stderr。
@@ -329,8 +330,8 @@ TradePreview["交易预览功能"] --> trades["backend/cli/commands/trades.py"]
   - 使用 `ir config export` 导出当前配置进行备份。
   - 使用 `ir trade preview` 进行交易的预验证和参数检查。
   - 检查后端CLI服务的连接状态和可用性。
-  - **新增** 使用 `ir share-event list` 验证份额变动事件接口的连通性。
-  - **新增** 检查份额变动事件API的一致性和响应格式。
+  - 使用 `ir system trading-day list` 验证交易日历接口的连通性。
+  - 使用 `ir <command> --help` 查看增强的帮助输出和示例。
 
 章节来源
 - [ir-cli/ir_cli/context.py:1-80](file://ir-cli/ir_cli/context.py#L1-L80)
@@ -338,13 +339,12 @@ TradePreview["交易预览功能"] --> trades["backend/cli/commands/trades.py"]
 - [ir-cli/ir_cli/schema.py:1-150](file://ir-cli/ir_cli/schema.py#L1-L150)
 - [ir-cli/ir_cli/hints.py:1-120](file://ir-cli/ir_cli/hints.py#L1-L120)
 - [ir-cli/ir_cli/config.py:1-90](file://ir-cli/ir_cli/config.py#L1-L90)
-- [backend/cli/commands/share_events.py:1-100](file://backend/cli/commands/share_events.py#L1-L100)
-- [backend/cli/commands/trades.py:1-100](file://backend/cli/commands/trades.py#L1-L100)
+- [ir-cli/ir_cli/commands/system.py:1-100](file://ir-cli/ir_cli/commands/system.py#L1-L100)
 
 ## 结论
 InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑下沉至后端服务层，并通过 Typer 暴露稳定、可解析的 JSON 接口，特别适合 AI Agent 自动化编排。其分层清晰、错误处理规范、输出格式统一，具备良好的可维护性与扩展性。
 
-**更新总结**：最新的 ir-cli 包架构引入了 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。增强的后端CLI份额变动事件管理提供了统一的REST/CLI接口，确保API调用和命令行操作之间的一致性行为，显著提升了份额变动事件管理的用户体验和操作效率。这些改进使 CLI 成为更智能的自文档化接口，支持程序化交互和更好的自动化处理，为企业级应用提供了强大的命令行工具支持。
+**更新总结**：最新的 ir-cli 包架构引入了 schema 自描述系统、智能错误提示、--quiet 模式、portfolio 上下文聚合、workflows 配方等高级功能。新增的系统交易日历查询功能为用户提供了便捷的日历信息查询能力，增强的帮助输出功能显著提升了用户体验，标准化的参数处理和动态错误提示机制进一步增强了工具的可靠性和易用性。这些改进使 CLI 成为更智能的自文档化接口，支持程序化交互和更好的自动化处理，为企业级应用提供了强大的命令行工具支持。
 
 ## 附录：命令清单与用法要点
 - **auth**
@@ -364,7 +364,6 @@ InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑
   - 支持交易预览功能，可在执行前验证参数和计算影响。
 - **share-event**
   - list/create/get/update/delete/confirm/cancel：用于分红等份额变动事件，支持丰富的参数配置。
-  - **重大更新**：现在提供统一的REST/CLI接口，确保API调用和命令行操作之间的一致性行为。
 - **market**
   - price/sync/sync-history：查询与同步价格。
   - 已移除 'sync-nav' 命令，请使用 'ir snapshot generate' 进行净值生成。
@@ -382,6 +381,12 @@ InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑
   - list/search/export：系统日志管理，支持查询、搜索和导出功能。
 - **system**
   - health/info/config：系统运维管理，支持健康检查、信息查询和配置管理。
+  - **trading-day**：**新增**交易日历管理，支持查询交易日历、检查交易日、获取节假日等功能。
+    - list：查询指定日期范围内的交易日历
+    - is-trading-day：检查特定日期是否为交易日
+    - next-trading-day：获取下一个交易日
+    - previous-trading-day：获取上一个交易日
+    - get-holiday：查询节假日信息
 - **task**
   - list/run/enable/disable/logs：任务管理，支持任务调度、执行和监控。
 - **platform**
@@ -398,12 +403,12 @@ InvestRing Admin CLI 通过全新的 ir-cli 包架构，将复杂的业务逻辑
   - export：导出当前配置
   - import：导入配置
 
-**更新**：增强了份额变动事件管理功能，现在可以通过 ir-cli 直接调用统一的REST/CLI接口进行份额变动事件管理，确保API调用和命令行操作的一致性。
+**更新**：新增了系统交易日历查询功能，所有高频 create 命令现在都包含了完整的帮助示例，提供了更好的用户指导。
 
 **迁移指导**：
-- **旧方式**：直接执行份额变动事件操作
-- **新方式**：使用统一的REST/CLI接口进行份额变动事件管理
-- **优势**：确保API调用和命令行操作的一致性，提供更好的错误处理和用户体验
+- **旧方式**：直接执行各种操作
+- **新方式**：使用统一的REST/CLI接口进行操作，享受增强的帮助输出和错误提示
+- **优势**：提供更完善的用户指导、更好的错误处理和一致性体验
 
 章节来源
 - [ir-cli/ir_cli/main.py:1-100](file://ir-cli/ir_cli/main.py#L1-L100)
