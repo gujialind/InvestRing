@@ -1,9 +1,21 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { ApiError } from "@/types/common";
 
+/**
+ * 检测运行时基础路径（用于 ModelScope Studio 等子路径部署场景）。
+ * 魔搭 Studio 将应用挂载在 /studios/{owner}/{repo}/ 下，
+ * 平台反向代理会剥离前缀后转发给容器，但浏览器端发起的 API 请求
+ * 必须携带完整前缀才能经代理抵达本应用的 Next.js 服务器。
+ */
+export function getBasePath(): string {
+  if (typeof window === "undefined") return "";
+  const match = window.location.pathname.match(/^(\/studios\/[^/]+\/[^/]+)/);
+  return match ? match[1] : "";
+}
+
 // 创建 axios 实例
 const api: AxiosInstance = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "/api",
+  baseURL: process.env.NEXT_PUBLIC_API_URL || `${getBasePath()}/api`,
   headers: {
     "Content-Type": "application/json",
   },
@@ -34,7 +46,7 @@ api.interceptors.response.use(
     if (typeof window !== "undefined") {
       if (error.response?.status === 401) {
         localStorage.removeItem("token");
-        window.location.href = "/login";
+        window.location.href = `${getBasePath()}/login`;
       }
     }
     return Promise.reject(error);

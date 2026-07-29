@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { authApi, ApiException } from "@/lib/api";
+import { authApi, ApiException, getBasePath } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +11,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
 
 export default function LoginPage() {
-  const router = useRouter();
   const { login } = useAuthStore();
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -27,8 +25,13 @@ export default function LoginPage() {
     try {
       const response = await authApi.login({ code, password });
       const { token, user } = response;
+      if (!token) {
+        setError("登录响应无效，请检查后端服务是否可达");
+        return;
+      }
       login(token, user);
-      router.push("/dashboard");
+      // 使用完整路径跳转，兼容 ModelScope Studio 等子路径部署
+      window.location.href = `${getBasePath()}/dashboard`;
     } catch (err) {
       if (err instanceof ApiException) {
         setError(err.message);
