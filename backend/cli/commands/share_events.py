@@ -114,9 +114,12 @@ def update_event(
     cash_change: Optional[float] = typer.Option(None, "--cash-change"),
     notes: Optional[str] = typer.Option(None, "--notes"),
 ):
-    """更新份额变动事件"""
+    """更新份额变动事件（仅 pending 可改，confirmed 需先 unconfirm）"""
     with cli_context() as db:
         from app.models.share_change_event import ShareChangeEvent
+        from app.services.share_change_event_service import (
+            update_share_change_event as update_event_service,
+        )
 
         event = db.query(ShareChangeEvent).filter(ShareChangeEvent.id == id).first()
         if not event:
@@ -125,20 +128,24 @@ def update_event(
         def to_d(v):
             return Decimal(str(v)) if v is not None else None
 
+        updates = {}
         if ex_date is not None:
-            event.ex_date = parse_date(ex_date)
+            updates["ex_date"] = parse_date(ex_date)
         if entitlement_shares is not None:
-            event.entitlement_shares = to_d(entitlement_shares)
+            updates["entitlement_shares"] = to_d(entitlement_shares)
         if ratio is not None:
-            event.ratio = to_d(ratio)
+            updates["ratio"] = to_d(ratio)
         if div_cash is not None:
-            event.div_cash = to_d(div_cash)
+            updates["div_cash"] = to_d(div_cash)
         if reinvest_nav is not None:
-            event.reinvest_nav = to_d(reinvest_nav)
+            updates["reinvest_nav"] = to_d(reinvest_nav)
         if cash_change is not None:
-            event.cash_change = to_d(cash_change)
+            updates["cash_change"] = to_d(cash_change)
         if notes is not None:
-            event.notes = notes
+            updates["notes"] = notes
+
+        # confirmed 阻断、日期重校验均在 service 单点实现（REST/CLI 共用）
+        update_event_service(db, event, updates)
 
         db.flush()
         db.refresh(event)

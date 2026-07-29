@@ -416,3 +416,113 @@ class TestShareChangeEventUnconfirm:
         )
         assert resp.status_code == 422
         assert resp.json()["detail"]["error"] == "INVALID_STATUS"
+
+
+class TestUpdateShareChangeEvent:
+    """PUT 更新事件：confirmed 阻断、日期重校验、status 直改忽略"""
+
+    def test_update_confirmed_event_rejected(self, client, admin_headers, test_db):
+        """confirmed 事件不可直接修改，须先 unconfirm"""
+        create_portfolio(test_db, code="UPE_P1", status="active")
+        create_product(test_db, code="FUND_UPE1", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        create_platform(test_db, code="UPE_PLAT1")
+        ensure_trading_day(test_db, date(2025, 11, 10), is_open=True)
+        ensure_trading_day(test_db, date(2025, 11, 12), is_open=True)
+        event = create_share_change_event(
+            test_db, "UPE_P1", "FUND_UPE1", "CN_OTC",
+            event_type="cash_dividend", ex_date=date(2025, 11, 12),
+            entitlement_date=date(2025, 11, 10), status="confirmed",
+            platform_code="UPE_PLAT1", div_cash=Decimal("0.1"),
+        )
+
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"notes": "try modify confirmed"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "CANNOT_MODIFY_CONFIRMED"
+
+    def test_update_pending_event_dates_revalidated(self, client, admin_headers, test_db):
+        """pending 事件改日期时重跑创建时的双日期校验"""
+        create_portfolio(test_db, code="UPE_P2", status="active")
+        create_product(test_db, code="FUND_UPE2", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        create_platform(test_db, code="UPE_PLAT2")
+        ensure_trading_day(test_db, date(2025, 11, 10), is_open=True)
+        ensure_trading_day(test_db, date(2025, 11, 12), is_open=True)
+        ensure_trading_day(test_db, date(2025, 11, 15), is_open=False)  # 周六
+        event = create_share_change_event(
+            test_db, "UPE_P2", "FUND_UPE2", "CN_OTC",
+            event_type="cash_dividend", ex_date=date(2025, 11, 12),
+            entitlement_date=date(2025, 11, 10), status="pending",
+            platform_code="UPE_PLAT2", div_cash=Decimal("0.1"),
+        )
+
+        # 除息日非交易日
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"ex_date": "2025-11-15"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_EX_DATE"
+
+        # 除息日 <= 权益登记日
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"ex_date": "2025-11-10"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_DATE_ORDER"
+
+        # 除息日 <= 最新快照日
+        create_value_snapshot(test_db, "UPE_P2", date(2025, 11, 14),
+                              total_value=1000, total_shares=1000, unit_price=1.0)
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"ex_date": "2025-11-13"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "DATE_BEFORE_SNAPSHOT"
+
+        # 合法新日期（交易日、晚于登记日与最新快照日）可正常更新
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"ex_date": "2025-11-17"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        test_db.expire_all()
+        updated = test_db.query(ShareChangeEvent).get(event.id)
+        assert updated.ex_date == date(2025, 11, 17)
+
+    def test_update_status_field_ignored(self, client, admin_headers, test_db):
+        """PUT 传 status 被忽略（状态流转只走 confirm/cancel/unconfirm 端点）"""
+        create_portfolio(test_db, code="UPE_P3", status="active")
+        create_product(test_db, code="FUND_UPE3", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        create_platform(test_db, code="UPE_PLAT3")
+        ensure_trading_day(test_db, date(2025, 11, 10), is_open=True)
+        ensure_trading_day(test_db, date(2025, 11, 12), is_open=True)
+        event = create_share_change_event(
+            test_db, "UPE_P3", "FUND_UPE3", "CN_OTC",
+            event_type="cash_dividend", ex_date=date(2025, 11, 12),
+            entitlement_date=date(2025, 11, 10), status="pending",
+            platform_code="UPE_PLAT3", div_cash=Decimal("0.1"),
+        )
+
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"status": "confirmed", "notes": "n1"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        test_db.expire_all()
+        updated = test_db.query(ShareChangeEvent).get(event.id)
+        # status 字段被 schema 忽略，仍为 pending；其余合法字段正常更新
+        assert updated.status == "pending"
+        assert updated.notes == "n1"

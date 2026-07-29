@@ -7270,17 +7270,6 @@
             ],
             "title": "Ratio"
           },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
-          },
           "notes": {
             "anyOf": [
               {
@@ -7759,17 +7748,6 @@
               }
             ],
             "title": "Unit Price"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
           },
           "notes": {
             "anyOf": [
@@ -8520,17 +8498,6 @@
               }
             ],
             "title": "Trade Date"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
           },
           "notes": {
             "anyOf": [

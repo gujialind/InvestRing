@@ -157,6 +157,34 @@ def _confirm_fund_level_event(db: Session, event: ShareChangeEvent) -> None:
     event.confirmed_at = now
 
 
+def _validate_event_dates(
+    db: Session, portfolio_code: str, ex_date: date, entitlement_date: date
+) -> None:
+    """校验事件双日期：均为交易日、ex_date > entitlement_date、晚于最新快照日。
+
+    创建与更新（pending 改日期）共用，保证两条路径校验一致。
+    """
+    # 权益登记日必须是交易日
+    if not is_trading_day(db, entitlement_date):
+        raise BusinessError("INVALID_ENTITLEMENT_DATE", "权益登记日不是交易日")
+    # 除息日必须是交易日
+    if not is_trading_day(db, ex_date):
+        raise BusinessError("INVALID_EX_DATE", "除息日不是交易日")
+    # 除息日必须严格大于权益登记日
+    if ex_date <= entitlement_date:
+        raise BusinessError(
+            "INVALID_DATE_ORDER",
+            "除息日必须严格大于权益登记日（ex_date > entitlement_date）",
+        )
+    # 除息日必须晚于最新快照日
+    latest_snapshot = get_latest_snapshot_date(db, portfolio_code)
+    if latest_snapshot and ex_date <= latest_snapshot:
+        raise BusinessError(
+            "DATE_BEFORE_SNAPSHOT",
+            f"除息日必须晚于最新快照日（{latest_snapshot}）",
+        )
+
+
 def create_share_change_event(
     db: Session,
     *,
@@ -182,25 +210,7 @@ def create_share_change_event(
     force_cover: bool = False,
 ) -> ShareChangeEvent:
     """创建份额变动事件（含全部校验与平台分级约束），供 REST 与 CLI 共用。不 commit。"""
-    # 权益登记日必须是交易日
-    if not is_trading_day(db, entitlement_date):
-        raise BusinessError("INVALID_ENTITLEMENT_DATE", "权益登记日不是交易日")
-    # 除息日必须是交易日
-    if not is_trading_day(db, ex_date):
-        raise BusinessError("INVALID_EX_DATE", "除息日不是交易日")
-    # 除息日必须严格大于权益登记日
-    if ex_date <= entitlement_date:
-        raise BusinessError(
-            "INVALID_DATE_ORDER",
-            "除息日必须严格大于权益登记日（ex_date > entitlement_date）",
-        )
-    # 除息日必须晚于最新快照日
-    latest_snapshot = get_latest_snapshot_date(db, portfolio_code)
-    if latest_snapshot and ex_date <= latest_snapshot:
-        raise BusinessError(
-            "DATE_BEFORE_SNAPSHOT",
-            f"除息日必须晚于最新快照日（{latest_snapshot}）",
-        )
+    _validate_event_dates(db, portfolio_code, ex_date, entitlement_date)
 
     portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
     if not portfolio:
@@ -260,6 +270,35 @@ def create_share_change_event(
     )
     db.add(new_event)
     return new_event
+
+
+def update_share_change_event(
+    db: Session, event: ShareChangeEvent, updates: dict
+) -> ShareChangeEvent:
+    """更新份额变动事件（仅 pending 可改），供 REST 与 CLI 共用。不 commit。
+
+    - confirmed 拒绝直改（含基金级子记录，子记录恒为 confirmed），
+      须先 unconfirm，经快照保护（SNAPSHOT_DEPENDENCY）把关
+    - 日期变更时用合并后生效值重跑创建时的双日期校验
+    """
+    if event.status == "confirmed":
+        raise BusinessError(
+            "CANNOT_MODIFY_CONFIRMED",
+            "已确认的份额变动事件不可直接修改，请先取消确认后再修改",
+        )
+
+    if updates.keys() & {"ex_date", "entitlement_date"}:
+        effective_ex_date = updates.get("ex_date", event.ex_date)
+        effective_entitlement_date = updates.get(
+            "entitlement_date", event.entitlement_date
+        )
+        _validate_event_dates(
+            db, event.portfolio_code, effective_ex_date, effective_entitlement_date
+        )
+
+    for field, value in updates.items():
+        setattr(event, field, value)
+    return event
 
 
 def confirm_share_change_event(db: Session, event: ShareChangeEvent) -> ShareChangeEvent:

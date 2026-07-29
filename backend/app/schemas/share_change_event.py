@@ -32,6 +32,7 @@ class ShareChangeEventCreate(ShareChangeEventBase):
 
 
 class ShareChangeEventUpdate(BaseModel):
+    # status 不开放直改：状态流转走 confirm/cancel/unconfirm 端点
     ex_date: Optional[date] = None
     entitlement_date: Optional[date] = None
     shares_before: Optional[float] = None
@@ -41,7 +42,6 @@ class ShareChangeEventUpdate(BaseModel):
     div_cash: Optional[float] = None
     reinvest_nav: Optional[float] = None
     ratio: Optional[float] = None
-    status: Optional[str] = None
     notes: Optional[str] = None
 
 

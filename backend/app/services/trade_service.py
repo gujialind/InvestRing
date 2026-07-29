@@ -96,8 +96,10 @@ def attach_paired_cash_leg(
 def sync_transfer_group(
     db: Session, trade: Trade, target_status: str, confirm_date: Optional[date] = None
 ):
-    """同步 transfer_group 关联的另一腿状态与金额
+    """同步 transfer_group 关联的另一腿状态、日期与金额
 
+    - 传播 `trade.trade_date`（组内不变量：同 transfer_group 各腿 trade_date 恒等；
+      PUT 改基金腿 trade_date 时据此随动 CASH 腿，其余路径为幂等写入）
     - 传播 `target_status` 与 `confirm_date`（unconfirm 时重算期望确认日）
     - 若源腿为基金腿（product_code != "CASH"），将其 actual_amount 镜像给配对
       CASH 腿（CASH 腿金额恒等于基金腿 actual_amount）。确认时净值型基金
@@ -120,6 +122,8 @@ def sync_transfer_group(
     sp = db.connection().begin_nested()
     try:
         for paired_trade in paired:
+            # 先同步 trade_date，保证下方 unconfirm 分支用新日期重算确认日
+            paired_trade.trade_date = trade.trade_date
             paired_trade.status = target_status
             if confirm_date is not None:
                 paired_trade.confirm_date = confirm_date
