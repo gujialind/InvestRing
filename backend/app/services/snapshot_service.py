@@ -68,8 +68,8 @@ def generate_daily_snapshots(
     # 2. 删除已有快照（如果存在）
     _delete_existing_snapshots(db, portfolio_code, target_date)
     
-    # 3. 生成持仓快照
-    positions = _generate_portfolio_position(db, portfolio_code, target_date)
+    # 3. 生成持仓快照（issue #71：附带负现金 warnings，不阻断生成）
+    positions, warnings = _generate_portfolio_position(db, portfolio_code, target_date)
     
     # 无持仓时跳过快照生成（组合尚无资产，如首次申购确认前）
     if not positions:
@@ -86,6 +86,7 @@ def generate_daily_snapshots(
             "total_value": 0,
             "total_shares": 0,
             "unit_price": 0,
+            "warnings": None,
         }
     
     db.add_all(positions)
@@ -117,6 +118,7 @@ def generate_daily_snapshots(
         "total_value": float(value_snapshot.total_value),
         "total_shares": float(value_snapshot.total_shares),
         "unit_price": float(value_snapshot.unit_price),
+        "warnings": warnings or None,
     }
 
 
@@ -183,7 +185,8 @@ def recalculate_snapshots(
             "total_processed": 0,
             "auto_confirmed": [],
             "cascaded_unconfirmed": [],
-            "errors": []
+            "errors": [],
+            "warnings": [],
         }
 
         if effective_end_date > end_date:
@@ -248,6 +251,9 @@ def recalculate_snapshots(
                 snapshot_result = generate_daily_snapshots(
                     db, portfolio.code, current_date, check_continuity=False,
                 )
+                # issue #71：累积每日负现金 warnings（与 errors 聚合风格一致）
+                if snapshot_result.get("warnings"):
+                    result["warnings"].extend(snapshot_result["warnings"])
 
                 # 自动确认 apply_date<=current_date 的 pending 申购/赎回
                 auto_results = auto_confirm_after_snapshot(
@@ -521,7 +527,7 @@ def _generate_portfolio_position(
     db: Session,
     portfolio_code: str,
     target_date: date
-) -> List[PortfolioPosition]:
+) -> Tuple[List[PortfolioPosition], List[Dict[str, Any]]]:
     """
     生成持仓快照
     
@@ -530,6 +536,11 @@ def _generate_portfolio_position(
     2. 应用期间内所有已确认交易
     3. 获取目标日价格计算市值
     4. 计算冻结字段
+
+    Returns:
+        (positions, warnings) 元组。warnings 为负现金告警列表（issue #71）：
+        CASH 条目 cash_amount < 0 时记录 negative_cash 告警但不阻断生成
+        （历史快照可能已有负现金，阻断会使重算不可用）。
     """
     # 获取前一日最新快照日期
     prev_snapshot = db.query(func.max(PortfolioPosition.snapshot_date)).filter(
@@ -764,7 +775,26 @@ def _generate_portfolio_position(
         )
         result_positions.append(position)
     
-    return result_positions
+    # issue #71：检测负现金 CASH 条目，产出 warning（不阻断生成）
+    warnings: List[Dict[str, Any]] = []
+    for pos in result_positions:
+        if (
+            pos.product_code == "CASH"
+            and pos.cash_amount is not None
+            and Decimal(str(pos.cash_amount)) < 0
+        ):
+            warnings.append({
+                "type": "negative_cash",
+                "platform_code": pos.platform_code,
+                "cash_amount": float(pos.cash_amount),
+                "snapshot_date": target_date.isoformat(),
+            })
+            logger.warning(
+                f"负现金告警: portfolio={portfolio_code}, platform={pos.platform_code}, "
+                f"date={target_date}, cash_amount={pos.cash_amount}"
+            )
+
+    return result_positions, warnings
 
 
 def _generate_portfolio_value_snapshot(
@@ -1067,8 +1097,9 @@ def auto_confirm_after_snapshot(
                 Product.market == trade.market,
             ).first()
             # 走公共确认逻辑：净值型产品按 T 日净值重算 shares/amount，
-            # 并原子同步 transfer_group 配对腿（#29）
-            confirm_single_trade(db, trade, product)
+            # 并原子同步 transfer_group 配对腿（#29）；重算历史时现金基线
+            # 尚未逐日重建，跳过买入确认的可用现金校验（#78）
+            confirm_single_trade(db, trade, product, skip_cash_check=True)
             results.append({
                 "id": trade.id,
                 "type": "trade",

@@ -30,7 +30,7 @@ RESPONSE_FIELDS: dict = {
     "snapshot": {
         "status": {
             "shape": "object",
-            "fields": "portfolio_code:str,latest_snapshot_date:date?,total_snapshots:int,first_snapshot_date:date?,missing_dates:list"
+            "fields": "portfolio_code:str,latest_snapshot_date:date?,total_snapshots:int,first_snapshot_date:date?,missing_dates:list,negative_cash_platforms:list"
         }
     },
     "trade": {

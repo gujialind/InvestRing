@@ -46,6 +46,9 @@ def create_trade(
     platform_code: Optional[str] = typer.Option(None, "--platform-code"),
     trade_date: str = typer.Option(..., "--trade-date", help="YYYY-MM-DD"),
     notes: Optional[str] = typer.Option(None, "--notes"),
+    allow_duplicate: bool = typer.Option(
+        False, "--allow-duplicate", help="强制创建与既有 pending/confirmed 交易同参数的重复交易"
+    ),
 ):
     """创建买入/卖出交易（校验/配对 CASH 腿由服务层统一处理）"""
     with cli_context() as db:
@@ -64,6 +67,7 @@ def create_trade(
             shares=Decimal(str(shares)) if shares is not None else None,
             platform_code=platform_code,
             notes=notes,
+            allow_duplicate=allow_duplicate,
         )
         db.flush()
         db.refresh(new_trade)

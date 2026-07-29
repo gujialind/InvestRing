@@ -6689,6 +6689,20 @@
             },
             "type": "array",
             "title": "Errors"
+          },
+          "warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings"
           }
         },
         "type": "object",
@@ -7356,6 +7370,20 @@
               }
             ],
             "title": "Unit Price"
+          },
+          "warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings"
           }
         },
         "type": "object",
@@ -7440,6 +7468,14 @@
             },
             "type": "array",
             "title": "Missing Dates"
+          },
+          "negative_cash_platforms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Negative Cash Platforms",
+            "default": []
           }
         },
         "type": "object",
@@ -8139,6 +8175,11 @@
               }
             ],
             "title": "Notes"
+          },
+          "allow_duplicate": {
+            "type": "boolean",
+            "title": "Allow Duplicate",
+            "default": false
           }
         },
         "type": "object",

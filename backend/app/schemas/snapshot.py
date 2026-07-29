@@ -41,6 +41,8 @@ class SnapshotGenerationResult(BaseModel):
     total_value: Optional[float] = None
     total_shares: Optional[float] = None
     unit_price: Optional[float] = None
+    # issue #71：负现金等非阻断性告警（无告警时为 None，旧客户端可忽略）
+    warnings: Optional[List[Dict[str, Any]]] = None
 
 
 class RecalculationPortfolioResult(BaseModel):
@@ -49,6 +51,8 @@ class RecalculationPortfolioResult(BaseModel):
     processed_dates: List[str]  # ISO格式日期列表
     total_processed: int
     errors: List[Dict[str, Any]]
+    # issue #71：逐日重建累积的负现金告警（与 errors 聚合风格一致）
+    warnings: Optional[List[Dict[str, Any]]] = None
 
 
 class RecalculationResult(BaseModel):
@@ -65,3 +69,5 @@ class SnapshotStatusResponse(BaseModel):
     total_snapshots: int
     first_snapshot_date: Optional[date] = None
     missing_dates: List[str]  # 缺失的交易日（ISO格式）
+    # issue #71：最新快照日 CASH 持仓 cash_amount < 0 的平台清单（正常为空）
+    negative_cash_platforms: List[str] = []

@@ -2,7 +2,7 @@
 import sys
 import typer
 from typing import Optional
-from ir_cli.client import APIClient
+from ir_cli.client import APIClient, ApiError
 from ir_cli.output import error, success
 from ir_cli.utils import SUMMARY_FIELDS, build_body, project_fields, resolve_body, run_list
 
@@ -48,6 +48,7 @@ def create(
     amount: Optional[float] = typer.Option(None, "--amount", help="金额"),
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
+    allow_duplicate: bool = typer.Option(False, "--allow-duplicate", help="跳过重复交易检测（后端报 DUPLICATE_TRADE 且确需重复录入时使用）"),
     auto_confirm: bool = typer.Option(False, "--confirm", help="创建成功后立即确认（快捷组合）"),
     quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
 ):
@@ -69,12 +70,22 @@ def create(
         amount=amount,
         notes=notes,
     )
+    if allow_duplicate:
+        body["allow_duplicate"] = True
     result = client.post("/api/trades", json_data=body)
     created = result["data"]
     if auto_confirm and isinstance(created, dict) and created.get("id"):
-        # 确认失败时 stdout 为确认阶段的错误 JSON，stderr 保留已创建的 id 便于后续处理
+        # 确认失败时 stdout 仍为单个错误 JSON，但携带已创建的 id，避免重复创建（issue #72）
         print(f"[info] 交易已创建 id={created['id']}，正在确认...", file=sys.stderr)
-        result = client.post(f"/api/trades/{created['id']}/confirm")
+        try:
+            result = client.post(f"/api/trades/{created['id']}/confirm", raise_errors=True)
+        except ApiError as e:
+            error(
+                e.code,
+                e.message,
+                details={**(e.details or {}), "created_trade_id": created["id"]},
+                hints=[f"交易已创建未确认，勿重复创建；修复问题后执行: ir trade confirm {created['id']}"],
+            )
     data = result["data"]
     hints = None
     if isinstance(data, dict):

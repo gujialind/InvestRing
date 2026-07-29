@@ -76,11 +76,14 @@
 compute_cash_balance(T) = SUM(confirmed CASH trades WHERE confirm_date <= T)
                         + SUM(confirmed events WHERE ex_date <= T, cash_change != 0)
 
-calculate_available_cash = 最新快照日 portfolio_position 的 CASH cash_amount（基线）
-                         + SUM(confirmed CASH trades WHERE confirm_date > 快照日)
-                         − SUM(pending CASH sells)
-                         + SUM(confirmed event cash_change WHERE ex_date > 快照日)
+calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_amount（基线）
+                             + SUM(confirmed CASH buys  WHERE confirm_date > 快照日 [AND confirm_date <= T])
+                             − SUM(confirmed CASH sells WHERE confirm_date > 快照日 [AND trade_date <= T])
+                             − SUM(pending CASH sells [WHERE trade_date <= T])
+                             + SUM(confirmed event cash_change WHERE ex_date > 快照日 [AND ex_date <= T])
 ```
+
+- **时点口径**（#70/#78）：现金流出（sell）的资金承诺锚定**下单日 trade_date**，不论 pending/confirmed（消除 pending→confirmed 翻转后预留隐身）；流入（buy）仍须 confirmed 且 confirm_date <= T 才计入。T（as_of_date）为空时不设上限。
 
 - 快照生成走 `_generate_portfolio_position` 增量累加路径（前一日 CASH 基准 + 窗口内 confirmed CASH trades + event `cash_change` 增量 + `manual_market_value` 绝对覆盖）。
 - 有快照时 `calculate_available_cash` 直接读快照表基线；无快照时降级为 `compute_cash_balance`。
@@ -332,6 +335,8 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 | 买入金额 ≤ 0 | `INVALID_AMOUNT` |
 | 卖出份额 ≤ 0 | `INVALID_SHARES` |
 | 买入金额 > 可用现金（pending 卖出不增加可用现金） | `INSUFFICIENT_CASH` |
+| 基金买入确认时可用现金不足（按确认日时点口径，加回自身在途 CASH 腿；`skip_cash_check` 仅 auto_confirm） | `INSUFFICIENT_CASH` |
+| 创建时命中同组合/产品/市场/平台/方向/交易日且金额（买）或份额（卖）相同的 pending/confirmed 交易（未传 `allow_duplicate`；cancelled 不算） | `DUPLICATE_TRADE` |
 | 卖出份额 > 可用份额 | `INSUFFICIENT_SHARES` |
 | 场内交易缺有效价格 | `MISSING_OR_INVALID_PRICE` |
 | 场外基金确认传入价格与 T 日净值不一致 | `PRICE_NAV_MISMATCH` |

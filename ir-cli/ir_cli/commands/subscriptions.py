@@ -2,7 +2,7 @@
 import sys
 import typer
 from typing import Optional
-from ir_cli.client import APIClient
+from ir_cli.client import APIClient, ApiError
 from ir_cli.output import error, success
 from ir_cli.utils import SUMMARY_FIELDS, build_body, project_fields, resolve_body, run_list
 
@@ -67,9 +67,17 @@ def create(
     result = client.post("/api/subscriptions", json_data=body)
     created = result["data"]
     if auto_confirm and isinstance(created, dict) and created.get("id"):
-        # 确认失败时 stdout 为确认阶段的错误 JSON，stderr 保留已创建的 id 便于后续处理
+        # 确认失败时 stdout 仍为单个错误 JSON，但携带已创建的 id，避免重复创建（issue #72）
         print(f"[info] 申赎已创建 id={created['id']}，正在确认...", file=sys.stderr)
-        result = client.post(f"/api/subscriptions/{created['id']}/confirm")
+        try:
+            result = client.post(f"/api/subscriptions/{created['id']}/confirm", raise_errors=True)
+        except ApiError as e:
+            error(
+                e.code,
+                e.message,
+                details={**(e.details or {}), "created_subscription_id": created["id"]},
+                hints=[f"申赎已创建未确认，勿重复创建；修复问题后执行: ir sub confirm {created['id']}"],
+            )
     data = result["data"]
     hints = None
     if isinstance(data, dict):
