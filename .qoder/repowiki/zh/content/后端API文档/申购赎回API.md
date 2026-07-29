@@ -26,12 +26,10 @@
 
 ## 更新摘要
 **变更内容**
-- **优化** REST API层错误处理逻辑简化：移除了冗余的try/except块，业务错误处理已集中到服务层
-- **改进** API行为保持一致，但内部实现更加清晰和可维护
-- **增强** 服务层异常处理机制，提供更精确的错误信息
-- **统一** 错误处理模式，减少代码重复和提高一致性
-- **更新** subscription.py schema和subscription_service.py的改进，包括平台关联和错误处理优化
-- **调整** CLI工具的相应调整以匹配新的API结构
+- **重要更新** SubscriptionUpdate schema中移除了status字段，实现API一致性改进
+- **状态管理优化** 状态转换现在专门通过专用的confirm/cancel/unconfirm端点处理，不再支持通过PUT请求直接修改status字段
+- **API设计统一** 消除了直接状态修改与专用状态转换端点的歧义，提高API的一致性和可维护性
+- **向后兼容性** 保持现有接口功能不变，仅移除不推荐的状态字段直接修改方式
 
 ## 目录
 1. [简介](#简介)
@@ -59,7 +57,9 @@
 - **新增** 简化的确认接口，自动计算确认日期和单位净值
 - **优化** 增强的错误处理机制，提供具体的异常类型
 - **新增** 已确认订阅事件的安全保护机制
-- **更新** 简化的REST API层错误处理，移除冗余try/except块，业务错误处理集中到服务层
+- **更新** subscription.py schema和subscription_service.py的改进，包括平台关联和错误处理优化
+- **调整** CLI工具的相应调整以匹配新的API结构
+- **重要更新** SubscriptionUpdate schema移除status字段，状态转换统一通过专用端点处理
 
 ## 项目结构与入口
 - API 路由统一挂载于应用入口，其中"申购赎回"模块对应路由前缀为 /api/subscriptions，"份额变动事件"模块对应 /api/share-change-events。
@@ -73,7 +73,7 @@ graph TB
 A["应用入口<br/>backend/app/main.py"] --> B["路由注册<br/>subscriptions 路由"]
 A --> C["路由注册<br/>share_change_events 路由"]
 B --> D["订阅模型<br/>subscription.py (含platform_code)"]
-B --> E["订阅Schema<br/>subscription.py (含platform_code)"]
+B --> E["订阅Schema<br/>subscription.py (不含status字段)"]
 B --> F["订阅服务层<br/>subscription_service.py"]
 C --> G["份额变动事件模型<br/>share_change_event.py"]
 C --> H["份额变动事件Schema<br/>share_change_event.py"]
@@ -84,6 +84,7 @@ L["平台模型<br/>platform.py"] --> D
 M["现金转移路由<br/>cash_transfers.py"] --> N["平台间转账功能"]
 O["位置服务<br/>position_service.py"] --> P["按平台计算可用现金"]
 Q["简化错误处理<br/>移除冗余try/except"] --> B
+R["状态管理优化<br/>移除status字段"] --> E
 ```
 
 **图表来源**
@@ -91,22 +92,22 @@ Q["简化错误处理<br/>移除冗余try/except"] --> B
 - [backend/app/routers/subscriptions.py:1-16](file://backend/app/routers/subscriptions.py#L1-L16)
 - [backend/app/routers/share_change_events.py:1-18](file://backend/app/routers/share_change_events.py#L1-L18)
 - [backend/app/services/subscription_service.py:1-20](file://backend/app/services/subscription_service.py#L1-L20)
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
 - [backend/app/models/subscription.py:11](file://backend/app/models/subscription.py#L11)
 - [backend/app/models/platform.py:5-12](file://backend/app/models/platform.py#L5-L12)
-- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-190)
 - [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
 
 **章节来源**
 - [backend/app/main.py:32-48](file://backend/app/main.py#L32-L48)
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
 
 ## 核心组件
 - 申购/赎回模块
   - 路由：/api/subscriptions
   - 主要功能：创建申购/赎回、确认、取消、更新、删除；查询列表与详情
   - 关键模型：Subscription（**已更新** 含platform_code字段）
-  - 关键Schema：SubscriptionCreate、SubscriptionUpdate、SubscriptionResponse（**已更新** 含platform_code）
+  - 关键Schema：SubscriptionCreate、SubscriptionUpdate（**已更新** 移除status字段）、SubscriptionResponse（**已更新** 含platform_code）
   - **新增** 服务层：confirm_single_subscription、unconfirm_single_subscription
 - 份额变动事件模块
   - 路由：/api/share-change-events
@@ -128,12 +129,12 @@ Q["简化错误处理<br/>移除冗余try/except"] --> B
 
 **章节来源**
 - [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
-- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
+- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-134)
 - [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-46)
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
 - [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
 - [backend/app/routers/trades.py:271-289](file://backend/app/routers/trades.py#L271-L289)
-- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-190)
 
 ## 服务层架构
 **新增** 为了提升代码复用性和可维护性，申购赎回的核心业务逻辑已从路由层提取到独立的服务模块中。
@@ -172,8 +173,8 @@ I --> J["返回错误信息"]
 ```
 
 **图表来源**
-- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
-- [backend/app/services/subscription_service.py:137-178](file://backend/app/services/subscription_service.py#L137-L178)
+- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-134)
+- [backend/app/services/subscription_service.py:137-178](file://backend/app/services/subscription_service.py#L137-178)
 - [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-253)
 
 **章节来源**
@@ -200,6 +201,10 @@ I --> J["返回错误信息"]
   - 移除路由层冗余try/except块
   - 业务错误处理集中到服务层
   - 更清晰的异常传播路径
+- **重要更新** 状态管理优化
+  - SubscriptionUpdate schema移除status字段
+  - 状态转换统一通过专用端点处理
+  - 提高API一致性和可维护性
 
 ```mermaid
 sequenceDiagram
@@ -226,6 +231,7 @@ service->>模型 : "查询申请日快照获取净值"
 模型-->>服务 : "返回净值或抛出异常"
 service->>模型 : "更新确认状态和计算结果"
 模型-->>客户端 : "返回确认成功"
+Note over 客户端,模型 : 注意：状态转换现在只能通过专用端点处理
 ```
 
 **图表来源**
@@ -244,7 +250,7 @@ service->>模型 : "更新确认状态和计算结果"
   - GET /api/subscriptions/{id}：查询详情（本人或管理员）
   - POST /api/subscriptions/{id}/confirm：确认（管理员）
   - POST /api/subscriptions/{id}/cancel：取消（管理员）
-  - PUT /api/subscriptions/{id}：更新（管理员）
+  - PUT /api/subscriptions/{id}：更新（管理员，**已更新** 不再支持status字段）
   - DELETE /api/subscriptions/{id}：删除（管理员）
 
 - 权限与约束
@@ -256,6 +262,7 @@ service->>模型 : "更新确认状态和计算结果"
   - **新增** 平台校验：platform_code 必须指向存在的平台
   - **新增** 安全验证：已确认（confirmed）状态的订阅事件不可直接修改或删除
   - **优化** 错误处理简化：移除路由层冗余try/except块，业务错误直接抛出
+  - **重要更新** 状态管理：SubscriptionUpdate schema不再包含status字段，状态转换必须通过专用端点处理
 
 - 份额/金额计算
   - **更新** 确认接口简化：不再需要手动传入 confirm_date 和 unit_price 参数
@@ -302,7 +309,7 @@ SavePending --> End(["结束"])
 - [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-85)
 
 **章节来源**
-- [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-113)
+- [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
 - [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-199)
 - [backend/app/routers/subscriptions.py:237-320](file://backend/app/routers/subscriptions.py#L237-320)
 - [backend/app/routers/subscriptions.py:323-340](file://backend/app/routers/subscriptions.py#L323-340)
@@ -380,7 +387,7 @@ participant 日历 as "交易日历"
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
 - [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-92)
 - [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-122)
-- [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-36)
+- [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
 - [backend/app/routers/portfolios.py:61-70](file://backend/app/routers/portfolios.py#L61-70)
 - [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-191)
 - [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-241)
@@ -429,7 +436,7 @@ participant 现金服务 as "calculate_available_cash"
 
 **图表来源**
 - [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-190)
-- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-143)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
 
 **章节来源**
 - [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-190)
@@ -474,6 +481,44 @@ ProcessRequest --> End
 - [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-361)
 - [backend/app/routers/subscriptions.py:380-388](file://backend/app/routers/subscriptions.py#L380-388)
 
+### **重要更新** SubscriptionUpdate schema状态字段移除
+- **变更内容**
+  - SubscriptionUpdate schema中完全移除了status字段
+  - 不再支持通过PUT请求直接修改订阅状态
+  - 状态转换现在必须通过专用的confirm/cancel端点处理
+
+- **API设计改进**
+  - 消除了直接状态修改与专用状态转换端点的歧义
+  - 提高了API的一致性和可维护性
+  - 强制使用明确的状态转换语义
+
+- **迁移指南**
+  - 前端需要移除对status字段的直接修改逻辑
+  - 所有状态转换操作应使用对应的专用端点
+  - 保持现有的confirm/cancel端点功能不变
+
+```mermaid
+flowchart TD
+OldFlow["旧流程"] --> DirectUpdate["直接修改status字段"]
+DirectUpdate --> UpdateAPI["PUT /api/subscriptions/{id}"]
+UpdateAPI --> StatusChange["状态变更"]
+NewFlow["新流程"] --> ConfirmEndpoint["专用确认端点"]
+ConfirmEndpoint --> ConfirmAPI["POST /api/subscriptions/{id}/confirm"]
+ConfirmAPI --> StatusChange
+CancelEndpoint["专用取消端点"] --> CancelAPI["POST /api/subscriptions/{id}/cancel"]
+CancelAPI --> StatusChange
+NewFlow -.-> Blocked["直接修改status被阻止"]
+Blocked --> Error["返回错误：不支持直接修改状态"]
+```
+
+**图表来源**
+- [backend/app/schemas/subscription.py:1-100](file://backend/app/schemas/subscription.py#L1-100)
+- [backend/app/routers/subscriptions.py:343-359](file://backend/app/routers/subscriptions.py#L343-359)
+
+**章节来源**
+- [backend/app/schemas/subscription.py:1-100](file://backend/app/schemas/subscription.py#L1-100)
+- [backend/app/routers/subscriptions.py:343-359](file://backend/app/routers/subscriptions.py#L343-359)
+
 ## 依赖关系分析
 - 认证与授权
   - get_current_user：校验Token、黑名单、账户锁定，返回当前用户
@@ -510,6 +555,8 @@ E --> I["InvalidStatusError"]
 P["Platform模型"] --> R
 PC["platform_code参数"] --> R
 Q["简化错误处理"] --> R
+SU["SubscriptionUpdate schema"] --> R
+SU -.-> Removed["status字段已移除"]
 ```
 
 **图表来源**
@@ -519,7 +566,7 @@ Q["简化错误处理"] --> R
 - [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-32)
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-217)
 - [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-38)
-- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-143)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
 
 **章节来源**
 - [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
@@ -528,7 +575,7 @@ Q["简化错误处理"] --> R
 - [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-32)
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-217)
 - [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-38)
-- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-143)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
 
 ## 性能与并发特性
 - 交易日历查询：每次操作均进行一次数据库查询，建议在上层缓存交易日历
@@ -539,6 +586,7 @@ Q["简化错误处理"] --> R
 - **新增** 安全验证：状态检查为轻量级操作，对性能影响极小
 - **新增** 平台维度计算：按平台过滤的现金计算可能增加数据库查询复杂度
 - **优化** 错误处理简化：减少异常处理开销，提高整体性能
+- **重要更新** 状态管理优化：移除status字段减少了不必要的字段验证开销
 
 ## 故障排查指南
 - 常见错误码与原因
@@ -555,6 +603,7 @@ Q["简化错误处理"] --> R
   - 422 **新增** 状态非法：INVALID_STATUS（状态不符合操作要求）
   - 422 **新增** 同一平台转账：SAME_PLATFORM（转出和转入平台相同）
   - 422 **新增** 现金不足：INSUFFICIENT_CASH（转出平台可用现金不足）
+  - 422 **重要更新** 不支持直接修改状态：STATUS_FIELD_REMOVED（尝试通过PUT修改status字段）
   - 404 未找到：组合/投资人/事件/交易/平台不存在
   - 403 权限不足：非管理员或非本人记录
 - 排查步骤
@@ -567,6 +616,7 @@ Q["简化错误处理"] --> R
   - **新增** 确认净值快照是否存在，必要时先生成快照
   - **新增** 确认platform_code指向的平台是否存在
   - **新增** 检查平台间转账的可用现金是否充足
+  - **重要更新** 如果收到STATUS_FIELD_REMOVED错误，改用专用的confirm/cancel端点
   - **优化** 检查服务层异常是否正确抛出，避免路由层冗余try/except干扰
 
 **章节来源**
@@ -595,6 +645,7 @@ Q["简化错误处理"] --> R
 - **优化** 增强的错误处理机制提供了更精确的错误信息和更好的调试体验
 - **新增** 已确认订阅事件的安全验证机制有效防止了数据篡改，维护了系统的数据完整性
 - **优化** 简化的REST API层错误处理，移除冗余try/except块，业务错误处理集中到服务层，使内部实现更加清晰
+- **重要更新** SubscriptionUpdate schema移除status字段，统一状态转换通过专用端点处理，提高了API的一致性和可维护性
 - 建议在前端与网关层增加必要的缓存与限流策略，提升整体性能与稳定性
 
 ## 附录：接口清单与示例
@@ -614,15 +665,16 @@ Q["简化错误处理"] --> R
 - POST /api/subscriptions/{id}/cancel
   - 返回：取消成功消息
 - PUT /api/subscriptions/{id}
-  - 请求体：amount、shares、unit_price、confirm_date、status、notes
+  - 请求体：amount、shares、unit_price、confirm_date、notes（**重要更新** status字段已移除）
   - **新增** 当状态为 confirmed 时，返回错误：已确认事件不可直接修改
+  - **重要更新** 不再支持通过此接口修改status字段
   - 返回：更新后的订阅
 - DELETE /api/subscriptions/{id}
   - **新增** 当状态为 confirmed 时，返回错误：已确认事件不可直接删除
   - 返回：删除成功消息
 
 **章节来源**
-- [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-113)
+- [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
 - [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-199)
 - [backend/app/routers/subscriptions.py:202-213](file://backend/app/routers/subscriptions.py#L202-213)
 - [backend/app/routers/subscriptions.py:237-320](file://backend/app/routers/subscriptions.py#L237-320)
@@ -693,7 +745,7 @@ Q["简化错误处理"] --> R
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
 - [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-92)
 - [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-122)
-- [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-36)
+- [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
 - [backend/app/routers/portfolios.py:61-70](file://backend/app/routers/portfolios.py#L61-70)
 - [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-191)
 - [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-241)
@@ -705,6 +757,29 @@ Q["简化错误处理"] --> R
   - Subscription 接口添加 platform_code: string
   - SubscriptionCreate 接口添加 platform_code: string
   - SubscriptionUpdate 接口添加 platform_code?: string
+  - **重要更新** SubscriptionUpdate 接口移除 status 字段
 
 **章节来源**
 - [frontend/src/types/subscription.ts:1-39](file://frontend/src/types/subscription.ts#L1-39)
+
+### **重要更新** 状态管理最佳实践
+- **推荐的API使用模式**
+  - 创建订阅：POST /api/subscriptions（status自动设为pending）
+  - 确认订阅：POST /api/subscriptions/{id}/confirm（status变为confirmed）
+  - 取消订阅：POST /api/subscriptions/{id}/cancel（status变回pending）
+  - 更新订阅：PUT /api/subscriptions/{id}（仅更新非状态字段）
+
+- **避免的做法**
+  - ❌ 不要通过PUT请求直接修改status字段
+  - ❌ 不要在客户端直接改变订阅状态
+  - ✅ 始终使用专用的状态转换端点
+  - ✅ 遵循服务端状态机约束
+
+- **错误处理建议**
+  - 捕获STATUS_FIELD_REMOVED错误并重定向到正确的端点
+  - 在UI层禁用直接的status字段编辑功能
+  - 提供清晰的状态转换引导界面
+
+**章节来源**
+- [backend/app/schemas/subscription.py:1-100](file://backend/app/schemas/subscription.py#L1-100)
+- [backend/app/routers/subscriptions.py:343-359](file://backend/app/routers/subscriptions.py#L343-359)

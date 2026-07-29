@@ -21,12 +21,10 @@
 
 ## 更新摘要
 **变更内容**
-- 新增交易预览功能，提供GET /api/trades/{id}/preview接口
-- 增强交易服务中的calculate_confirm_preview函数
-- 改进交易Schema，添加预览响应模型
-- 交易预览系统允许用户在执行前验证交易而不持久化数据
-- 优化了CASH交易配对验证机制
-- 增强了交易状态管理的完整性保护
+- **重要更新**：移除了TradeUpdate schema中的status字段，作为API一致性改进的一部分
+- 状态转换现在专门通过专用的确认/取消/取消确认端点处理，而不是通过PUT请求直接修改状态字段
+- 更新了交易更新接口的安全验证机制，确保状态管理的完整性
+- 强化了交易状态机的约束，防止通过直接字段修改绕过业务逻辑
 
 ## 目录
 1. [简介](#简介)
@@ -43,7 +41,7 @@
 ## 简介
 本文件为 InvestRing 交易管理模块的完整API文档，覆盖交易CRUD操作、交易执行与确认、状态管理、费用计算、查询接口及权限控制。文档面向前后端开发者与运维人员，提供HTTP方法、URL模式、请求/响应格式、权限要求、示例与约束说明，帮助快速集成与排错。
 
-**重要更新** 系统新增了交易预览功能，允许用户在正式执行交易前进行验证和模拟，确保交易参数的正确性而不产生实际的数据变更。同时增强了现金交易处理机制，现在禁止直接创建裸CASH交易，只允许通过受控路径创建，确保资金流动的完整性和可追溯性。
+**重要更新** 系统进行了重要的API一致性改进，移除了TradeUpdate schema中的status字段。现在交易状态转换必须通过专用的确认/取消/取消确认端点进行，而不是通过直接修改状态字段。这一改进确保了交易状态管理的完整性和安全性，防止绕过业务逻辑的状态变更。
 
 ## 项目结构
 交易管理API位于后端FastAPI应用中，通过统一入口注册到根路径下。前端通过React组件与Hooks调用后端接口，实现交易的创建、查询、确认、取消与预览。
@@ -92,7 +90,7 @@ K --> M
 ## 核心组件
 - 路由器：交易路由集中于 [routers/trades.py](file://backend/app/routers/trades.py)，提供交易CRUD、确认、取消、预览与查询。
 - 模型：交易实体定义于 [models/trade.py](file://backend/app/models/trade.py)，包含字段、索引与外键约束。
-- Schema：请求/响应数据结构定义于 [schemas/trade.py](file://backend/app/schemas/trade.py)，用于Pydantic校验与序列化，包含新的预览响应模型。
+- Schema：请求/响应数据结构定义于 [schemas/trade.py](file://backend/app/schemas/trade.py)，用于Pydantic校验与序列化，**已移除status字段**。
 - 权限：用户与管理员权限校验位于 [dependencies.py](file://backend/app/dependencies.py)。
 - 交易日历：交易日判断与同步逻辑位于 [services/trading_calendar_service.py](file://backend/app/services/trading_calendar_service.py)。
 - 现金转账：跨平台现金转移处理位于 [cash_transfers.py](file://backend/app/routers/cash_transfers.py)。
@@ -194,9 +192,9 @@ end
 
 - 更新交易
   - 方法与路径：PUT /api/trades/{id}
-  - 请求体：TradeUpdate（支持部分字段更新）
+  - 请求体：TradeUpdate（**已移除status字段**，支持部分字段更新）
   - 权限：管理员（admin）
-  - 安全验证：**新增** 已确认交易不可直接修改，需先取消确认
+  - 安全验证：**重要更新** 已确认交易不可直接修改，需先取消确认；**新增** status字段不再支持直接修改
   - 响应：TradeResponse
   - 实现参考：[backend/app/routers/trades.py:535-561](file://backend/app/routers/trades.py#L535-561)
 
@@ -219,7 +217,7 @@ end
     - 非净值型产品若传入price，则按price重算amount/shares
     - 确认后更新confirm_date与最终amount/price/shares
   - 响应：包含message、id、portfolio_code、trade_type、status、confirm_date与trade对象
-  - 实现参考：[backend/app/routers/trades.py:417-504](file://backend/app/routers/trades.py#L417-504)
+  - 实现参考：[backend/app/routers/trades.py:417-504](file://backend/app/routers/trades.py#L417-L504)
 
 - 取消交易
   - 方法与路径：POST /api/trades/{id}/cancel
@@ -228,14 +226,15 @@ end
     - 仅pending状态可取消
     - 仅场外（CN_OTC）的pending可取消，场内（CN_EXCHANGE）不可取消
   - 响应：成功消息
-  - 实现参考：[backend/app/routers/trades.py:507-532](file://backend/app/routers/trades.py#L507-532)
+  - 实现参考：[backend/app/routers/trades.py:507-532](file://backend/app/routers/trades.py#L507-L532)
 
-**新增** CASH交易受控创建路径：
-系统现在只允许通过以下三种受控路径创建CASH交易：
-
-1. **申购赎回操作**：通过订阅服务创建的申购赎回交易
-2. **基金再平衡配对**：通过投资组合再平衡流程创建的配对交易
-3. **跨平台现金转移**：通过现金转账服务创建的平台间资金调拨
+**重要更新** TradeUpdate schema变更：
+- **已移除status字段**：不再支持通过PUT请求直接修改交易状态
+- 状态转换现在必须通过专用端点处理：
+  - 确认交易：POST /api/trades/{id}/confirm
+  - 取消交易：POST /api/trades/{id}/cancel
+  - 取消确认：需要通过专门的取消确认流程
+- 这一变更确保了API的一致性和状态管理的完整性
 
 请求/响应模式与字段说明（基于Schema与模型）：
 - TradeBase/TradeCreate/TradeUpdate/TradeResponse 字段定义参见 [backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-L45)
@@ -317,19 +316,22 @@ TradePreviewResponse包含以下关键字段：
 - [backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)
 
 ### 交易状态管理与流程
+**重要更新** 交易状态管理现在更加严格，移除了通过直接字段修改状态的途径。
+
 交易状态包括：pending（待确认）、confirmed（已确认）、cancelled（已取消）。确认流程根据产品类型与市场区分净值型与非净值型，并结合交易日历与确认周期自动推导确认日期。
 
 ```mermaid
 stateDiagram-v2
 [*] --> 待确认
-待确认 --> 已确认 : "管理员确认"
-待确认 --> 已取消 : "管理员取消仅场外pending"
+待确认 --> 已确认 : "通过专用确认端点"
+待确认 --> 已取消 : "通过专用取消端点"
 已确认 --> [*]
 已取消 --> [*]
+注意 : 状态转换只能通过专用端点进行
 ```
 
 **图表来源**
-- [backend/app/routers/trades.py:417-532](file://backend/app/routers/trades.py#L417-532)
+- [backend/app/routers/trades.py:417-532](file://backend/app/routers/trades.py#L417-L532)
 
 **章节来源**
 - [backend/app/routers/trades.py:417-532](file://backend/app/routers/trades.py#L417-L532)
@@ -366,7 +368,7 @@ SubConfirmedSells2 --> EndShares["得到可用份额"]
 
 **图表来源**
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
-- [backend/app/routers/trades.py:220-268](file://backend/app/routers/trades.py#L220-268)
+- [backend/app/routers/trades.py:220-268](file://backend/app/routers/trades.py#L220-L268)
 
 **章节来源**
 - [backend/app/routers/trades.py:128-268](file://backend/app/routers/trades.py#L128-L268)
@@ -382,11 +384,12 @@ SubConfirmedSells2 --> EndShares["得到可用份额"]
 - [backend/app/models/product.py:11-14](file://backend/app/models/product.py#L11-L14)
 
 ### 安全验证与数据完整性保护
-**新增** 交易管理包含严格的安全验证机制，防止对已确认交易进行直接修改或删除操作，确保数据完整性与审计追踪。
+**重要更新** 交易管理包含严格的安全验证机制，防止对已确认交易进行直接修改或删除操作，确保数据完整性与审计追踪。**新增** 移除了通过直接字段修改状态的能力。
 
 #### 已确认交易保护机制
 - **修改保护**：当尝试修改状态为confirmed的交易时，系统将拒绝请求并提示先取消确认
 - **删除保护**：当尝试删除状态为confirmed的交易时，系统将拒绝请求并提示先取消确认
+- **状态字段保护**：**新增** TradeUpdate中不再包含status字段，无法通过PUT请求直接修改状态
 - **错误响应**：返回标准的HTTP 422状态码和详细的错误信息
 
 #### 安全验证实现细节
@@ -454,19 +457,19 @@ TP --> VC["验证组件"]
 - [backend/app/routers/trades.py:1-16](file://backend/app/routers/trades.py#L1-L16)
 - [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-L32)
 - [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-22)
-- [backend/app/models/portfolio_position.py:5-34](file://backend/app/models/portfolio_position.py#L5-34)
-- [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-28)
+- [backend/app/models/portfolio_position.py:5-34](file://backend/app/models/portfolio_position.py#L5-L34)
+- [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-L28)
 - [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-L125)
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 
 **章节来源**
 - [backend/app/routers/trades.py:1-16](file://backend/app/routers/trades.py#L1-L16)
 - [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-L32)
-- [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-22)
-- [backend/app/models/portfolio_position.py:5-34](file://backend/app/models/portfolio_position.py#L5-34)
-- [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-28)
+- [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-L22)
+- [backend/app/models/portfolio_position.py:5-34](file://backend/app/models/portfolio_position.py#L5-L34)
+- [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-L28)
 - [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-L125)
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
 
 ## 性能考虑
 - 分页查询：列表接口默认每页20条，避免一次性加载过多数据
@@ -474,6 +477,7 @@ TP --> VC["验证组件"]
 - 余额与份额计算：基于最新快照与增量计算，避免全量扫描
 - **新增** CASH交易配对验证：通过transfer_group索引优化配对查询性能
 - **新增** 交易预览缓存：预览结果可在短时间内缓存，减少重复计算
+- **新增** 状态管理优化：通过专用端点处理状态转换，减少不必要的状态检查
 - 建议：
   - 前端对高频查询设置合理缓存时间
   - 后端对热点查询增加索引（如按portfolio_code、status、trade_date、transfer_group）
@@ -495,6 +499,7 @@ TP --> VC["验证组件"]
 - **新增** 缺少transfer_group：返回"transfer_group是CASH交易的必填字段"
 - **新增** 配对交易不完整：返回"配对交易不完整，请确保同一transfer_group内的交易成对出现"
 - **新增** 交易预览失败：检查交易ID是否存在，验证网络连接状态
+- **新增** 状态字段修改失败：返回"不支持直接修改状态字段，请使用专用端点进行处理"
 
 定位参考：
 - 错误抛出位置与消息定义见 [backend/app/routers/trades.py:298-336](file://backend/app/routers/trades.py#L298-L336)、[L364-L374]、[L428-L432]、[L516-L528]、[L458-L464]、[L546-L553]、[L573-L580]
@@ -516,7 +521,7 @@ TP --> VC["验证组件"]
 ## 结论
 交易管理API提供了完整的调仓交易生命周期管理：从创建（买入/卖出）、到确认（净值型与非净值型差异化处理）、再到取消与删除。通过严格的权限控制、交易日校验、可用资金/份额计算与状态机管理，确保交易安全与一致性。
 
-**重要更新** 新增的交易预览功能为用户提供了在执行交易前的验证能力，提升了系统的易用性和安全性。用户可以通过预览接口在不产生实际数据变更的情况下验证交易参数和预估结果，大大改善了用户体验。
+**重要更新** 系统进行了重要的API一致性改进，移除了TradeUpdate schema中的status字段。现在交易状态转换必须通过专用的确认/取消/取消确认端点进行，而不是通过直接修改状态字段。这一改进确保了交易状态管理的完整性和安全性，防止绕过业务逻辑的状态变更。
 
 同时，新增的CASH交易强制配对验证机制进一步强化了资金管理的严谨性，通过禁止直接创建裸CASH交易，确保所有现金流动都通过受控路径进行。这一改进为复杂的金融交易管理提供了必要的数据完整性和审计追踪能力。
 
@@ -563,7 +568,7 @@ TP --> VC["验证组件"]
   - 方法：PUT
   - 路径：/api/trades/{id}
   - 权限：管理员
-  - 请求体：TradeUpdate（部分字段）
+  - 请求体：TradeUpdate（**已移除status字段**，部分字段）
   - 安全验证：已确认交易不可直接修改
   - 示例响应：TradeResponse
   - 参考：[backend/app/routers/trades.py:535-561](file://backend/app/routers/trades.py#L535-561)
@@ -582,7 +587,7 @@ TP --> VC["验证组件"]
   - 查询参数：confirm_date（可选）、price（可选）
   - 权限：管理员
   - 示例响应：包含message、id、portfolio_code、trade_type、status、confirm_date与trade对象
-  - 参考：[backend/app/routers/trades.py:417-504](file://backend/app/routers/trades.py#L417-504)
+  - 参考：[backend/app/routers/trades.py:417-504](file://backend/app/routers/trades.py#L417-L504)
 
 - 取消交易
   - 方法：POST
@@ -595,6 +600,7 @@ TP --> VC["验证组件"]
 - Trade模型字段：id、portfolio_code、platform_code、product_code、market、trade_type、shares、amount、price、fee、actual_amount、trade_date、confirm_date、status、notes、created_at、updated_at
   - 参考：[backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-32)
 - Trade Schema：TradeBase/TradeCreate/TradeUpdate/TradeResponse
+  - **重要更新** TradeUpdate已移除status字段
   - 参考：[backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-L45)
 - Product模型：product_type、confirm_days、is_qdii
   - 参考：[backend/app/models/product.py:11-14](file://backend/app/models/product.py#L11-L14)
@@ -628,6 +634,17 @@ TP --> VC["验证组件"]
 - validation_status: 验证状态（valid/invalid）
 - warnings: 警告信息列表
 - errors: 错误信息列表
+
+### TradeUpdate schema变更说明
+**重要更新** TradeUpdate schema的重要变更：
+
+- **已移除字段**：status字段已从TradeUpdate中移除
+- **变更原因**：API一致性改进，确保状态转换只能通过专用端点进行
+- **影响范围**：所有通过PUT请求更新交易的客户端都需要相应调整
+- **替代方案**：使用专用端点进行状态管理：
+  - 确认交易：POST /api/trades/{id}/confirm
+  - 取消交易：POST /api/trades/{id}/cancel
+  - 其他字段更新：继续使用PUT /api/trades/{id}
 
 **章节来源**
 - [backend/app/routers/trades.py:292-402](file://backend/app/routers/trades.py#L292-L402)

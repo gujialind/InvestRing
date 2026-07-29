@@ -6,7 +6,7 @@ HTTP 客户端封装
 环境变量：
 - IR_TOKEN: 直接指定 token（优先于 ~/.ir/token.json，适合 CI/一次性调用）
 - IR_CONNECT_TIMEOUT / IR_HTTP_TIMEOUT: 连接/读取超时
-- IR_RETRY: GET 请求失败重试次数（默认 2，仅幂等 GET 重试连接/超时/5xx）
+- IR_RETRY: GET 请求失败重试次数（默认 2，仅幂等 GET 重试网络异常/5xx）
 - IR_DEBUG: 设为 1 时向 stderr 输出请求耗时与状态码
 """
 import os
@@ -18,6 +18,20 @@ import httpx
 
 from ir_cli import config
 from ir_cli.output import EXIT_AUTH, EXIT_CONNECTION, error, success
+
+
+class ApiError(Exception):
+    """HTTP 业务错误（raise_errors=True 时抛出）
+
+    供链式命令（如 create --confirm）捕获后续阶段的错误后，
+    在错误输出中携带已创建记录 id 等上下文，而非直接退出。
+    """
+
+    def __init__(self, code: str, message: str, details: Optional[dict] = None):
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
+        self.details = details
 
 
 def _debug_enabled() -> bool:
@@ -62,8 +76,8 @@ class APIClient:
             error("AUTH_REQUIRED", "未登录或 token 已过期，请执行: ir auth login", exit_code=EXIT_AUTH)
         return cls(base_url, token)
 
-    def _handle_response(self, resp: httpx.Response) -> dict:
-        """统一处理 HTTP 响应"""
+    def _handle_response(self, resp: httpx.Response, raise_errors: bool = False) -> dict:
+        """统一处理 HTTP 响应（raise_errors=True 时 HTTP >=400 抛 ApiError 而非直接退出）"""
         if resp.status_code >= 400:
             default_code = {
                 401: "AUTH_REQUIRED",
@@ -82,6 +96,8 @@ class APIClient:
                 }.get(resp.status_code)
                 if fallback:
                     detail = fallback
+            if raise_errors:
+                raise ApiError(code, detail, {"http_status": resp.status_code})
             error(
                 code,
                 detail,
@@ -143,8 +159,10 @@ class APIClient:
         json_data: Optional[dict] = None,
         params: Optional[dict] = None,
         retryable: bool = False,
+        raise_errors: bool = False,
     ) -> dict:
-        """统一请求入口：幂等请求（GET）在连接失败/超时/5xx 时按 IR_RETRY 重试"""
+        """统一请求入口：幂等请求（GET）在网络异常/5xx 时按 IR_RETRY 重试；
+        非幂等请求任何网络异常直接进入循环外错误处理（不重试）"""
         max_retries = 0
         if retryable:
             try:
@@ -161,7 +179,9 @@ class APIClient:
             start = time.monotonic()
             try:
                 resp = self._client.request(method, path, json=json_data, params=params)
-            except (httpx.ConnectError, httpx.TimeoutException) as e:
+            except httpx.HTTPError as e:
+                # 覆盖 RemoteProtocolError/ReadError/WriteError 等全部网络异常，
+                # 保证任何失败路径 stdout 都有结构化 JSON（issue #73/#77 根因）
                 last_exc = e
                 _debug(f"{method} {path} -> {type(e).__name__} ({time.monotonic() - start:.2f}s)")
                 continue
@@ -169,19 +189,36 @@ class APIClient:
             # 5xx 视为服务端瞬时故障，幂等请求可重试
             if retryable and resp.status_code >= 500 and attempt < max_retries:
                 continue
-            return self._handle_response(resp)
+            return self._handle_response(resp, raise_errors=raise_errors)
 
         if isinstance(last_exc, httpx.TimeoutException):
-            error("TIMEOUT_ERROR", f"请求超时: {self.base_url}{path}", exit_code=EXIT_CONNECTION)
-        error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
+            error(
+                "TIMEOUT_ERROR",
+                f"请求超时: {self.base_url}{path}；服务端可能仍在执行，请用对应查询命令（如 ir snapshot status）"
+                "回查结果，勿盲目重发；可用 IR_HTTP_TIMEOUT 环境变量调大（当前默认 300s）",
+                exit_code=EXIT_CONNECTION,
+            )
+        if isinstance(last_exc, httpx.ConnectError):
+            error("CONNECTION_ERROR", f"无法连接到 {self.base_url}，请检查 IR_BASE_URL 配置", exit_code=EXIT_CONNECTION)
+        error(
+            "NETWORK_ERROR",
+            f"网络传输中断: {type(last_exc).__name__}: {last_exc}；服务端可能仍在执行，请先回查结果再决定是否重发",
+            exit_code=EXIT_CONNECTION,
+        )
 
     def get(self, path: str, params: Optional[dict] = None) -> dict:
         """GET 请求（幂等，自动重试）"""
         return self._request("GET", path, params=params, retryable=True)
 
-    def post(self, path: str, json_data: Optional[dict] = None, params: Optional[dict] = None) -> dict:
+    def post(
+        self,
+        path: str,
+        json_data: Optional[dict] = None,
+        params: Optional[dict] = None,
+        raise_errors: bool = False,
+    ) -> dict:
         """POST 请求（非幂等，不重试）"""
-        return self._request("POST", path, json_data=json_data, params=params)
+        return self._request("POST", path, json_data=json_data, params=params, raise_errors=raise_errors)
 
     def put(self, path: str, json_data: Optional[dict] = None) -> dict:
         """PUT 请求（非幂等，不重试）"""

@@ -223,19 +223,116 @@ class TestCalculateAvailableCashAsOfDate:
         )
         assert cash == Decimal("6300")
 
-    def test_as_of_date_pending_unaffected(self, test_db):
-        """as_of_date 截止不影响 pending sells 计提"""
+    def test_as_of_date_pending_sell_after_as_of_excluded(self, test_db):
+        """新口径（#70/#78）：pending sell 仅在 trade_date <= as_of_date 时计提"""
         _seed_cash_baseline(test_db)
         create_trade(
             test_db, "GV_P", "CASH", "",
             trade_type="sell", amount=500, status="pending",
-            trade_date=date(2025, 1, 20),  # pending 在 as_of 之后，仍计提预留
+            trade_date=date(2025, 1, 20),  # 下单日在 as_of 之后，尚未承诺，不计提
+            platform_code="GV_PLAT",
+        )
+        cash = calculate_available_cash(
+            test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)
+        )
+        assert cash == Decimal("6000")
+
+    def test_as_of_date_pending_sell_on_or_before_as_of_deducted(self, test_db):
+        """新口径（#70/#78）：pending sell 的 trade_date <= as_of_date 时正常计提"""
+        _seed_cash_baseline(test_db)
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="sell", amount=500, status="pending",
+            trade_date=date(2025, 1, 8),
             platform_code="GV_PLAT",
         )
         cash = calculate_available_cash(
             test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)
         )
         assert cash == Decimal("5500")
+
+
+class TestAvailableCashTradeDateAnchor:
+    """可用现金时点口径（#70/#78）：流出锚定 trade_date，流入锚定 confirm_date"""
+
+    def test_confirmed_sell_trade_date_within_as_of_deducted(self, test_db):
+        """confirmed sell：trade_date <= as_of < confirm_date 仍扣减（旧口径会隐身）"""
+        _seed_cash_baseline(test_db)
+        # 下单 1-7、确认 1-13：as_of=1-10 时旧口径（按 confirm_date）不扣，新口径必扣
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="sell", amount=2000, status="confirmed",
+            trade_date=date(2025, 1, 7), confirm_date=date(2025, 1, 13),
+            platform_code="GV_PLAT",
+        )
+        cash = calculate_available_cash(
+            test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)
+        )
+        assert cash == Decimal("4000")
+
+    def test_confirmed_sell_trade_date_after_as_of_excluded(self, test_db):
+        """confirmed sell：trade_date > as_of 时不扣减（承诺尚未发生）"""
+        _seed_cash_baseline(test_db)
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="sell", amount=2000, status="confirmed",
+            trade_date=date(2025, 1, 13), confirm_date=date(2025, 1, 14),
+            platform_code="GV_PLAT",
+        )
+        cash = calculate_available_cash(
+            test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)
+        )
+        assert cash == Decimal("6000")
+
+    def test_spec_scenario_t_plus_1(self, test_db):
+        """事故口径复刻：T 日 4000，T+n 确认入金 2000，T+m(m>n) 下单卖出 2000，
+        as_of=T+1 时：入金未确认不计、卖出未下单不扣 → 4000"""
+        _seed_cash_baseline(test_db, amount=4000)  # T = 2025-01-06
+        # T+3 确认的入金（在途 confirmed CASH buy，confirm_date 未到不计入）
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="buy", amount=2000, status="confirmed",
+            trade_date=date(2025, 1, 8), confirm_date=date(2025, 1, 9),
+            platform_code="GV_PLAT",
+        )
+        # T+4 下单的卖出（trade_date 晚于 as_of，不扣）
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="sell", amount=2000, status="confirmed",
+            trade_date=date(2025, 1, 10), confirm_date=date(2025, 1, 13),
+            platform_code="GV_PLAT",
+        )
+        cash = calculate_available_cash(
+            test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 7)
+        )
+        assert cash == Decimal("4000")
+
+    def test_as_of_none_equivalent_to_legacy(self, test_db):
+        """as_of_date=None 时选取集合与旧实现完全一致（不设上限）"""
+        _seed_cash_baseline(test_db)  # 基线 6000
+        # 快照后 confirmed buy +300
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="buy", amount=300, status="confirmed",
+            trade_date=date(2025, 1, 13), confirm_date=date(2025, 1, 14),
+            platform_code="GV_PLAT",
+        )
+        # 快照后 confirmed sell −200（无上限，无论 trade_date/confirm_date 多晚）
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="sell", amount=200, status="confirmed",
+            trade_date=date(2025, 2, 10), confirm_date=date(2025, 2, 11),
+            platform_code="GV_PLAT",
+        )
+        # pending sell −500（远期下单仍全额计提）
+        create_trade(
+            test_db, "GV_P", "CASH", "",
+            trade_type="sell", amount=500, status="pending",
+            trade_date=date(2025, 3, 3),
+            platform_code="GV_PLAT",
+        )
+        cash = calculate_available_cash(test_db, "GV_P", "GV_PLAT")
+        assert cash == Decimal("5600")
 
 
 class TestCalculateAvailableSharesAsOfDate:

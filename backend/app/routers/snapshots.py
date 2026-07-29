@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_admin, get_current_user
-from app.models import Investor, Portfolio, PortfolioValueSnapshot
+from app.models import Investor, Portfolio, PortfolioPosition, PortfolioValueSnapshot
 from app.schemas.snapshot import (
     SnapshotGenerateRequest,
     SnapshotRecalculateRequest,
@@ -166,12 +166,25 @@ def get_snapshot_status(
     # 计算缺失的交易日（简化：这里只返回空列表，实际实现需要更复杂的逻辑）
     missing_dates = []
     
+    # issue #71：最新快照日 CASH 持仓负现金平台清单（正常为空）
+    negative_cash_platforms = []
+    if latest:
+        negative_cash_platforms = [
+            row[0] for row in db.query(PortfolioPosition.platform_code).filter(
+                PortfolioPosition.portfolio_code == code,
+                PortfolioPosition.snapshot_date == latest.snapshot_date,
+                PortfolioPosition.product_code == "CASH",
+                PortfolioPosition.cash_amount < 0,
+            ).all()
+        ]
+    
     return SnapshotStatusResponse(
         portfolio_code=code,
         latest_snapshot_date=latest.snapshot_date if latest else None,
         total_snapshots=total,
         first_snapshot_date=earliest.snapshot_date if earliest else None,
         missing_dates=missing_dates,
+        negative_cash_platforms=negative_cash_platforms,
     )
 
 

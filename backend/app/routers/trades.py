@@ -68,6 +68,7 @@ def create_trade(
         shares=trade.shares,
         platform_code=trade.platform_code,
         notes=trade.notes,
+        allow_duplicate=trade.allow_duplicate,
     )
     db.commit()
     db.refresh(new_trade)

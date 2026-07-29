@@ -14,6 +14,8 @@ _PROTOCOL_HELP = """InvestRing CLI - HTTP Client
 
 退出码: 0=成功 1=业务错误(可换参重试) 2=认证错误(ir auth login) 3=连接/超时
 
+诊断信息输出至 stderr，脚本/Agent 解析请只读取 stdout
+
 通用约定: --json 直传请求体 | --fields 裁剪输出 | --all 自动翻页 | --full 全字段 | --quiet 精简输出
 
 执行 `ir schema` 一次性获取全部命令/参数/枚举/错误码的机读 JSON 结构。

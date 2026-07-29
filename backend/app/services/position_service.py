@@ -123,13 +123,23 @@ def calculate_available_cash(
     基线 = 最新快照日 portfolio_position 快照表中 CASH 行的 cash_amount
     （与 _generate_portfolio_position 增量范式口径一致，manual_market_value
     覆盖已 baked in 快照，自然继承；无快照时降级为 compute_cash_balance 全量流水）
-    + 快照后 confirmed CASH trades（buy +, sell −）
-    − 所有 pending CASH sells（已承诺未执行）
+    + 快照后 confirmed CASH buys（流入）
+    − 快照后 confirmed CASH sells（流出）
+    − pending CASH sells（已承诺未执行）
     + 快照后 confirmed event cash_change
 
-    as_of_date 为 None 时取当前最新快照日为基线、after 范围为 > latest_date；
-    传入时基线取 <= as_of_date 的最新快照日，after 范围为 (latest_date, as_of_date]，
-    pending 不变（pending 未生效，截止日不影响 pending 计提）。
+    时点口径（#70/#78）：CASH 流出（sell）的资金承诺锚定**下单日 trade_date**，
+    不论 pending/confirmed——confirmed sell 的 as_of 上限按 trade_date（而非
+    confirm_date）判定，pending sell 仅在 trade_date <= as_of_date 时计提，
+    消除 pending→confirmed 翻转后"预留隐身"；CASH 流入（buy）仍须 confirmed
+    且 confirm_date <= as_of_date 才计入。
+
+    as_of_date 为 None 时取当前最新快照日为基线、快照后范围不设上限
+    （confirmed buy/sell 均计入，pending sell 全额计提，与历史口径一致）；
+    传入时基线取 <= as_of_date 的最新快照日，confirmed buys 计
+    confirm_date ∈ (latest_date, as_of_date]，confirmed sells 计
+    confirm_date > latest_date 且 trade_date <= as_of_date，
+    pending sells 计 trade_date <= as_of_date。
     """
     if as_of_date is not None:
         latest_date = get_latest_snapshot_date_le(db, portfolio_code, as_of_date)
@@ -155,31 +165,47 @@ def calculate_available_cash(
     if latest_date is None:
         latest_date = date(1970, 1, 1)  # 确保 > 条件对所有 trade 生效
 
-    # 快照后 confirmed CASH trades
-    after_trades = db.query(Trade).filter(
+    # 快照后 confirmed CASH buys（流入：confirm_date <= as_of_date 才计入）
+    after_buys = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
         Trade.product_code == "CASH",
         Trade.status == "confirmed",
+        Trade.trade_type == "buy",
         Trade.confirm_date > latest_date,
     )
     if as_of_date is not None:
-        after_trades = after_trades.filter(Trade.confirm_date <= as_of_date)
+        after_buys = after_buys.filter(Trade.confirm_date <= as_of_date)
     if platform_code:
-        after_trades = after_trades.filter(Trade.platform_code == platform_code)
+        after_buys = after_buys.filter(Trade.platform_code == platform_code)
 
-    for t in after_trades.all():
-        if t.trade_type == "buy":
-            cash += Decimal(str(t.amount or 0))
-        elif t.trade_type == "sell":
-            cash -= Decimal(str(t.amount or 0))
+    for t in after_buys.all():
+        cash += Decimal(str(t.amount or 0))
 
-    # pending CASH sells（已承诺未执行，需预留）
+    # 快照后 confirmed CASH sells（流出：承诺锚定下单日，上限按 trade_date 判定）
+    after_sells = db.query(Trade).filter(
+        Trade.portfolio_code == portfolio_code,
+        Trade.product_code == "CASH",
+        Trade.status == "confirmed",
+        Trade.trade_type == "sell",
+        Trade.confirm_date > latest_date,
+    )
+    if as_of_date is not None:
+        after_sells = after_sells.filter(Trade.trade_date <= as_of_date)
+    if platform_code:
+        after_sells = after_sells.filter(Trade.platform_code == platform_code)
+
+    for t in after_sells.all():
+        cash -= Decimal(str(t.amount or 0))
+
+    # pending CASH sells（已承诺未执行，需预留；as_of 时点仅计提已下单的）
     pending_sells = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
         Trade.product_code == "CASH",
         Trade.status == "pending",
         Trade.trade_type == "sell",
     )
+    if as_of_date is not None:
+        pending_sells = pending_sells.filter(Trade.trade_date <= as_of_date)
     if platform_code:
         pending_sells = pending_sells.filter(Trade.platform_code == platform_code)
 

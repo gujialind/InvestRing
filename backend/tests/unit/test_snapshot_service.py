@@ -465,7 +465,7 @@ class TestGeneratePortfolioPositionCashNone:
             asset_type="stock", market_value=0.0,
         )
         # 修复前：(None <= 0) 抛 TypeError；修复后：零持仓被跳过
-        result = _generate_portfolio_position(test_db, "ZS20", date(2025, 3, 4))
+        result, _ = _generate_portfolio_position(test_db, "ZS20", date(2025, 3, 4))
         assert all(p.product_code != "STK20" for p in result)
 
 
@@ -597,7 +597,7 @@ class TestFrozenAmount:
             trade_type="sell", amount=300.0, platform_code="PLAT_FA",
             trade_date=date(2025, 1, 6), status="pending",
         )
-        result = _generate_portfolio_position(test_db, "FA1", date(2025, 1, 7))
+        result, _ = _generate_portfolio_position(test_db, "FA1", date(2025, 1, 7))
         cash_pos = [p for p in result if p.product_code == "CASH"]
         assert cash_pos, "应生成 CASH 持仓"
         assert cash_pos[0].frozen_amount == Decimal("300.0")
@@ -701,7 +701,7 @@ class TestCashIncrementalWithManual:
             market_value=8888.0,
         )
         # 生成快照
-        positions = _generate_portfolio_position(test_db, "MMV_P", date(2025, 3, 10))
+        positions, _ = _generate_portfolio_position(test_db, "MMV_P", date(2025, 3, 10))
         cash_positions = [p for p in positions if p.product_code == "CASH"]
         assert len(cash_positions) == 1
         # 应被 manual 覆盖为 8888，而非前日 9900
@@ -731,7 +731,7 @@ class TestCashIncrementalWithManual:
             platform_code="CV_PLAT", trade_date=date(2025, 3, 9),
             confirm_date=date(2025, 3, 9), status="confirmed",
         )
-        positions = _generate_portfolio_position(test_db, "CV_P", date(2025, 3, 10))
+        positions, _ = _generate_portfolio_position(test_db, "CV_P", date(2025, 3, 10))
         cash_positions = [p for p in positions if p.product_code == "CASH"]
         assert len(cash_positions) == 1
         # 5000 + 3000 - 1000 = 7000
@@ -770,7 +770,7 @@ class TestCashIncrementalWithManual:
             confirm_date=date(2025, 3, 9), status="confirmed",
         )
         # 生成 D-1 快照
-        positions = _generate_portfolio_position(test_db, "INH_P", date(2025, 3, 10))
+        positions, _ = _generate_portfolio_position(test_db, "INH_P", date(2025, 3, 10))
         cash_positions = [p for p in positions if p.product_code == "CASH"]
         assert len(cash_positions) == 1
         # 基线 = D-2 快照 10000（含 manual）+ 窗口 1000 = 11000

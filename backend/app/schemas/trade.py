@@ -22,7 +22,8 @@ class TradeBase(BaseModel):
 
 
 class TradeCreate(TradeBase):
-    pass
+    # 自然键防重（#82）：命中同参数 pending/confirmed 交易时需显式传 True 强制创建
+    allow_duplicate: bool = False
 
 
 class TradeUpdate(BaseModel):

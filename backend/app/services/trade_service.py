@@ -277,6 +277,7 @@ def confirm_single_trade(
     *,
     confirm_date: Optional[date] = None,
     price: Optional[Decimal] = None,
+    skip_cash_check: bool = False,
 ) -> Trade:
     """
     确认单笔调仓交易的核心逻辑，供手动确认与 auto_confirm 共用。
@@ -289,6 +290,8 @@ def confirm_single_trade(
     - 场外基金若传入 price 仅作一致性校验：须与 T 日净值相等，否则抛 PRICE_NAV_MISMATCH，
       手动价不覆盖净值（不传则直接取净值）
     - 场内基金不取净值，使用创建时录入的成交价（成交价录入时必填，见 trades.py 创建校验）
+    - 基金买入确认时按生效确认日口径校验可用现金（加回自身在途 CASH 腿防双重计数），
+      不足抛 INSUFFICIENT_CASH；skip_cash_check=True 跳过（auto_confirm 重算历史场景）
     - 置 status=confirmed 并原子同步配对 CASH 腿
 
     Args:
@@ -298,6 +301,7 @@ def confirm_single_trade(
         confirm_date: 覆盖确认日（补录场景）
         price: 手动价格；场外基金仅用于与 T 日净值一致性校验（不覆盖净值），
             场内基金作为覆盖成交价
+        skip_cash_check: 跳过买入确认时的可用现金校验（auto_confirm 专用）
 
     Returns:
         确认后的 trade 对象（未 commit，事务由调用方控制）
@@ -305,6 +309,47 @@ def confirm_single_trade(
     preview = calculate_confirm_preview(
         db, trade, product, confirm_date=confirm_date, price=price
     )
+
+    # 基金买入确认时校验可用现金（#70/#78：按生效确认日时点口径）
+    if (
+        not skip_cash_check
+        and trade.trade_type == "buy"
+        and trade.product_code != "CASH"
+    ):
+        effective_confirm_date = (
+            confirm_date if confirm_date is not None else trade.confirm_date
+        )
+        available = calculate_available_cash(
+            db, trade.portfolio_code, trade.platform_code,
+            as_of_date=effective_confirm_date,
+        )
+        # 加回自身在途 CASH sell 腿：该腿已作为 pending sell 计提预留，
+        # 若不加回会与 paired_cash_amount 双重计数导致误拒
+        own_leg_amount = Decimal("0")
+        if trade.transfer_group:
+            own_legs = db.query(Trade).filter(
+                Trade.transfer_group == trade.transfer_group,
+                Trade.product_code == "CASH",
+                Trade.trade_type == "sell",
+                Trade.status == "pending",
+            ).all()
+            for leg in own_legs:
+                own_leg_amount += Decimal(str(leg.amount or 0))
+        available_excl_own = available + own_leg_amount
+        paired = preview["paired_cash_amount"]
+        if paired is not None:
+            paired_d = Decimal(str(paired))
+            if paired_d > available_excl_own:
+                raise BusinessError(
+                    "INSUFFICIENT_CASH",
+                    f"平台 {trade.platform_code} 可用现金不足"
+                    f"（需 {paired_d}，可用 {available_excl_own}）",
+                    details={
+                        "deficit": str(paired_d - available_excl_own),
+                        "required": str(paired_d),
+                        "available": str(available_excl_own),
+                    },
+                )
 
     # confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
     if confirm_date is not None:
@@ -344,11 +389,15 @@ def create_trade(
     shares: Optional[Decimal] = None,
     platform_code: Optional[str] = None,
     notes: Optional[str] = None,
+    allow_duplicate: bool = False,
 ) -> Trade:
     """创建买入/卖出交易（含全部校验与配对 CASH 腿），供 REST 与 CLI 共用。
 
     买入现金口径统一：cash_out = actual_amount 优先，否则 amount
     （前端传 amount、CLI 传 actual_amount，两者行为一致）。
+    自然键防重（#82）：同组合/产品/市场/平台/方向/交易日且金额（买）或份额（卖）
+    相同的 pending/confirmed 交易视为重复，抛 DUPLICATE_TRADE；
+    allow_duplicate=True 强制放行，cancelled 记录不算重复。
     不 commit，事务由调用方控制。返回基金腿 Trade。
     """
     if not is_trading_day(db, trade_date):
@@ -440,6 +489,37 @@ def create_trade(
         )
     else:
         raise BusinessError("INVALID_TYPE", "类型必须为 buy 或 sell")
+
+    # 自然键防重（#82）：命中 pending/confirmed 同参数交易且未显式放行时拒绝
+    if not allow_duplicate:
+        candidates = db.query(Trade).filter(
+            Trade.portfolio_code == portfolio_code,
+            Trade.product_code == product_code,
+            Trade.market == market,
+            Trade.platform_code == platform_code,
+            Trade.trade_type == trade_type,
+            Trade.trade_date == trade_date,
+            Trade.status.in_(["pending", "confirmed"]),
+        ).all()
+        existing = None
+        for c in candidates:
+            if trade_type == "buy":
+                # 买入比对现金支出（actual_amount = cash_out，与落库值同口径）
+                if c.actual_amount is not None and Decimal(str(c.actual_amount)) == cash_out_d:
+                    existing = c
+                    break
+            else:
+                # 卖出比对量化后份额（与落库值同口径）
+                if c.shares is not None and Decimal(str(c.shares)) == shares_d:
+                    existing = c
+                    break
+        if existing:
+            raise BusinessError(
+                "DUPLICATE_TRADE",
+                f"存在相同参数的交易（id={existing.id}），如确为重复操作请检查，"
+                f"如需强制创建请传 allow_duplicate",
+                details={"existing_trade_id": existing.id},
+            )
 
     # 基金腿必配 CASH 腿（显式记录现金变动）
     db.add(new_trade)

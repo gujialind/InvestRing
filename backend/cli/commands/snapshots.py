@@ -36,9 +36,10 @@ def recalculate_snapshots(
         from app.services.snapshot_service import recalculate_snapshots as recalc
 
         result = recalc(db, portfolio_code, parse_date(start_date), parse_date(end_date))
-        # errors 非空时先回滚，防 cli_context 成功路径统一 commit 落库半截状态
+        # errors 非空时整体回滚并以非 0 退出，防 cli_context 成功路径统一 commit 落库半截状态
         if any(r["errors"] for r in result["results"]):
             db.rollback()
+            error("RECALCULATE_FAILED", "区间重算存在失败日期，已整体回滚", details=result)
         success(data=result)
 
 
