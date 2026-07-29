@@ -25,12 +25,13 @@ echo "🚀 启动后端服务..."
 cd backend
 
 # 创建并激活虚拟环境
-if [ ! -d ".venv" ]; then
+if [ ! -f ".venv/bin/activate" ]; then
     echo "📦 创建 Python 虚拟环境..."
-    python3 -m venv .venv
+    rm -rf .venv
+    python3 -m venv .venv || { echo "❌ 创建虚拟环境失败，请确保已安装 python3-venv"; exit 1; }
 fi
 
-source .venv/bin/activate
+source .venv/bin/activate || { echo "❌ 激活虚拟环境失败"; exit 1; }
 
 # 安装依赖
 echo "📦 安装后端依赖..."
