@@ -25,6 +25,8 @@
 - 增强交易服务中的calculate_confirm_preview函数
 - 改进交易Schema，添加预览响应模型
 - 交易预览系统允许用户在执行前验证交易而不持久化数据
+- 优化了CASH交易配对验证机制
+- 增强了交易状态管理的完整性保护
 
 ## 目录
 1. [简介](#简介)
@@ -196,14 +198,14 @@ end
   - 权限：管理员（admin）
   - 安全验证：**新增** 已确认交易不可直接修改，需先取消确认
   - 响应：TradeResponse
-  - 实现参考：[backend/app/routers/trades.py:535-561](file://backend/app/routers/trades.py#L535-L561)
+  - 实现参考：[backend/app/routers/trades.py:535-561](file://backend/app/routers/trades.py#L535-561)
 
 - 删除交易
   - 方法与路径：DELETE /api/trades/{id}
   - 权限：管理员（admin）
   - 安全验证：**新增** 已确认交易不可直接删除，需先取消确认
   - 响应：成功消息
-  - 实现参考：[backend/app/routers/trades.py:563-585](file://backend/app/routers/trades.py#L563-L585)
+  - 实现参考：[backend/app/routers/trades.py:563-585](file://backend/app/routers/trades.py#L563-585)
 
 - 确认交易
   - 方法与路径：POST /api/trades/{id}/confirm
@@ -364,7 +366,7 @@ SubConfirmedSells2 --> EndShares["得到可用份额"]
 
 **图表来源**
 - [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
-- [backend/app/routers/trades.py:220-268](file://backend/app/routers/trades.py#L220-L268)
+- [backend/app/routers/trades.py:220-268](file://backend/app/routers/trades.py#L220-268)
 
 **章节来源**
 - [backend/app/routers/trades.py:128-268](file://backend/app/routers/trades.py#L128-L268)
@@ -564,7 +566,7 @@ TP --> VC["验证组件"]
   - 请求体：TradeUpdate（部分字段）
   - 安全验证：已确认交易不可直接修改
   - 示例响应：TradeResponse
-  - 参考：[backend/app/routers/trades.py:535-561](file://backend/app/routers/trades.py#L535-L561)
+  - 参考：[backend/app/routers/trades.py:535-561](file://backend/app/routers/trades.py#L535-561)
 
 - 删除交易
   - 方法：DELETE
@@ -629,6 +631,6 @@ TP --> VC["验证组件"]
 
 **章节来源**
 - [backend/app/routers/trades.py:292-402](file://backend/app/routers/trades.py#L292-L402)
-- [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-L32)
+- [backend/app/models/trade.py:5-32](file://backend/app/models/trade.py#L5-32)
 - [backend/app/schemas/trade.py:6-45](file://backend/app/schemas/trade.py#L6-L45)
 - [backend/app/routers/trades.py:415-416](file://backend/app/routers/trades.py#L415-L416)

@@ -30,6 +30,8 @@
 - **改进** API行为保持一致，但内部实现更加清晰和可维护
 - **增强** 服务层异常处理机制，提供更精确的错误信息
 - **统一** 错误处理模式，减少代码重复和提高一致性
+- **更新** subscription.py schema和subscription_service.py的改进，包括平台关联和错误处理优化
+- **调整** CLI工具的相应调整以匹配新的API结构
 
 ## 目录
 1. [简介](#简介)
@@ -127,7 +129,7 @@ Q["简化错误处理<br/>移除冗余try/except"] --> B
 **章节来源**
 - [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
 - [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
-- [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-L46)
+- [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-46)
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
 - [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
 - [backend/app/routers/trades.py:271-289](file://backend/app/routers/trades.py#L271-L289)
@@ -172,11 +174,11 @@ I --> J["返回错误信息"]
 **图表来源**
 - [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
 - [backend/app/services/subscription_service.py:137-178](file://backend/app/services/subscription_service.py#L137-L178)
-- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-L253)
+- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-253)
 
 **章节来源**
 - [backend/app/services/subscription_service.py:1-178](file://backend/app/services/subscription_service.py#L1-L178)
-- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-L253)
+- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-253)
 
 ## 架构概览
 - 认证与授权
@@ -227,10 +229,10 @@ service->>模型 : "更新确认状态和计算结果"
 ```
 
 **图表来源**
-- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-L253)
-- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-L134)
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
-- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-L361)
+- [backend/app/routers/subscriptions.py:216-253](file://backend/app/routers/subscriptions.py#L216-253)
+- [backend/app/services/subscription_service.py:40-134](file://backend/app/services/subscription_service.py#L40-134)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
+- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-361)
 - [backend/app/models/subscription.py:11](file://backend/app/models/subscription.py#L11)
 
 ## 详细组件分析
@@ -276,7 +278,7 @@ PlatformOK --> |否| ErrP["返回错误：平台不存在"]
 PlatformOK --> |是| CheckPortfolio["校验组合状态"]
 CheckPortfolio --> PortfolioOK{"active/draft？"}
 PortfolioOK --> |否| Err2["返回错误：组合未激活"]
-PortfolioOK --> |是| CheckInvestor["校验投资人存在"]
+PortfolioOK --> |是| CheckInvestor["校验投资人是否存在"]
 CheckInvestor --> InvestorOK{"存在？"}
 InvestorOK --> |否| Err3["返回错误：投资人不存在"]
 InvestorOK --> SubType{"sub_type"}
@@ -296,17 +298,17 @@ SavePending --> End(["结束"])
 ```
 
 **图表来源**
-- [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-L199)
-- [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-L85)
+- [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-199)
+- [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-85)
 
 **章节来源**
-- [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
-- [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-L199)
-- [backend/app/routers/subscriptions.py:237-320](file://backend/app/routers/subscriptions.py#L237-L320)
-- [backend/app/routers/subscriptions.py:323-340](file://backend/app/routers/subscriptions.py#L323-L340)
-- [backend/app/routers/subscriptions.py:343-359](file://backend/app/routers/subscriptions.py#L343-L359)
-- [backend/app/routers/subscriptions.py:362-374](file://backend/app/routers/subscriptions.py#L362-L374)
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
+- [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-113)
+- [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-199)
+- [backend/app/routers/subscriptions.py:237-320](file://backend/app/routers/subscriptions.py#L237-320)
+- [backend/app/routers/subscriptions.py:323-340](file://backend/app/routers/subscriptions.py#L323-340)
+- [backend/app/routers/subscriptions.py:343-359](file://backend/app/routers/subscriptions.py#L343-359)
+- [backend/app/routers/subscriptions.py:362-374](file://backend/app/routers/subscriptions.py#L362-374)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
 
 ### 份额变动事件模块（/api/share-change-events）
 - 接口总览
@@ -349,17 +351,17 @@ participant 日历 as "交易日历"
 ```
 
 **图表来源**
-- [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-L77)
-- [backend/app/routers/share_change_events.py:92-128](file://backend/app/routers/share_change_events.py#L92-L128)
+- [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-77)
+- [backend/app/routers/share_change_events.py:92-128](file://backend/app/routers/share_change_events.py#L92-128)
 
 **章节来源**
 - [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-46)
-- [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-L77)
-- [backend/app/routers/share_change_events.py:92-128](file://backend/app/routers/share_change_events.py#L92-L128)
-- [backend/app/routers/share_change_events.py:131-148](file://backend/app/routers/share_change_events.py#L131-L148)
-- [backend/app/routers/share_change_events.py:151-167](file://backend/app/routers/share_change_events.py#L151-L167)
-- [backend/app/routers/share_change_events.py:170-182](file://backend/app/routers/share_change_events.py#L170-L182)
-- [Docs/04-后端开发.md:543-646](file://Docs/04-后端开发.md#L543-L646)
+- [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-77)
+- [backend/app/routers/share_change_events.py:92-128](file://backend/app/routers/share_change_events.py#L92-128)
+- [backend/app/routers/share_change_events.py:131-148](file://backend/app/routers/share_change_events.py#L131-148)
+- [backend/app/routers/share_change_events.py:151-167](file://backend/app/routers/share_change_events.py#L151-167)
+- [backend/app/routers/share_change_events.py:170-182](file://backend/app/routers/share_change_events.py#L170-182)
+- [Docs/04-后端开发.md:543-646](file://Docs/04-后端开发.md#L543-646)
 
 ### 查询接口补充
 - 产品查询（/api/products）
@@ -376,13 +378,13 @@ participant 日历 as "交易日历"
 
 **章节来源**
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
-- [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-L92)
-- [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-L122)
-- [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
-- [backend/app/routers/portfolios.py:61-70](file://backend/app/routers/portfolios.py#L61-L70)
-- [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-L191)
-- [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-L241)
-- [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-L275)
+- [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-92)
+- [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-122)
+- [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-36)
+- [backend/app/routers/portfolios.py:61-70](file://backend/app/routers/portfolios.py#L61-70)
+- [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-191)
+- [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-241)
+- [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-275)
 
 ### **新增** 平台间现金转移模块（/api/cash-transfers）
 - 接口总览
@@ -426,14 +428,14 @@ participant 现金服务 as "calculate_available_cash"
 ```
 
 **图表来源**
-- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
-- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-190)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-143)
 
 **章节来源**
-- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
-- [backend/app/routers/cash_transfers.py:193-249](file://backend/app/routers/cash_transfers.py#L193-L249)
-- [backend/app/routers/cash_transfers.py:252-317](file://backend/app/routers/cash_transfers.py#L252-L317)
-- [backend/app/schemas/cash_transfer.py:6-43](file://backend/app/schemas/cash_transfer.py#L6-L43)
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-190)
+- [backend/app/routers/cash_transfers.py:193-249](file://backend/app/routers/cash_transfers.py#L193-249)
+- [backend/app/routers/cash_transfers.py:252-317](file://backend/app/routers/cash_transfers.py#L252-317)
+- [backend/app/schemas/cash_transfer.py:6-43](file://backend/app/schemas/cash_transfer.py#L6-43)
 
 ### **新增** 已确认订阅事件的安全验证机制
 - **安全验证规则**
@@ -465,12 +467,12 @@ ProcessRequest --> End
 ```
 
 **图表来源**
-- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-L361)
-- [backend/app/routers/subscriptions.py:380-388](file://backend/app/routers/subscriptions.py#L380-L388)
+- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-361)
+- [backend/app/routers/subscriptions.py:380-388](file://backend/app/routers/subscriptions.py#L380-388)
 
 **章节来源**
-- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-L361)
-- [backend/app/routers/subscriptions.py:380-388](file://backend/app/routers/subscriptions.py#L380-L388)
+- [backend/app/routers/subscriptions.py:354-361](file://backend/app/routers/subscriptions.py#L354-361)
+- [backend/app/routers/subscriptions.py:380-388](file://backend/app/routers/subscriptions.py#L380-388)
 
 ## 依赖关系分析
 - 认证与授权
@@ -511,22 +513,22 @@ Q["简化错误处理"] --> R
 ```
 
 **图表来源**
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
-- [backend/app/routers/subscriptions.py:19-23](file://backend/app/routers/subscriptions.py#L19-L23)
-- [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-L85)
-- [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-L32)
-- [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
-- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
-- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
+- [backend/app/routers/subscriptions.py:19-23](file://backend/app/routers/subscriptions.py#L19-23)
+- [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-85)
+- [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-32)
+- [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-217)
+- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-38)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-143)
 
 **章节来源**
-- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-L129)
-- [backend/app/routers/subscriptions.py:19-23](file://backend/app/routers/subscriptions.py#L19-L23)
-- [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-L85)
-- [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-L32)
-- [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-L217)
-- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
-- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-L143)
+- [backend/app/dependencies.py:49-129](file://backend/app/dependencies.py#L49-129)
+- [backend/app/routers/subscriptions.py:19-23](file://backend/app/routers/subscriptions.py#L19-23)
+- [backend/app/routers/subscriptions.py:36-85](file://backend/app/routers/subscriptions.py#L36-85)
+- [backend/app/routers/trades.py:18-32](file://backend/app/routers/trades.py#L18-32)
+- [backend/app/routers/trades.py:128-217](file://backend/app/routers/trades.py#L128-217)
+- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-38)
+- [backend/app/services/position_service.py:18-143](file://backend/app/services/position_service.py#L18-143)
 
 ## 性能与并发特性
 - 交易日历查询：每次操作均进行一次数据库查询，建议在上层缓存交易日历
@@ -568,19 +570,19 @@ Q["简化错误处理"] --> R
   - **优化** 检查服务层异常是否正确抛出，避免路由层冗余try/except干扰
 
 **章节来源**
-- [backend/app/routers/subscriptions.py:121-126](file://backend/app/routers/subscriptions.py#L121-L126)
-- [backend/app/routers/subscriptions.py:136-140](file://backend/app/routers/subscriptions.py#L136-L140)
-- [backend/app/routers/subscriptions.py:152-156](file://backend/app/routers/subscriptions.py#L152-L156)
-- [backend/app/routers/subscriptions.py:168-172](file://backend/app/routers/subscriptions.py#L168-L172)
-- [backend/app/routers/subscriptions.py:176-183](file://backend/app/routers/subscriptions.py#L176-L183)
-- [backend/app/routers/subscriptions.py:248-252](file://backend/app/routers/subscriptions.py#L248-L252)
-- [backend/app/routers/share_change_events.py:56-63](file://backend/app/routers/share_change_events.py#L56-L63)
-- [backend/app/routers/share_change_events.py:116-123](file://backend/app/routers/share_change_events.py#L116-L123)
-- [backend/app/routers/share_change_events.py:101-105](file://backend/app/routers/share_change_events.py#L101-L105)
-- [backend/app/routers/subscriptions.py:357-361](file://backend/app/routers/subscriptions.py#L357-L361)
-- [backend/app/routers/subscriptions.py:384-388](file://backend/app/routers/subscriptions.py#L384-L388)
-- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-L38)
-- [backend/app/routers/cash_transfers.py:76-117](file://backend/app/routers/cash_transfers.py#L76-L117)
+- [backend/app/routers/subscriptions.py:121-126](file://backend/app/routers/subscriptions.py#L121-126)
+- [backend/app/routers/subscriptions.py:136-140](file://backend/app/routers/subscriptions.py#L136-140)
+- [backend/app/routers/subscriptions.py:152-156](file://backend/app/routers/subscriptions.py#L152-156)
+- [backend/app/routers/subscriptions.py:168-172](file://backend/app/routers/subscriptions.py#L168-172)
+- [backend/app/routers/subscriptions.py:176-183](file://backend/app/routers/subscriptions.py#L176-183)
+- [backend/app/routers/subscriptions.py:248-252](file://backend/app/routers/subscriptions.py#L248-252)
+- [backend/app/routers/share_change_events.py:56-63](file://backend/app/routers/share_change_events.py#L56-63)
+- [backend/app/routers/share_change_events.py:116-123](file://backend/app/routers/share_change_events.py#L116-123)
+- [backend/app/routers/share_change_events.py:101-105](file://backend/app/routers/share_change_events.py#L101-105)
+- [backend/app/routers/subscriptions.py:357-361](file://backend/app/routers/subscriptions.py#L357-361)
+- [backend/app/routers/subscriptions.py:384-388](file://backend/app/routers/subscriptions.py#L384-388)
+- [backend/app/services/subscription_service.py:22-38](file://backend/app/services/subscription_service.py#L22-38)
+- [backend/app/routers/cash_transfers.py:76-117](file://backend/app/routers/cash_transfers.py#L76-117)
 
 ## 结论
 - 申购/赎回与份额变动事件模块均采用严格的交易日与状态机约束，确保业务合规
@@ -620,13 +622,13 @@ Q["简化错误处理"] --> R
   - 返回：删除成功消息
 
 **章节来源**
-- [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-L113)
-- [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-L199)
-- [backend/app/routers/subscriptions.py:202-213](file://backend/app/routers/subscriptions.py#L202-L213)
-- [backend/app/routers/subscriptions.py:237-320](file://backend/app/routers/subscriptions.py#L237-L320)
-- [backend/app/routers/subscriptions.py:323-340](file://backend/app/routers/subscriptions.py#L323-L340)
-- [backend/app/routers/subscriptions.py:343-359](file://backend/app/routers/subscriptions.py#L343-L359)
-- [backend/app/routers/subscriptions.py:362-374](file://backend/app/routers/subscriptions.py#L362-L374)
+- [backend/app/routers/subscriptions.py:88-113](file://backend/app/routers/subscriptions.py#L88-113)
+- [backend/app/routers/subscriptions.py:115-199](file://backend/app/routers/subscriptions.py#L115-199)
+- [backend/app/routers/subscriptions.py:202-213](file://backend/app/routers/subscriptions.py#L202-213)
+- [backend/app/routers/subscriptions.py:237-320](file://backend/app/routers/subscriptions.py#L237-320)
+- [backend/app/routers/subscriptions.py:323-340](file://backend/app/routers/subscriptions.py#L323-340)
+- [backend/app/routers/subscriptions.py:343-359](file://backend/app/routers/subscriptions.py#L343-359)
+- [backend/app/routers/subscriptions.py:362-374](file://backend/app/routers/subscriptions.py#L362-374)
 
 ### 份额变动事件接口
 - GET /api/share-change-events
@@ -649,13 +651,13 @@ Q["简化错误处理"] --> R
 
 **章节来源**
 - [backend/app/routers/share_change_events.py:28-46](file://backend/app/routers/share_change_events.py#L28-46)
-- [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-L77)
-- [backend/app/routers/share_change_events.py:80-89](file://backend/app/routers/share_change_events.py#L80-L89)
-- [backend/app/routers/share_change_events.py:92-128](file://backend/app/routers/share_change_events.py#L92-L128)
-- [backend/app/routers/share_change_events.py:131-148](file://backend/app/routers/share_change_events.py#L131-L148)
-- [backend/app/routers/share_change_events.py:151-167](file://backend/app/routers/share_change_events.py#L151-L167)
-- [backend/app/routers/share_change_events.py:170-182](file://backend/app/routers/share_change_events.py#L170-L182)
-- [Docs/04-后端开发.md:543-646](file://Docs/04-后端开发.md#L543-L646)
+- [backend/app/routers/share_change_events.py:49-77](file://backend/app/routers/share_change_events.py#L49-77)
+- [backend/app/routers/share_change_events.py:80-89](file://backend/app/routers/share_change_events.py#L80-89)
+- [backend/app/routers/share_change_events.py:92-128](file://backend/app/routers/share_change_events.py#L92-128)
+- [backend/app/routers/share_change_events.py:131-148](file://backend/app/routers/share_change_events.py#L131-148)
+- [backend/app/routers/share_change_events.py:151-167](file://backend/app/routers/share_change_events.py#L151-167)
+- [backend/app/routers/share_change_events.py:170-182](file://backend/app/routers/share_change_events.py#L170-182)
+- [Docs/04-后端开发.md:543-646](file://Docs/04-后端开发.md#L543-646)
 
 ### **新增** 平台间现金转移接口
 - POST /api/cash-transfers/portfolios/{portfolio_code}/cash-transfer
@@ -669,10 +671,10 @@ Q["简化错误处理"] --> R
   - 返回：转账记录列表（按transfer_group分组）
 
 **章节来源**
-- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-L190)
-- [backend/app/routers/cash_transfers.py:193-249](file://backend/app/routers/cash_transfers.py#L193-L249)
-- [backend/app/routers/cash_transfers.py:252-317](file://backend/app/routers/cash_transfers.py#L252-L317)
-- [backend/app/schemas/cash_transfer.py:6-43](file://backend/app/schemas/cash_transfer.py#L6-L43)
+- [backend/app/routers/cash_transfers.py:51-190](file://backend/app/routers/cash_transfers.py#L51-190)
+- [backend/app/routers/cash_transfers.py:193-249](file://backend/app/routers/cash_transfers.py#L193-249)
+- [backend/app/routers/cash_transfers.py:252-317](file://backend/app/routers/cash_transfers.py#L252-317)
+- [backend/app/schemas/cash_transfer.py:6-43](file://backend/app/schemas/cash_transfer.py#L6-43)
 
 ### 查询接口
 - 产品查询
@@ -689,13 +691,13 @@ Q["简化错误处理"] --> R
 
 **章节来源**
 - [backend/app/routers/products.py:27-45](file://backend/app/routers/products.py#L27-45)
-- [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-L92)
-- [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-L122)
-- [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-L36)
-- [backend/app/routers/portfolios.py:61-70](file://backend/app/routers/portfolios.py#L61-L70)
-- [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-L191)
-- [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-L241)
-- [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-L275)
+- [backend/app/routers/products.py:79-92](file://backend/app/routers/products.py#L79-92)
+- [backend/app/routers/products.py:95-122](file://backend/app/routers/products.py#L95-122)
+- [backend/app/routers/portfolios.py:18-36](file://backend/app/routers/portfolios.py#L18-36)
+- [backend/app/routers/portfolios.py:61-70](file://backend/app/routers/portfolios.py#L61-70)
+- [backend/app/routers/portfolios.py:159-191](file://backend/app/routers/portfolios.py#L159-191)
+- [backend/app/routers/portfolios.py:194-241](file://backend/app/routers/portfolios.py#L194-241)
+- [backend/app/routers/portfolios.py:244-275](file://backend/app/routers/portfolios.py#L244-275)
 
 ### **新增** 前端类型变更
 - Subscription 类型
@@ -705,4 +707,4 @@ Q["简化错误处理"] --> R
   - SubscriptionUpdate 接口添加 platform_code?: string
 
 **章节来源**
-- [frontend/src/types/subscription.ts:1-39](file://frontend/src/types/subscription.ts#L1-L39)
+- [frontend/src/types/subscription.ts:1-39](file://frontend/src/types/subscription.ts#L1-39)
