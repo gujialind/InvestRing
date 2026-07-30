@@ -32,6 +32,13 @@
 - [backend/requirements.txt](file://backend/requirements.txt)
 </cite>
 
+## 更新摘要
+**所做更改**
+- 新增 ModelScope Studio 子路径部署支持，通过 getBasePath() 函数实现动态基础路径配置
+- 增强 axios baseURL 配置，支持在 /studios/{owner}/{repo} 路径下正确路由 API 请求
+- 改进 401 认证错误处理机制，提供更完善的令牌管理和自动刷新策略
+- 优化网络异常处理和离线支持方案，提升系统健壮性
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -48,7 +55,7 @@
 
 InvestRing 项目采用前后端分离架构，前端使用 Next.js + TypeScript + React Query 构建，后端使用 FastAPI 提供 RESTful API 服务。本设计文档专注于前端 API 客户端的设计与实现，涵盖 HTTP 客户端封装、请求/响应拦截器、错误处理机制、认证令牌管理、重试策略、超时配置、并发控制以及最佳实践等内容。
 
-**重要变更**：项目已从单一 monolithic API 模块重构为模块化的业务域驱动架构。新的架构将 API 功能按业务领域进行模块化组织，提高了代码的可维护性和可扩展性。
+**重要变更**：项目已从单一 monolithic API 模块重构为模块化的业务域驱动架构。新的架构将 API 功能按业务领域进行模块化组织，提高了代码的可维护性和可扩展性。**最新更新**：新增了 ModelScope Studio 子路径部署支持，通过 getBasePath() 函数和增强的 axios baseURL 配置，确保在 /studios/{owner}/{repo} 路径下正确路由 API 请求。
 
 ## 项目结构
 
@@ -127,10 +134,12 @@ IndexAPI --> TaskAPI
 
 项目基于 Axios 创建了统一的 HTTP 客户端实例，配置了基础 URL、请求头和超时时间：
 
-- 基础 URL：从环境变量 `NEXT_PUBLIC_API_URL` 获取，默认为 `/api`
-- Content-Type：固定为 `application/json`
-- 超时时间：30000ms（30秒）
-- 支持请求/响应拦截器链式处理
+- **基础 URL**：从环境变量 `NEXT_PUBLIC_API_URL` 获取，默认为 `/api`，现在支持通过 `getBasePath()` 函数动态获取 ModelScope Studio 子路径
+- **Content-Type**：固定为 `application/json`
+- **超时时间**：30000ms（30秒）
+- **支持请求/响应拦截器链式处理**
+
+**更新**：新增 `getBasePath()` 函数，支持 ModelScope Studio 子路径部署，确保在 `/studios/{owner}/{repo}` 路径下正确路由 API 请求。
 
 ### 模块化 API 设计
 
@@ -375,12 +384,42 @@ Note over Client,AuthRouter : 令牌有效期由配置决定
 ```
 
 **图表来源**
-- [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-L95)
-- [backend/app/config.py:14-16](file://backend/app/config.py#L14-L16)
+- [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-95)
+- [backend/app/config.py:14-16](file://backend/app/config.py#L14-16)
 
 **章节来源**
-- [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-L95)
-- [backend/app/config.py:14-16](file://backend/app/config.py#L14-L16)
+- [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-95)
+- [backend/app/config.py:14-16](file://backend/app/config.py#L14-16)
+
+### ModelScope Studio 子路径部署支持
+
+**新增功能**：项目现在支持 ModelScope Studio 子路径部署，通过 `getBasePath()` 函数实现动态基础路径配置。
+
+#### 动态路径解析
+
+```mermaid
+flowchart TD
+Start["应用启动"] --> DetectEnv["检测运行环境"]
+DetectEnv --> CheckStudio{"是否在 Studio 环境？"}
+CheckStudio --> |是| GetOwnerRepo["获取 owner/repo 信息"]
+CheckStudio --> |否| UseDefault["使用默认路径 /api"]
+GetOwnerRepo --> BuildPath["构建 /studios/{owner}/{repo}/api"]
+BuildPath --> SetBaseURL["设置 axios baseURL"]
+UseDefault --> SetBaseURL
+SetBaseURL --> Ready["API 客户端就绪"]
+```
+
+**图表来源**
+- [frontend/src/lib/api/client.ts:1-50](file://frontend/src/lib/api/client.ts#L1-50)
+
+#### 路径配置策略
+
+- **开发环境**：直接使用 `/api` 作为基础路径
+- **ModelScope Studio 环境**：自动检测并构建 `/studios/{owner}/{repo}/api` 路径
+- **生产环境**：支持自定义环境变量覆盖
+
+**章节来源**
+- [frontend/src/lib/api/client.ts:1-50](file://frontend/src/lib/api/client.ts#L1-50)
 
 ## 依赖分析
 
@@ -463,6 +502,8 @@ Next --> FastAPI
 2. 跳转到登录页面
 3. 阻止后续请求
 
+**更新**：增强了 401 认证错误处理机制，提供更完善的令牌管理和自动刷新策略。
+
 #### 网络连接问题
 
 可能的原因包括：
@@ -479,6 +520,14 @@ Next --> FastAPI
 - 确认后端 JWT 密钥配置正确
 - 检查用户角色权限
 
+#### ModelScope Studio 部署问题
+
+如果在使用 ModelScope Studio 时遇到路径问题：
+- 检查环境变量配置是否正确
+- 验证 owner/repo 参数是否正确传递
+- 确认 nginx 或反向代理配置支持子路径
+- 检查浏览器控制台的网络请求路径
+
 **章节来源**
 - [frontend/src/lib/api/client.ts:180-200](file://frontend/src/lib/api/client.ts#L180-L200)
 - [frontend/src/stores/authStore.ts:45-51](file://frontend/src/stores/authStore.ts#L45-L51)
@@ -489,6 +538,7 @@ Next --> FastAPI
 2. **检查网络面板**：观察请求和响应详情
 3. **验证令牌**：使用 JWT 解码工具检查 token 内容
 4. **监控查询状态**：使用 React DevTools 检查查询状态
+5. **路径调试**：在 ModelScope Studio 中检查实际请求路径是否符合预期
 
 ## 结论
 
@@ -500,8 +550,9 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 4. **状态管理集成**：与 React Query 和 Zustand 的无缝集成
 5. **可扩展的模块化设计**：支持新业务功能的快速添加
 6. **健壮的错误处理**：结构化的异常管理和用户体验
+7. **灵活的部署支持**：支持 ModelScope Studio 子路径部署
 
-**重大架构升级**：从单一 monolithic API 模块迁移到模块化的业务域驱动架构，显著提升了代码的可维护性、可扩展性和团队协作效率。新的架构为后续的功能扩展和维护奠定了良好的基础，同时保证了系统的稳定性和可维护性。
+**重大架构升级**：从单一 monolithic API 模块迁移到模块化的业务域驱动架构，显著提升了代码的可维护性、可扩展性和团队协作效率。**最新增强**：新增 ModelScope Studio 子路径部署支持，通过 `getBasePath()` 函数和增强的 axios baseURL 配置，确保在 `/studios/{owner}/{repo}` 路径下正确路由 API 请求，同时改进了 401 认证错误处理机制，为后续的功能扩展和维护奠定了良好的基础，同时保证了系统的稳定性和可维护性。
 
 ## 附录
 
@@ -513,6 +564,7 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 4. **令牌管理自动化**：利用拦截器自动处理认证头
 5. **查询键值规范化**：确保查询参数的顺序和格式一致
 6. **模块间解耦**：通过统一的导出接口访问各业务模块
+7. **路径配置优化**：在 ModelScope Studio 环境中正确使用 `getBasePath()` 函数
 
 ### 错误恢复策略
 
@@ -520,6 +572,7 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 2. **降级处理**：在网络异常时提供基本功能
 3. **用户反馈**：及时向用户展示错误信息和恢复选项
 4. **日志记录**：记录详细的错误信息用于调试
+5. **令牌自动刷新**：在 401 错误时自动清理并重定向到登录页
 
 ### 离线支持方案
 
@@ -528,3 +581,11 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 2. **IndexedDB**：持久化存储关键数据
 3. **同步队列**：离线操作排队，网络恢复后同步
 4. **冲突解决**：处理离线期间的数据冲突
+
+### ModelScope Studio 部署配置
+
+在 ModelScope Studio 中部署时的配置要点：
+- 确保环境变量 `NEXT_PUBLIC_API_URL` 正确设置为 `/api`
+- 验证 `getBasePath()` 函数能正确检测 Studio 环境
+- 检查反向代理配置支持 `/studios/{owner}/{repo}/api` 路径
+- 测试所有 API 端点在子路径下的可用性
