@@ -224,7 +224,6 @@ def calculate_available_cash(
         after_events = after_events.filter(ShareChangeEvent.ex_date <= as_of_date)
     if platform_code:
         after_events = after_events.filter(ShareChangeEvent.platform_code == platform_code)
-
     for e in after_events.all():
         cash += Decimal(str(e.cash_change))
 
