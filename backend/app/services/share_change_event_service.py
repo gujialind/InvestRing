@@ -32,7 +32,7 @@ def _compute_event_fields(event: ShareChangeEvent) -> None:
     """按 event_type 计算 shares_change/shares_after/cash_change。
     forced_adjustment 由用户直接填写，不自动计算（份额仅量化）。
 
-    份额类字段统一量化到 2 位（第 3 位舍去），且保证 shares_after 与
+    份额类字段统一量化到 2 位（四舍五入），且保证 shares_after 与
     shares_change 严格自洽：乘除产生新份额的类型（split/merge）先量化
     shares_after 再反算 shares_change；增量型（reinvest/bonus）先量化
     shares_change 再用 es + shares_change 重算 shares_after。

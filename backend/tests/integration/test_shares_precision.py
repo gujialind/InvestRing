@@ -1,7 +1,7 @@
 # ============================================================================
 # 集成测试：份额精度统一 2 位小数 (test_shares_precision.py)
 # ============================================================================
-# 覆盖份额精度全局改 2 位小数后的核心场景：
+# 覆盖份额精度全局改 2 位小数（ROUND_HALF_UP 四舍五入，issue #87）后的核心场景：
 # - 申购确认后 subscription.shares 为 2 位小数（非整除净值）
 # - 场外基金买入确认后 trade.shares 为 2 位小数
 # - 回归：按 2 位可用份额全额卖出/全额赎回不再被 INSUFFICIENT_SHARES 拒绝
@@ -23,10 +23,10 @@ from app.models.trade import Trade
 
 
 class TestSubscriptionConfirmSharesPrecision:
-    """申购确认份额量化到 2 位（ROUND_DOWN）"""
+    """申购确认份额量化到 2 位（ROUND_HALF_UP）"""
 
     def test_confirm_subscribe_shares_two_decimals(self, client, admin_headers, test_db):
-        """非整除净值（1.4623）申购确认后份额为 2 位小数：10000/1.4623 → 6838.54"""
+        """非整除净值（0.9757）申购确认后份额为 2 位小数：3000/0.9757 → 3074.72"""
         create_portfolio(test_db, code="PREC_SP", status="active")
         create_investor(test_db, code="PREC_SI")
         ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
@@ -40,10 +40,10 @@ class TestSubscriptionConfirmSharesPrecision:
             confirm_date=date(2025, 8, 4), status="confirmed",
         )
         create_value_snapshot(test_db, "PREC_SP", date(2025, 9, 1),
-                              total_value=14623, total_shares=10000, unit_price=1.4623)
+                              total_value=9757, total_shares=10000, unit_price=0.9757)
         sub = create_subscription(
             test_db, "PREC_SP", "PREC_SI",
-            sub_type="subscribe", amount=10000.0,
+            sub_type="subscribe", amount=3000.0,
             apply_date=date(2025, 9, 1), status="pending",
         )
 
@@ -52,16 +52,16 @@ class TestSubscriptionConfirmSharesPrecision:
 
         test_db.expire_all()
         confirmed = test_db.query(Subscription).filter(Subscription.id == sub.id).first()
-        # 10000 / 1.4623 = 6838.5426...，ROUND_DOWN → 6838.54
-        assert Decimal(str(confirmed.shares)) == Decimal("6838.54")
-        assert Decimal(str(confirmed.unit_price)) == Decimal("1.4623")
+        # issue #87 实例：3000 / 0.9757 = 3074.715588...，HALF_UP → 3074.72（DOWN 为 3074.71）
+        assert Decimal(str(confirmed.shares)) == Decimal("3074.72")
+        assert Decimal(str(confirmed.unit_price)) == Decimal("0.9757")
 
 
 class TestOtcBuyConfirmSharesPrecision:
-    """场外基金买入确认份额量化到 2 位（ROUND_DOWN）"""
+    """场外基金买入确认份额量化到 2 位（ROUND_HALF_UP）"""
 
     def test_confirm_otc_buy_shares_two_decimals(self, client, admin_headers, test_db):
-        """场外基金买入确认按 T 日净值重算份额：10000/1.4623 → 6838.54"""
+        """场外基金买入确认按 T 日净值重算份额：3000/0.9757 → 3074.72"""
         create_portfolio(test_db, code="PREC_TP", status="active")
         create_product(test_db, code="FUND_PREC", market="CN_OTC",
                        product_type="OEF", confirm_days=1, is_qdii=False)
@@ -77,7 +77,7 @@ class TestOtcBuyConfirmSharesPrecision:
         )
         # T 日净值（非整除）
         create_price_record(test_db, "FUND_PREC", "CN_OTC",
-                            date(2025, 10, 6), unit_price=1.4623)
+                            date(2025, 10, 6), unit_price=0.9757)
 
         resp = client.post(
             "/api/trades",
@@ -86,7 +86,7 @@ class TestOtcBuyConfirmSharesPrecision:
                 "product_code": "FUND_PREC",
                 "market": "CN_OTC",
                 "trade_type": "buy",
-                "amount": 10000.0,
+                "amount": 3000.0,
                 "platform_code": "PREC_PLAT",
                 "trade_date": "2025-10-06",
             },
@@ -100,8 +100,8 @@ class TestOtcBuyConfirmSharesPrecision:
 
         test_db.expire_all()
         trade = test_db.query(Trade).filter(Trade.id == trade_id).first()
-        # 10000 / 1.4623 = 6838.5426...，ROUND_DOWN → 6838.54
-        assert Decimal(str(trade.shares)) == Decimal("6838.54")
+        # issue #87 实例：3000 / 0.9757 = 3074.715588...，HALF_UP → 3074.72（DOWN 为 3074.71）
+        assert Decimal(str(trade.shares)) == Decimal("3074.72")
 
 
 class TestFullSellRedeemRegression:

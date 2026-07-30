@@ -17,10 +17,12 @@ Create Date: 2026-07-28
 金额类（amount/actual_amount/market_value 等）保持 Numeric(15,4)、
 净值/价格类（unit_price/price 等）保持 Numeric(10,4)，均不在本迁移范围内。
 
-先 UPDATE 显式截断到 2 位保证舍入确定性，再 alter 列类型；历史数据采用与
-运行时 quantize_shares（ROUND_DOWN）一致的「向零截断」策略，不用 ROUND
-半进位：MySQL 用 TRUNCATE(col, 2)，SQLite 等无 TRUNCATE 的方言用
+先 UPDATE 显式截断到 2 位保证舍入确定性，再 alter 列类型；本迁移为当时的
+一次性存量数据处理，采用与彼时运行时 quantize_shares（ROUND_DOWN）一致的
+「向零截断」策略：MySQL 用 TRUNCATE(col, 2)，SQLite 等无 TRUNCATE 的方言用
 CAST(col * 100 AS INTEGER) / 100（CAST 为 INTEGER 即向零截断，含负数）。
+注：运行时舍入口径已于 issue #87 改为 ROUND_HALF_UP（四舍五入），存量历史
+数据已通过快照全量重算对齐新口径；本迁移 SQL 为历史快照，不随之修改。
 UPDATE 失败必须抛出；仅 SQLite 下容忍 alter 失败（SQLite 不强制 Numeric
 精度，UPDATE 已生效），其他方言 alter 失败同样抛出，避免静默吞错。
 
@@ -60,8 +62,9 @@ def upgrade():
     is_mysql = bind.dialect.name == "mysql"
 
     # 先显式截断到 2 位，保证舍入行为确定（不依赖各数据库 ALTER 时的隐式舍入）。
-    # 历史数据采用与运行时 quantize_shares（ROUND_DOWN）一致的「向零截断」策略，
-    # 不用 ROUND 半进位。UPDATE 在所有方言都应成功，失败必须抛出。
+    # 采用与迁移当时运行时 quantize_shares（ROUND_DOWN）一致的「向零截断」策略
+    # （运行时口径已于 issue #87 改为 ROUND_HALF_UP，本迁移 SQL 不随之修改）。
+    # UPDATE 在所有方言都应成功，失败必须抛出。
     for table, column, _ in SHARES_COLUMNS:
         if is_mysql:
             op.execute(

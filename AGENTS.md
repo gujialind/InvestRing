@@ -107,7 +107,7 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 - **净值稳定性**：申购/赎回/现金分红/份额拆分合并 → 净值不变；调仓 → 净值可能变化。
 - **市值** = Σ(场内份额 × 收盘价) + Σ(场外份额 × 净值) + Σ(非净值型资产金额)。
 - **净值** `unit_price = total_value / total_shares`（4 位小数）。
-- **份额统一 2 位小数**（ROUND_DOWN，第 3 位直接舍去）：产生点（申购确认 `amount/nav`、调仓买入 `amount/price`、卖出/赎回用户输入、份额事件变动计算）统一经 `app/utils/quantize.py::quantize_shares` 量化；读取/累加路径不量化。净值 4 位、金额 4 位不变。
+- **份额统一 2 位小数**（ROUND_HALF_UP 四舍五入，第 3 位 ≥5 进位；负数按绝对值对称、远离零进位，符合场外基金行业惯例，误差计入基金财产）：产生点（申购确认 `amount/nav`、调仓买入 `amount/price`、卖出/赎回用户输入、份额事件变动计算）统一经 `app/utils/quantize.py::quantize_shares` 量化；读取/累加路径不量化。净值 4 位、金额 4 位不变。
 - **卖出/赎回输入份额先量化再校验**：量化到 2 位后与可用份额**精确比较**（无容差），超出返回 `INSUFFICIENT_SHARES`。
 - **成本价**：首次 = 组合净值；后续 = `(old×cost + new×price)/(old + new)`。
 - **赎回按申请日净值**计算，不是确认日净值。

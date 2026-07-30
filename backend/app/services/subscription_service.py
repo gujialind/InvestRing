@@ -117,7 +117,7 @@ def confirm_single_subscription(
 
     # 4. 计算份额/金额
     if subscription.sub_type == "subscribe":
-        # 确认份额量化到 2 位（第 3 位舍去）；净值与金额保持原精度
+        # 确认份额量化到 2 位（四舍五入）；净值与金额保持原精度
         shares = quantize_shares(Decimal(str(subscription.amount)) / nav)
         subscription.unit_price = nav
         subscription.shares = shares
@@ -292,7 +292,7 @@ def create_subscription(
     elif sub_type == "redeem":
         if shares is None or Decimal(str(shares)) <= 0:
             raise BusinessError("INVALID_SHARES", "赎回份额必须大于0")
-        # 用户输入份额先量化到 2 位（第 3 位舍去），再做精确比较
+        # 用户输入份额先量化到 2 位（四舍五入），再做精确比较
         shares_d = quantize_shares(Decimal(str(shares)))
         if shares_d <= 0:
             raise BusinessError("INVALID_SHARES", "赎回份额必须大于0")
