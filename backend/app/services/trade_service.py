@@ -483,7 +483,7 @@ def create_trade(
     elif trade_type == "sell":
         if shares is None or Decimal(str(shares)) <= 0:
             raise BusinessError("INVALID_SHARES", "卖出份额必须大于0")
-        # 用户输入份额先量化到 2 位（第 3 位舍去），再做精确比较
+        # 用户输入份额先量化到 2 位（四舍五入），再做精确比较
         shares_d = quantize_shares(Decimal(str(shares)))
         if shares_d <= 0:
             raise BusinessError("INVALID_SHARES", "卖出份额必须大于0")
