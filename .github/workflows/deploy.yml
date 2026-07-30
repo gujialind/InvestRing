@@ -1,13 +1,13 @@
 # ============================================================================
-# InvestRing CD 持续部署流水线（仅后端）
+# InvestRing CD 持续部署流水线（backend + frontend + nginx）
 # ============================================================================
 # 触发条件：
 #   1. main 分支 CI 通过后自动部署
 #   2. 手动触发（workflow_dispatch）：可指定已有镜像 tag 重新部署/回滚
 #
-# 部署链路：构建后端镜像 → 推送阿里云 ACR → SSH 到服务器拉取并重启
-# 目标环境：4核4G 云服务器（仅 backend 容器）+ 云 RDS MySQL
-# 前端暂未部署，不在本流水线范围内。
+# 部署链路：并行构建前后端镜像 → 推送阿里云 ACR → SSH 到服务器 docker compose up -d
+# 目标环境：4核4G 云服务器（backend/frontend/nginx 三容器）+ 云 RDS MySQL
+# 对外入口：nginx 80/443（HTTPS，Let's Encrypt）；backend 仅绑定 127.0.0.1:8000
 #
 # 需要配置的 GitHub Secrets：
 #   ACR_REGISTRY   - ACR 地址，如 registry.cn-hangzhou.aliyuncs.com
@@ -19,7 +19,9 @@
 #   SERVER_SSH_KEY - SSH 私钥
 #
 # 服务器约定：
-#   部署目录 /opt/investring；应用配置 .env 由服务器人工维护，CD 不覆盖。
+#   部署目录 /opt/investring；应用配置 .env 由服务器人工维护，
+#   CD 仅更新其中 BACKEND_IMAGE_REF / FRONTEND_IMAGE_REF 两行。
+#   Let's Encrypt 证书由服务器 certbot 维护（/etc/letsencrypt），不在本流水线范围。
 # ============================================================================
 
 name: Deploy
@@ -31,7 +33,8 @@ on:
     types: [completed]
 
   # 手动触发：留空 image_tag 则构建触发分支当前 commit 并部署；
-  # 填写已有 tag（如短 commit SHA）则跳过构建直接部署该版本（用于回滚）
+  # 填写已有 tag（如短 commit SHA）则跳过构建直接部署该版本（用于回滚）。
+  # 前后端镜像共用同一 tag（同一 commit 构建），回滚时两者一起回退。
   workflow_dispatch:
     inputs:
       image_tag:
@@ -41,11 +44,12 @@ on:
 
 # 部署串行执行，不可中途取消
 concurrency:
-  group: deploy-backend
+  group: deploy
   cancel-in-progress: false
 
 env:
   BACKEND_IMAGE: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/investring-backend
+  FRONTEND_IMAGE: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/investring-frontend
 
 jobs:
   # ==========================================================================
@@ -61,7 +65,7 @@ jobs:
        github.event.workflow_run.head_branch == 'main') ||
       github.event_name == 'workflow_dispatch'
     outputs:
-      # 要部署的镜像 tag
+      # 要部署的镜像 tag（前后端共用）
       image_tag: ${{ steps.ver.outputs.image_tag }}
       # 是否需要构建（手动指定已有 tag 时跳过构建）
       need_build: ${{ steps.ver.outputs.need_build }}
@@ -94,13 +98,29 @@ jobs:
           fi
 
   # ==========================================================================
-  # 构建后端镜像并推送至阿里云 ACR
+  # 并行构建前后端镜像并推送至阿里云 ACR（matrix 两个并发 job）
   # ==========================================================================
   build-and-push:
-    name: "构建镜像 & 推送 ACR"
+    name: "构建镜像 & 推送 ACR (${{ matrix.service }})"
     needs: setup
     if: needs.setup.outputs.need_build == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: backend
+            image: investring-backend
+            context: .
+            dockerfile: backend/Dockerfile
+            build_args: ""
+          - service: frontend
+            image: investring-frontend
+            # 前端 Dockerfile 要求以 frontend/ 为上下文（根目录 .dockerignore 排除了 frontend/）
+            context: frontend
+            dockerfile: frontend/Dockerfile
+            # rewrites 在 build 时固化：生产环境下 Next.js 经容器网络访问后端服务
+            build_args: |
+              API_BASE_URL=http://backend:8000
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -117,20 +137,21 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build and push Backend image
+      - name: Build and push ${{ matrix.service }} image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: backend/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
+          build-args: ${{ matrix.build_args }}
           tags: |
-            ${{ env.BACKEND_IMAGE }}:${{ needs.setup.outputs.image_tag }}
-            ${{ env.BACKEND_IMAGE }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/${{ matrix.image }}:${{ needs.setup.outputs.image_tag }}
+            ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
   # ==========================================================================
-  # SSH 部署到服务器（拉取镜像 → 重启容器 → 健康检查 → 失败自动回滚）
+  # SSH 部署到服务器（拉取镜像 → compose up → 健康检查 → 失败自动回滚）
   # ==========================================================================
   deploy:
     name: "部署到生产服务器"
@@ -148,14 +169,15 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.checkout_ref }}
 
-      # 同步 docker-compose.yml 到服务器（.env 由服务器人工维护，不覆盖）
-      - name: Copy compose file to server
+      # 同步 compose 与 nginx 配置到服务器（.env 由服务器人工维护，不覆盖）
+      # scp-action 保留相对路径：nginx/nginx.conf → /opt/investring/nginx/nginx.conf
+      - name: Copy compose & nginx config to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: "docker-compose.yml"
+          source: "docker-compose.yml,nginx/nginx.conf"
           target: "/opt/investring"
 
       - name: Deploy via SSH
@@ -168,72 +190,108 @@ jobs:
           script: |
             set -e
             cd /opt/investring
-            IMAGE="${{ env.BACKEND_IMAGE }}:${{ needs.setup.outputs.image_tag }}"
+            TAG="${{ needs.setup.outputs.image_tag }}"
+            BACKEND_IMG="${{ env.BACKEND_IMAGE }}:$TAG"
+            FRONTEND_IMG="${{ env.FRONTEND_IMAGE }}:$TAG"
 
             echo "============================================"
-            echo "  InvestRing 后端部署"
-            echo "  镜像: $IMAGE"
+            echo "  InvestRing 部署"
+            echo "  后端镜像: $BACKEND_IMG"
+            echo "  前端镜像: $FRONTEND_IMG"
             echo "============================================"
 
-            # 0. 前置检查：.env 必须已由人工配置好（CD 只更新 BACKEND_IMAGE_REF 一行）
+            # 0. 前置检查：.env 必须已由人工配置好（CD 只更新镜像引用两行）
             if [ ! -f .env ]; then
               echo "❌ /opt/investring/.env 不存在，请先在服务器上配置应用环境变量"
               exit 1
             fi
 
-            # 将镜像版本写入 .env（仅替换/追加 BACKEND_IMAGE_REF 行，其余配置不动），
+            # certbot webroot 目录（nginx 容器只读挂载，certbot --webroot 写入验证文件）
+            mkdir -p certbot/www
+
+            # 将镜像版本写入 .env（仅替换/追加指定行，其余配置不动），
             # 保证后续人工 docker compose up -d 也能拉起正确版本
             update_image_ref() {
-              if grep -q '^BACKEND_IMAGE_REF=' .env; then
-                sed -i "s|^BACKEND_IMAGE_REF=.*|BACKEND_IMAGE_REF=$1|" .env
+              local KEY="$1" VAL="$2"
+              if grep -q "^${KEY}=" .env; then
+                sed -i "s|^${KEY}=.*|${KEY}=${VAL}|" .env
               else
-                echo "BACKEND_IMAGE_REF=$1" >> .env
+                echo "${KEY}=${VAL}" >> .env
               fi
             }
 
             # 1. 登录 ACR 并拉取新镜像（先拉后停，缩短停机时间）
             echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_REGISTRY }} \
               -u "${{ secrets.ACR_USERNAME }}" --password-stdin
-            docker pull "$IMAGE"
+            docker pull "$BACKEND_IMG"
+            docker pull "$FRONTEND_IMG"
 
             # 2. 记录当前运行版本（用于失败回滚）
-            PREV_IMAGE=$(docker inspect --format '{{.Config.Image}}' investring-backend 2>/dev/null || true)
-            echo "当前版本: ${PREV_IMAGE:-<无>}"
+            PREV_BACKEND=$(docker inspect --format '{{.Config.Image}}' investring-backend 2>/dev/null || true)
+            PREV_FRONTEND=$(docker inspect --format '{{.Config.Image}}' investring-frontend 2>/dev/null || true)
+            echo "当前后端版本: ${PREV_BACKEND:-<无>}"
+            echo "当前前端版本: ${PREV_FRONTEND:-<无>}"
 
             # 3. 移除同名旧容器（兼容早期人工 docker run 部署的容器）
             docker rm -f investring-backend 2>/dev/null || true
 
-            # 4. 启动新容器（应用启动时自动执行 alembic upgrade head）
-            update_image_ref "$IMAGE"
+            # 4. 启动/更新全部服务（compose 仅重建镜像变化的容器；
+            #    后端应用启动时自动执行 alembic upgrade head）
+            update_image_ref BACKEND_IMAGE_REF "$BACKEND_IMG"
+            update_image_ref FRONTEND_IMAGE_REF "$FRONTEND_IMG"
             docker compose up -d --remove-orphans
 
             # 5. 健康检查（最长等待 120s，覆盖迁移执行时间）
-            echo "执行健康检查..."
-            HEALTHY=false
-            for i in $(seq 1 60); do
-              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-                HEALTHY=true
-                break
-              fi
-              sleep 2
-            done
+            #    后端：本机回环 8000（backend 仅绑定 127.0.0.1）
+            #    入口：HTTPS 优先、HTTP 兜底，兼容备案审核期（仅 80）与启用证书后（443）两阶段
+            check() {
+              local NAME="$1"; shift
+              for i in $(seq 1 60); do
+                if "$@" > /dev/null 2>&1; then
+                  echo "✅ ${NAME} 健康检查通过"
+                  return 0
+                fi
+                sleep 2
+              done
+              echo "❌ ${NAME} 健康检查超时"
+              return 1
+            }
+
+            # nginx 入口探活：先试 HTTPS（-k：证书按域名签发，经 localhost 访问跳过主机名校验），
+            # 阶段一（未启用 443）时回退 HTTP 80
+            probe_nginx() {
+              curl -skf https://127.0.0.1/health > /dev/null 2>&1 \
+                || curl -sf http://127.0.0.1/health > /dev/null 2>&1
+            }
+
+            HEALTHY=true
+            check "后端" curl -sf http://127.0.0.1:8000/health || HEALTHY=false
+            if [ "$HEALTHY" == "true" ]; then
+              check "nginx 入口" probe_nginx || HEALTHY=false
+            fi
 
             if [ "$HEALTHY" != "true" ]; then
-              echo "❌ 健康检查超时，输出容器日志："
+              echo "输出容器日志："
               docker logs --tail 100 investring-backend || true
-              if [ -n "$PREV_IMAGE" ]; then
-                echo "🔄 回滚到上一版本: $PREV_IMAGE"
-                docker rm -f investring-backend 2>/dev/null || true
-                update_image_ref "$PREV_IMAGE"
+              docker logs --tail 50 investring-frontend || true
+              docker logs --tail 50 investring-nginx || true
+              if [ -n "$PREV_BACKEND" ]; then
+                echo "🔄 回滚后端到上一版本: $PREV_BACKEND"
+                update_image_ref BACKEND_IMAGE_REF "$PREV_BACKEND"
+              fi
+              if [ -n "$PREV_FRONTEND" ]; then
+                echo "🔄 回滚前端到上一版本: $PREV_FRONTEND"
+                update_image_ref FRONTEND_IMAGE_REF "$PREV_FRONTEND"
+              fi
+              if [ -n "$PREV_BACKEND" ] || [ -n "$PREV_FRONTEND" ]; then
                 docker compose up -d
               fi
               exit 1
             fi
-            echo "✅ 健康检查通过"
 
             # 6. 清理悬空旧镜像，释放磁盘
             docker image prune -f
 
             echo "============================================"
-            echo "  ✅ 部署完成: $IMAGE"
+            echo "  ✅ 部署完成: tag $TAG"
             echo "============================================"

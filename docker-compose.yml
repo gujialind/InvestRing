@@ -1,10 +1,13 @@
 # ============================================================================
-# InvestRing 生产环境 Docker Compose 配置（仅后端）
+# InvestRing 生产环境 Docker Compose 配置（backend + frontend + nginx）
 # ============================================================================
 # 目标环境：4核4G 云服务器 + 云 RDS MySQL
 # 部署目录：/opt/investring（compose 文件由 CD 自动同步，.env 人工维护）
-# 镜像版本：由 .env 中的 BACKEND_IMAGE_REF 指定（CD 部署时自动更新该行）
-# 前端暂未部署，后续部署时再补充 frontend / nginx 服务。
+# 镜像版本：由 .env 中的 BACKEND_IMAGE_REF / FRONTEND_IMAGE_REF 指定
+#（CD 部署时自动更新这两行）
+# 对外入口：仅 nginx 发布 80/443；backend 仅绑定 127.0.0.1（供健康检查/运维）
+# HTTPS 证书：Let's Encrypt，由宿主机 certbot 以 webroot 方式签发/续期，
+#   证书目录 /etc/letsencrypt 只读挂载进 nginx 容器
 # ============================================================================
 
 services:
@@ -16,8 +19,9 @@ services:
     image: ${BACKEND_IMAGE_REF:?BACKEND_IMAGE_REF 未设置，请在 .env 中指定后端镜像}
     container_name: investring-backend
     restart: unless-stopped
+    # 仅绑定本机回环：外部流量一律经 nginx 443 进入，8000 不再公网暴露
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     networks:
@@ -36,6 +40,64 @@ services:
           cpus: "2.0"
         reservations:
           memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # 前端服务：Next.js standalone
+  # 容器内监听 7860（Dockerfile 为兼容魔搭 Studio 固定该端口，健康检查随镜像内置），
+  # 不对外发布端口，仅供 nginx 经容器网络访问
+  # --------------------------------------------------------------------------
+  frontend:
+    image: ${FRONTEND_IMAGE_REF:?FRONTEND_IMAGE_REF 未设置，请在 .env 中指定前端镜像}
+    container_name: investring-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - investring-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # Nginx：唯一对外入口（80 → 301 跳转 + ACME 验证；443 → 反代前后端）
+  # --------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: investring-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Let's Encrypt 证书（live/ 下为符号链接，须挂载整个 /etc/letsencrypt）
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # certbot webroot（HTTP-01 验证文件），与宿主机 certbot --webroot 对应
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - investring-net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
     logging:
       driver: json-file
       options:
