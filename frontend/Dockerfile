@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------
 # 阶段 1：安装依赖
 # ------------------------------------------------------------------
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 
 # npm 镜像源（可选）：国内环境构建可传 --build-arg NPM_REGISTRY=https://registry.npmmirror.com
 ARG NPM_REGISTRY=https://registry.npmjs.org
@@ -25,7 +25,7 @@ RUN npm ci --registry=$NPM_REGISTRY
 # ------------------------------------------------------------------
 # 阶段 2：构建 Next.js 应用
 # ------------------------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -47,7 +47,7 @@ RUN npm run build
 # ------------------------------------------------------------------
 # 阶段 3：生产运行层（最小化镜像）
 # ------------------------------------------------------------------
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 
 WORKDIR /app
 
