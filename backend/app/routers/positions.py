@@ -204,6 +204,7 @@ def update_cash_position(
     - 必须指定平台代码
     - 写入 manual_market_value 表（绝对替换），不再直接写 portfolio_position
     - 写入后提示用户重新生成快照（非强制）
+    - 同日存在已确认现金交易时附 warnings 提示（issue #88，不阻断）
     """
     from app.services.position_service import update_cash_position as update_cash_service
 
@@ -226,4 +227,68 @@ def update_cash_position(
         "computed_value": result["computed_value"],
         "update_date": result["update_date"].isoformat(),
         "requires_snapshot_regen": True,
+        "warnings": result["warnings"],
+    }
+
+
+@router.get("/portfolio/{portfolio_code}/cash-position")
+def list_cash_overrides(
+    portfolio_code: str,
+    platform_code: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_admin),
+):
+    """
+    查询现金手动覆盖记录（manual_market_value，issue #88）
+
+    权限：仅admin
+    """
+    from app.services.position_service import list_manual_cash_overrides
+
+    items = list_manual_cash_overrides(
+        db,
+        portfolio_code,
+        platform_code=platform_code,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return {"items": items, "total": len(items)}
+
+
+@router.delete("/portfolio/{portfolio_code}/cash-position")
+def delete_cash_override(
+    portfolio_code: str,
+    platform_code: str,
+    update_date: date,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_admin),
+):
+    """
+    删除现金手动覆盖记录（issue #88）
+
+    删除后该日该平台回退到自然计算值；若覆盖已 baked in 快照，
+    需重算快照才生效（requires_snapshot_regen）。
+
+    权限：仅admin
+    """
+    from app.services.position_service import delete_manual_cash_override
+
+    result = delete_manual_cash_override(
+        db,
+        portfolio_code=portfolio_code,
+        platform_code=platform_code,
+        value_date=update_date,
+    )
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"已删除 {portfolio_code}/{platform_code} 在 {update_date} 的现金覆盖记录",
+        "portfolio_code": result["portfolio_code"],
+        "platform_code": result["platform_code"],
+        "update_date": result["value_date"].isoformat(),
+        "deleted_value": result["deleted_value"],
+        "requires_snapshot_regen": result["requires_snapshot_regen"],
     }

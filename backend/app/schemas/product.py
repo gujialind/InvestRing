@@ -15,7 +15,8 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
-    pass
+    # issue #90：创建后立即回填历史净值（同步失败不阻断创建）
+    sync_history: Optional[bool] = False
 
 
 class ProductUpdate(BaseModel):
@@ -31,6 +32,8 @@ class ProductResponse(ProductBase):
     last_sync_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # issue #90：sync_history=True 时的回填结果（success/message/synced_count）
+    sync_result: Optional[dict] = None
 
     class Config:
         from_attributes = True

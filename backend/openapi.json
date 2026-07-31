@@ -3202,6 +3202,16 @@
               ],
               "title": "Price"
             }
+          },
+          {
+            "name": "sync_nav",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Sync Nav"
+            }
           }
         ],
         "responses": {
@@ -4224,7 +4234,7 @@
           "持仓管理"
         ],
         "summary": "Update Cash Position",
-        "description": "更新非净值型资产（现金）金额\n\n权限：仅admin\n规则：\n- 必须在交易日进行\n- 必须指定平台代码\n- 写入 manual_market_value 表（绝对替换），不再直接写 portfolio_position\n- 写入后提示用户重新生成快照（非强制）",
+        "description": "更新非净值型资产（现金）金额\n\n权限：仅admin\n规则：\n- 必须在交易日进行\n- 必须指定平台代码\n- 写入 manual_market_value 表（绝对替换），不再直接写 portfolio_position\n- 写入后提示用户重新生成快照（非强制）\n- 同日存在已确认现金交易时附 warnings 提示（issue #88，不阻断）",
         "operationId": "update_cash_position_api_positions_portfolio__portfolio_code__cash_position_post",
         "security": [
           {
@@ -4252,6 +4262,163 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "持仓管理"
+        ],
+        "summary": "List Cash Overrides",
+        "description": "查询现金手动覆盖记录（manual_market_value，issue #88）\n\n权限：仅admin",
+        "operationId": "list_cash_overrides_api_positions_portfolio__portfolio_code__cash_position_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          },
+          {
+            "name": "platform_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Platform Code"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "持仓管理"
+        ],
+        "summary": "Delete Cash Override",
+        "description": "删除现金手动覆盖记录（issue #88）\n\n删除后该日该平台回退到自然计算值；若覆盖已 baked in 快照，\n需重算快照才生效（requires_snapshot_regen）。\n\n权限：仅admin",
+        "operationId": "delete_cash_override_api_positions_portfolio__portfolio_code__cash_position_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          },
+          {
+            "name": "platform_code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Platform Code"
+            }
+          },
+          {
+            "name": "update_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Update Date"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4538,6 +4705,95 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/tasks/executions": {
+      "get": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "Get All Task Executions",
+        "description": "全局执行历史（跨任务，可选按 task_code 过滤）。\n\n注意：必须注册在 GET /{code} 之前，否则 \"executions\" 会被当作任务 code 捕获。",
+        "operationId": "get_all_task_executions_api_system_tasks_executions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Code"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedTaskLogResponse"
+                }
               }
             }
           },
@@ -5028,7 +5284,7 @@
           "snapshots"
         ],
         "summary": "Recalculate",
-        "description": "重算指定时间区间的快照\n\n单一事务（issue #58）：无 errors 时统一 commit；任一日失败则整体 rollback，\n被删快照与级联回退状态完整复原，对外「要么完整成功，要么无变化」。\n\n权限：仅admin",
+        "description": "重算指定时间区间的快照（同步模式）\n\n单一事务（issue #58）：无 errors 时统一 commit；任一日失败则整体 rollback，\n被删快照与级联回退状态完整复原，对外「要么完整成功，要么无变化」。\n\n大区间重算易触发客户端 HTTP 超时（issue #89），建议改用\nPOST /snapshots/recalculate-async 提交后台任务并轮询终态。\n\n权限：仅admin",
         "operationId": "recalculate_api_v1_snapshots_recalculate_post",
         "requestBody": {
           "content": {
@@ -5048,6 +5304,52 @@
                 "schema": {
                   "$ref": "#/components/schemas/RecalculationResult"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/snapshots/recalculate-async": {
+      "post": {
+        "tags": [
+          "快照管理",
+          "snapshots"
+        ],
+        "summary": "Recalculate Async",
+        "description": "异步区间重算（issue #89）：提交后台任务立即返回 job_id，\n经 GET /api/sync-jobs/{job_id} 轮询终态（success=已提交 / failed=已整体回滚）。\n\n事务语义与同步模式一致：后台执行体按 errors 统一 commit/rollback，\n对外仍是「要么完整成功，要么无变化」。\n\n已有重算任务在运行时返回 409 RECALC_JOB_CONFLICT。\n\n权限：仅admin",
+        "operationId": "recalculate_async_api_v1_snapshots_recalculate_async_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotRecalculateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -6853,6 +7155,17 @@
             ],
             "title": "Frozen Amount"
           },
+          "asset_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Type"
+          },
           "snapshot_date": {
             "type": "string",
             "format": "date",
@@ -6976,6 +7289,17 @@
             ],
             "title": "Frozen Amount"
           },
+          "asset_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Type"
+          },
           "snapshot_date": {
             "type": "string",
             "format": "date",
@@ -6996,6 +7320,39 @@
               }
             ],
             "title": "Created At"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
+          },
+          "profit_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit Loss"
+          },
+          "profit_loss_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit Loss Percent"
           }
         },
         "type": "object",
@@ -7280,6 +7637,18 @@
             ],
             "title": "Data Source",
             "default": "tushare"
+          },
+          "sync_history": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync History",
+            "default": false
           }
         },
         "type": "object",
@@ -7387,6 +7756,17 @@
               }
             ],
             "title": "Updated At"
+          },
+          "sync_result": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Result"
           }
         },
         "type": "object",
@@ -9266,6 +9646,17 @@
             "type": "boolean",
             "title": "Allow Duplicate",
             "default": false
+          },
+          "cash_platform_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Platform Code"
           }
         },
         "type": "object",

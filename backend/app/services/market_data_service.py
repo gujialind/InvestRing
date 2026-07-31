@@ -357,7 +357,11 @@ def submit_price_sync_job(
     if own_db:
         db = SessionLocal()
     try:
-        active = db.query(SyncJob).filter(SyncJob.status.in_(["pending", "running"])).count()
+        # 仅锁价格同步类型（#89：sync_job 表现已承载 snapshot_recalc，两类互不阻塞）
+        active = db.query(SyncJob).filter(
+            SyncJob.job_type.in_(["price_history_sync", "price_incremental_sync"]),
+            SyncJob.status.in_(["pending", "running"]),
+        ).count()
         if active > 0:
             raise ConflictError("已有价格同步任务在运行中")
 

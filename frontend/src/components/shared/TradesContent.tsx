@@ -105,6 +105,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     product_code: "",
     market: "",
     platform_code: "",
+    cash_platform_code: "",
     shares: "",
     amount: "",
     price: "",
@@ -118,7 +119,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
 
   const resetTradeForm = () => {
     setIsDialogOpen(false);
-    setFormData({ product_code: "", market: "", platform_code: "", shares: "", amount: "", price: "", trade_date: toDateOnly(new Date()) });
+    setFormData({ product_code: "", market: "", platform_code: "", cash_platform_code: "", shares: "", amount: "", price: "", trade_date: toDateOnly(new Date()) });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -128,6 +129,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
       product_code: formData.product_code,
       market: formData.market || undefined,
       platform_code: formData.platform_code || undefined,
+      cash_platform_code: formData.cash_platform_code || undefined,
       trade_type: tradeType,
       trade_date: formData.trade_date,
       price: formData.price ? parseFloat(formData.price) : undefined,
@@ -239,6 +241,24 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
                     <option value="">请选择平台</option>
+                    {platforms.map((plat) => (
+                      <option key={plat.code} value={plat.code}>
+                        {plat.name} ({plat.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cash_platform_code">
+                    现金平台（{tradeType === "buy" ? "扣款" : "到账"}，可选）
+                  </Label>
+                  <select
+                    id="cash_platform_code"
+                    value={formData.cash_platform_code}
+                    onChange={(e) => setFormData({ ...formData, cash_platform_code: e.target.value })}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="">同交易平台</option>
                     {platforms.map((plat) => (
                       <option key={plat.code} value={plat.code}>
                         {plat.name} ({plat.code})

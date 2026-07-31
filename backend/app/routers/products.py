@@ -55,6 +55,7 @@ def create_product(
         asset_class_code=product.asset_class_code,
         is_qdii=product.is_qdii,
         data_source=product.data_source,
+        sync_history=bool(product.sync_history),
     )
     db.commit()
     db.refresh(new_product)

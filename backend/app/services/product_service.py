@@ -66,8 +66,13 @@ def create_product(
     asset_class_code: Optional[str] = None,
     is_qdii: bool = False,
     data_source: Optional[str] = None,
+    sync_history: bool = False,
 ) -> Product:
-    """创建产品（自动计算 confirm_days）。不 commit。"""
+    """创建产品（自动计算 confirm_days）。不 commit。
+
+    sync_history=True 时（issue #90）创建后立即回填历史净值；
+    同步失败不回滚产品创建，结果挂在返回对象的瞬态属性 sync_result。
+    """
     existing = db.query(Product).filter(
         Product.code == code, Product.market == market
     ).first()
@@ -86,6 +91,22 @@ def create_product(
         data_source=data_source,
     )
     db.add(product)
+
+    if sync_history:
+        from datetime import date as _date
+        from app.services.market_data_service import sync_price_data
+
+        db.flush()
+        try:
+            result = sync_price_data(db, code, product.market, None, _date.today())
+            product.sync_result = {
+                "success": bool(result.get("success")),
+                "message": result.get("message"),
+                "synced_count": result.get("synced_count"),
+            }
+        except Exception as e:  # 同步失败不阻断创建，用户可事后 sync-history 补回填
+            product.sync_result = {"success": False, "message": str(e), "synced_count": 0}
+
     return product
 
 

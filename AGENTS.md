@@ -58,7 +58,7 @@
 |------|--------|----------|
 | 交易（申赎/调仓/转移） | `trade`（CASH buy/sell） | `transfer_group` 关联同组记录 |
 | 事件（现金分红等） | `share_change_event` | `cash_change` 字段，按 `ex_date` 生效 |
-| 手动重估 | `manual_market_value` | 按日期绝对替换，不进 trade / event |
+| 手动重估 | `manual_market_value` | 按日期绝对替换，不进 trade / event；优先级高于当日全部交易/事件，且作为后续快照增量基线；可删除（DELETE cash-position / `ir position delete-cash`），删除后需重算快照才回退自然计算值 |
 
 各业务操作生成的 CASH trade：
 
@@ -69,6 +69,8 @@
 | 基金买入 | 基金 buy + CASH sell（同状态/日期） | `rebal_{uuid}` |
 | 基金卖出 | 基金 sell + CASH buy（同状态/日期） | `rebal_{uuid}` |
 | 跨平台转移 | CASH sell + CASH buy | `{uuid}`（12 位 hex） |
+
+- **跨平台现金腿**（#91）：基金买/卖可传 `cash_platform_code`（买=扣款平台、卖=到账平台，CLI `--cash-platform-code`），CASH 腿落在指定平台、缺省同基金腿；买入可用现金按扣款平台校验（创建与确认均是），两腿仍同 transfer_group 原子翻转，免去前置平台间现金转移。
 
 **两条计算口径**（`position_service.py`）：
 
@@ -196,7 +198,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 | `logs` | `/api/system/logs` | 3 | admin | login / audit / error |
 | `tasks` | `/api/system/tasks` | 6 | admin | 列表、describe、run、enable、disable、logs |
 | `notifications` | `/api/system/notifications` | 3 | user | 列表、read、read-all |
-| `snapshots` | **`/api/v1/snapshots`** | 8 | user/admin | generate、recalculate、catch-up、generate-next、validation、status、delete、bulk delete（支持 `dry_run`） |
+| `snapshots` | **`/api/v1/snapshots`** | 9 | user/admin | generate、recalculate、recalculate-async（#89 异步 job）、catch-up、generate-next、validation、status、delete、bulk delete（支持 `dry_run`） |
 | `cash_transfers` | **`/api`** | 3 | admin | cash-transfer 创建、confirm、列表 |
 | `sync_jobs` | `/api/sync-jobs` | 3 | admin | price、job 状态、details |
 
@@ -205,7 +207,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 ### 4.3 核心服务与关键函数
 
 - **`snapshot_service.py`**：`generate_daily_snapshots` / `recalculate_snapshots` / `validate_snapshot_dependencies`；三个生成函数 `_generate_portfolio_position` → `_generate_portfolio_value_snapshot` → `_generate_investor_holding`（固定顺序）；`auto_confirm_after_snapshot`（重算后自动重确认）；`_delete_existing_snapshots`（删除级联回退）。`_generate_portfolio_position` 走增量累加：前一日 CASH 基准 + 窗口内 confirmed CASH trades + event `cash_change` 增量，`manual_market_value` 绝对覆盖；事件只读 `platform_code IS NOT NULL` 的 confirmed 记录，按 `entitlement_date` 升序、`fund_key=(product_code, market, platform_code)` 精确匹配。
-- **`position_service.py`**：`compute_cash_balance`、`get_cash_value`、`calculate_available_cash`、`calculate_available_shares`、`calculate_investor_available_shares`、`update_cash_position`（现金重估写 `manual_market_value` 绝对替换，绝不直接写 `portfolio_position`）。
+- **`position_service.py`**：`compute_cash_balance`、`get_cash_value`、`calculate_available_cash`、`calculate_available_shares`、`calculate_investor_available_shares`、`update_cash_position`（现金重估写 `manual_market_value` 绝对替换，绝不直接写 `portfolio_position`；同日存在 confirmed CASH trade 时返回 warnings 提示覆盖将压制交易效果）、`list_manual_cash_overrides` / `delete_manual_cash_override`（#88 覆盖层查询/删除，删除后需重算快照回退自然值）。
 - **`trade_service.py`**：`create_trade`（快照/价格/平台/`as_of_date` 校验 + 买卖金额份额计算 + `attach_paired_cash_leg`）、`confirm_single_trade`（含 QDII 净值获取规则，禁止向前查找）、`cancel_trade` / `unconfirm_trade`（快照保护 + `sync_transfer_group`）、`sync_transfer_group`（配对腿原子同步）、`attach_paired_cash_leg`（基金腿创建时生成 `rebal_` 组并构造配对 CASH 腿，REST/CLI 共用）。
 - **`subscription_service.py`**：`create_subscription`（含 `DATE_BEFORE_SNAPSHOT`、创建即设 `confirm_date`）、`confirm_single_subscription` / `unconfirm_single_subscription`（首次申购净值 1.0000、生成/删除配对 CASH trade、首次确认激活组合）。
 - **`share_change_event_service.py`**：`create/confirm/cancel/unconfirm_share_change_event` 全套 + `_compute_event_fields` / `check_platform_coverage` / `_confirm_fund_level_event`（基金级自动拆分子记录、平台分级校验、快照保护）。`snapshot_service.auto_confirm_after_snapshot` 由此模块 import（消除 service→router 反向依赖）。
@@ -214,7 +216,8 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 - **`product_service.py`**：`calculate_confirm_days`（单一实现：CN_EXCHANGE=0 / CN_OTC 非 QDII=1 / CN_OTC QDII=2 / 其他=1）、`create_product` / `update_product`。
 - **`investor_service.py`**：`create_investor`（`role` 默认 viewer，CLI 可显式传入以建管理员）、`update_investor`（`password`→`password_hash`）、`delete_investor`（`INVESTOR_HAS_SHARES` 保护）。
 - **`exceptions.py`**：`BusinessError` / `NotFoundError`——领域异常基类（见 §4.1），REST 全局 handler 与 `cli_context` 共同消费。
-- **`market_data_service.py`**：价格/净值查询与同步、`get_nav_coverage`（区间净值覆盖校验：trading_calendar 与 price_record 集合差）、`submit_price_sync_job`、`recover_orphan_jobs`。
+- **`market_data_service.py`**：价格/净值查询与同步、`get_nav_coverage`（区间净值覆盖校验：trading_calendar 与 price_record 集合差）、`submit_price_sync_job`（锁仅限价格同步类 job_type）、`recover_orphan_jobs`。
+- **`snapshot_recalc_job.py`**（#89）：`submit_snapshot_recalc_job`（复用 sync_job 表 + 线程池，job_type=`snapshot_recalc`，同类型单 active 锁、与价格同步锁互不阻塞）；后台执行体自持 SessionLocal，保持 `recalculate_snapshots` 单一事务语义（无 errors 统一 commit、否则整体 rollback），终态经 `GET /api/sync-jobs/{id}` 轮询（success=已提交 / failed=已整体回滚）。
 - **`trading_calendar_service.py`** / **`trading_utils.py`**：交易日判断、下一/前一交易日、最新快照日查询。
 - **`task_runner.py`** / **`scheduler_service.py`**：`run_nav_sync` / `run_calendar_sync` / `run_log_cleanup`；APScheduler 调度。
 
@@ -347,8 +350,8 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 - 金额：买入 `amount = actual_amount − fee`、`shares = amount/price`；卖出 `amount = actual_amount + fee`。
 - `confirm_date` 创建时即按 `product.confirm_days` 设定；`confirm` 可传参覆盖（补录）。
-- 基金买卖创建时自动生成配对 CASH trade（`rebal_{uuid}`），状态/日期与基金腿同步。
-- 确认取价规则：场内用成交价（录入交易时必填，见 §7.2）、场外用净值；确认必须用 T 日净值（包括QDII），未同步则拒绝（禁止向前查找）；QDII快照/市值用 T-1 日净值。确认天数（T+N）见附录 C。场外基金确认可选传入价格，仅用于与 T 日净值一致性校验（不一致报 `PRICE_NAV_MISMATCH`），不覆盖净值。
+- 基金买卖创建时自动生成配对 CASH trade（`rebal_{uuid}`），状态/日期与基金腿同步；CASH 腿平台可经 `cash_platform_code` 指定为其他平台（#91 跨平台扣款/到账，现金校验按扣款平台）。
+- 确认取价规则：场内用成交价（录入交易时必填，见 §7.2）、场外用净值；确认必须用 T 日净值（包括QDII），未同步则拒绝（禁止向前查找；可传 `sync_nav`/`--sync-nav` 在 MISSING_NAV 时自动回填净值并重试一次，#90）；QDII快照/市值用 T-1 日净值。确认天数（T+N）见附录 C。场外基金确认可选传入价格，仅用于与 T 日净值一致性校验（不一致报 `PRICE_NAV_MISMATCH`），不覆盖净值。
 
 ### 7.3 份额变动事件
 

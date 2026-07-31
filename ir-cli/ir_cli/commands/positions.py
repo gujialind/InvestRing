@@ -95,3 +95,36 @@ def update_cash(
         body["update_date"] = update_date
     result = client.post(f"/api/positions/portfolio/{portfolio_code}/cash-position", json_data=body)
     success(data=result["data"])
+
+
+@app.command("list-cash-overrides")
+def list_cash_overrides(
+    portfolio_code: str = typer.Option(..., "--portfolio-code", help="组合代码"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="起始日期(YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="截止日期(YYYY-MM-DD)"),
+):
+    """查询现金手动覆盖记录（manual_market_value）"""
+    client = APIClient.from_config()
+    params = build_body(
+        platform_code=platform_code, start_date=start_date, end_date=end_date
+    )
+    result = client.get(
+        f"/api/positions/portfolio/{portfolio_code}/cash-position", params=params
+    )
+    success(data=result["data"])
+
+
+@app.command("delete-cash")
+def delete_cash(
+    portfolio_code: str = typer.Option(..., "--portfolio-code", help="组合代码"),
+    platform_code: str = typer.Option(..., "--platform-code", help="平台代码"),
+    update_date: str = typer.Option(..., "--update-date", help="覆盖记录日期(YYYY-MM-DD)"),
+):
+    """删除现金手动覆盖记录，删除后该日回退自然计算值（需重算快照生效）"""
+    client = APIClient.from_config()
+    result = client.delete(
+        f"/api/positions/portfolio/{portfolio_code}/cash-position",
+        params={"platform_code": platform_code, "update_date": update_date},
+    )
+    success(data=result["data"])

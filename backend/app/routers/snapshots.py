@@ -77,10 +77,13 @@ def recalculate(
     current_user: Investor = Depends(get_current_admin),
 ):
     """
-    重算指定时间区间的快照
+    重算指定时间区间的快照（同步模式）
     
     单一事务（issue #58）：无 errors 时统一 commit；任一日失败则整体 rollback，
     被删快照与级联回退状态完整复原，对外「要么完整成功，要么无变化」。
+    
+    大区间重算易触发客户端 HTTP 超时（issue #89），建议改用
+    POST /snapshots/recalculate-async 提交后台任务并轮询终态。
     
     权限：仅admin
     """
@@ -109,6 +112,63 @@ def recalculate(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "RECALCULATION_FAILED", "message": str(e)},
         )
+
+
+@router.post("/recalculate-async")
+def recalculate_async(
+    request: SnapshotRecalculateRequest,
+    db: Session = Depends(get_db),
+    current_user: Investor = Depends(get_current_admin),
+):
+    """
+    异步区间重算（issue #89）：提交后台任务立即返回 job_id，
+    经 GET /api/sync-jobs/{job_id} 轮询终态（success=已提交 / failed=已整体回滚）。
+
+    事务语义与同步模式一致：后台执行体按 errors 统一 commit/rollback，
+    对外仍是「要么完整成功，要么无变化」。
+
+    已有重算任务在运行时返回 409 RECALC_JOB_CONFLICT。
+
+    权限：仅admin
+    """
+    from app.services.market_data_service import ConflictError
+    from app.services.snapshot_recalc_job import submit_snapshot_recalc_job
+
+    # 组合存在性前置校验（后台才报错体验差）
+    if request.portfolio_code:
+        portfolio = db.query(Portfolio).filter(
+            Portfolio.code == request.portfolio_code
+        ).first()
+        if not portfolio:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "PORTFOLIO_NOT_FOUND",
+                    "message": f"组合 {request.portfolio_code} 不存在",
+                },
+            )
+
+    try:
+        job_id = submit_snapshot_recalc_job(
+            params={
+                "portfolio_code": request.portfolio_code,
+                "start_date": request.start_date.isoformat(),
+                "end_date": request.end_date.isoformat(),
+            },
+            triggered_by="manual",
+            db=db,
+        )
+    except ConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "RECALC_JOB_CONFLICT", "message": str(e)},
+        )
+
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "message": "重算任务已提交，请用 GET /api/sync-jobs/{job_id} 轮询终态",
+    }
 
 
 @router.post("/catch-up", response_model=SnapshotCatchUpResult)

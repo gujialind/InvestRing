@@ -392,6 +392,22 @@ def update_cash_position(
     # 计算当前隐式值（用于审计）
     computed = compute_cash_balance(db, portfolio_code, platform_code, target_date)
 
+    # 冲突提示（issue #88）：该日该平台存在已确认 CASH 交易时，
+    # 覆盖层会绝对替换当日现金并作为后续快照增量基线，压制交易效果
+    warnings = []
+    conflict_count = db.query(Trade).filter(
+        Trade.portfolio_code == portfolio_code,
+        Trade.platform_code == platform_code,
+        Trade.product_code == "CASH",
+        Trade.status == "confirmed",
+        (Trade.trade_date == target_date) | (Trade.confirm_date == target_date),
+    ).count()
+    if conflict_count:
+        warnings.append(
+            f"该日存在 {conflict_count} 笔已确认现金交易，覆盖层将压制其效果"
+            "（覆盖值会绝对替换当日现金并作为后续快照增量基线）"
+        )
+
     manual = db.query(ManualMarketValue).filter(
         ManualMarketValue.portfolio_code == portfolio_code,
         ManualMarketValue.platform_code == platform_code,
@@ -420,4 +436,90 @@ def update_cash_position(
         "cash_amount": float(manual.market_value),
         "computed_value": float(computed) if computed is not None else None,
         "update_date": target_date,
+        "warnings": warnings,
+    }
+
+
+def list_manual_cash_overrides(
+    db: Session,
+    portfolio_code: str,
+    platform_code: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> list:
+    """查询现金手动覆盖记录（manual_market_value 的 CASH 行），供 REST 与 CLI 共用。"""
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise NotFoundError("PORTFOLIO_NOT_FOUND", f"组合 {portfolio_code} 不存在")
+
+    query = db.query(ManualMarketValue).filter(
+        ManualMarketValue.portfolio_code == portfolio_code,
+        ManualMarketValue.product_code == "CASH",
+    )
+    if platform_code:
+        query = query.filter(ManualMarketValue.platform_code == platform_code)
+    if start_date:
+        query = query.filter(ManualMarketValue.value_date >= start_date)
+    if end_date:
+        query = query.filter(ManualMarketValue.value_date <= end_date)
+
+    items = query.order_by(
+        ManualMarketValue.value_date.desc(), ManualMarketValue.platform_code.asc()
+    ).all()
+    return [
+        {
+            "id": m.id,
+            "portfolio_code": m.portfolio_code,
+            "platform_code": m.platform_code,
+            "value_date": m.value_date,
+            "market_value": float(m.market_value),
+            "computed_value": float(m.computed_value) if m.computed_value is not None else None,
+            "created_by": m.created_by,
+            "created_at": m.created_at,
+        }
+        for m in items
+    ]
+
+
+def delete_manual_cash_override(
+    db: Session,
+    *,
+    portfolio_code: str,
+    platform_code: str,
+    value_date: date,
+) -> dict:
+    """删除现金手动覆盖记录（issue #88）。不 commit。
+
+    删除后该日该平台回退到自然计算值；若覆盖已 baked in 快照
+    （value_date <= 最新快照日），需重算快照才生效（requires_snapshot_regen）。
+    """
+    portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
+    if not portfolio:
+        raise NotFoundError("PORTFOLIO_NOT_FOUND", f"组合 {portfolio_code} 不存在")
+
+    manual = db.query(ManualMarketValue).filter(
+        ManualMarketValue.portfolio_code == portfolio_code,
+        ManualMarketValue.platform_code == platform_code,
+        ManualMarketValue.product_code == "CASH",
+        ManualMarketValue.value_date == value_date,
+    ).first()
+    if not manual:
+        raise NotFoundError(
+            "MANUAL_OVERRIDE_NOT_FOUND",
+            f"未找到 {portfolio_code}/{platform_code} 在 {value_date} 的现金覆盖记录",
+        )
+
+    deleted_value = float(manual.market_value)
+    db.delete(manual)
+    db.flush()
+
+    latest_snapshot_date = get_latest_snapshot_date(db, portfolio_code)
+    requires_regen = bool(latest_snapshot_date and value_date <= latest_snapshot_date)
+
+    return {
+        "portfolio_code": portfolio_code,
+        "platform_code": platform_code,
+        "value_date": value_date,
+        "deleted_value": deleted_value,
+        "requires_snapshot_regen": requires_regen,
     }

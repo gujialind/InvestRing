@@ -69,6 +69,7 @@ def create_trade(
         platform_code=trade.platform_code,
         notes=trade.notes,
         allow_duplicate=trade.allow_duplicate,
+        cash_platform_code=trade.cash_platform_code,
     )
     db.commit()
     db.refresh(new_trade)
@@ -132,6 +133,7 @@ def confirm_trade(
     id: int,
     confirm_date: Optional[date] = None,
     price: Optional[float] = None,
+    sync_nav: bool = False,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
@@ -154,7 +156,8 @@ def confirm_trade(
 
     price_decimal = Decimal(str(price)) if price is not None else None
     confirm_single_trade(
-        db, trade, product, confirm_date=confirm_date, price=price_decimal
+        db, trade, product, confirm_date=confirm_date, price=price_decimal,
+        sync_nav=sync_nav,
     )
     db.commit()
     db.refresh(trade)
