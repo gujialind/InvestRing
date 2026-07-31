@@ -67,3 +67,35 @@ class NavHistoryRecord(BaseModel):
     unit_price: Optional[float] = None
     total_value: Optional[float] = None
     total_shares: Optional[float] = None
+
+
+class PortfolioPerformance(BaseModel):
+    """组合绩效指标（快照不足时相应字段为 None）。
+
+    twr：时间加权收益率，消除资金进出影响（净值化系统下等于净值增长率）
+    mwr：资金加权收益率（XIRR），反映实际投入资金的年化回报
+    """
+    portfolio_code: str
+    # 收益率
+    twr: Optional[float] = None
+    twr_chained: Optional[float] = None
+    annualized_twr: Optional[float] = None
+    mwr: Optional[float] = None
+    # 净值与持有期
+    initial_nav: Optional[float] = None
+    current_nav: Optional[float] = None
+    holding_days: Optional[int] = None
+    # 区间收益
+    return_1m: Optional[float] = None
+    return_3m: Optional[float] = None
+    return_ytd: Optional[float] = None
+    # 风险指标
+    max_drawdown: Optional[float] = None
+    max_drawdown_peak_date: Optional[str] = None
+    max_drawdown_trough_date: Optional[str] = None
+    annualized_volatility: Optional[float] = None
+    # 元信息
+    cash_flow_count: int = 0
+    nav_series_consistent: Optional[bool] = None
+    # 持有期 < 90 天时为 False：年化属大幅外推，前端应标注仅供参考
+    annualization_reliable: bool = False

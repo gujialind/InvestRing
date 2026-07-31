@@ -9,12 +9,13 @@ from app.schemas.portfolio import (
     PaginatedPortfolioResponse,
     PortfolioCreate,
     PortfolioInvestorItem,
+    PortfolioPerformance,
     PortfolioUpdate,
     PortfolioResponse,
     PortfolioValueSnapshotResponse,
 )
 from app.dependencies import get_current_user, get_current_admin
-from app.services import portfolio_service
+from app.services import performance_service, portfolio_service
 
 router = APIRouter()
 
@@ -130,6 +131,20 @@ def get_portfolio_returns(
     current_user=Depends(get_current_user),
 ):
     return portfolio_service.get_returns(db, code)
+
+
+@router.get("/{code}/performance", response_model=PortfolioPerformance)
+def get_portfolio_performance(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """组合绩效全指标：TWR / MWR(XIRR) / 区间收益 / 最大回撤 / 年化波动率。
+
+    与 /returns 的关系：/returns 保留为轻量口径（累计+年化）供列表页复用，
+    本端点提供详情页所需的全量绩效与风险指标。
+    """
+    return performance_service.get_performance(db, code)
 
 
 @router.get("/{code}/cash-flow")

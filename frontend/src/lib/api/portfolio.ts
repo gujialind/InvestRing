@@ -6,6 +6,7 @@ import {
   PortfolioValueSnapshot,
   NavHistoryRecord,
   PortfolioReturns,
+  PortfolioPerformance,
 } from "@/types/portfolio";
 import { Position, PositionCreate, PositionUpdate } from "@/types/position";
 import { PaginatedResponse } from "@/types/common";
@@ -39,6 +40,10 @@ export const portfolioApi = {
 
   getReturns: (code: string) =>
     request<PortfolioReturns>({ method: "GET", url: `/portfolios/${code}/returns` }),
+
+  // 全量绩效指标（TWR / MWR / 区间收益 / 回撤 / 波动率）
+  getPerformance: (code: string) =>
+    request<PortfolioPerformance>({ method: "GET", url: `/portfolios/${code}/performance` }),
 
   getAvailableCash: (code: string) =>
     request<{ available_cash: number }>({ method: "GET", url: `/positions/portfolio/${code}/available-cash` }),
