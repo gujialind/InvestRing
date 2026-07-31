@@ -2,6 +2,9 @@
   "name": "frontend",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -21,7 +24,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tanstack/react-query": "^5.62.0",
-    "@types/node": "^20.10.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "axios": "^1.7.0",
