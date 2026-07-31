@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ArrowLeft, Wallet, Plus, ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
-import { usePortfolio, useLatestSnapshot, useClosePortfolio, useActivatePortfolio, useNavHistory } from "@/hooks/usePortfolio";
+import { usePortfolio, useLatestSnapshot, useClosePortfolio, useActivatePortfolio, useNavHistory, usePortfolioPerformance } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import NavCurveSimple from "@/components/charts/NavCurveSimple";
 import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
+import PerformanceMetrics from "@/components/shared/PerformanceMetrics";
 import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
 import ClosePortfolioDialog from "@/components/shared/dialogs/ClosePortfolioDialog";
 import LoadingState from "@/components/shared/LoadingState";
@@ -31,6 +32,9 @@ export default function MobilePortfolioDetailPage() {
   const navHistory = (navHistoryData || [])
     .filter((r) => r.unit_price !== null)
     .map((r) => ({ date: r.snapshot_date, nav: r.unit_price as number }));
+
+  // 绩效指标：draft 组合无快照，不请求
+  const { data: performance } = usePortfolioPerformance(code, portfolio?.status !== "draft");
 
   const isLoading = portfolioLoading || snapshotLoading;
 
@@ -133,6 +137,9 @@ export default function MobilePortfolioDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* 绩效指标（紧凑两列） */}
+      {!isDraft && <PerformanceMetrics data={performance} variant="mobile" />}
 
       {/* Quick Links */}
       {!isDraft && (

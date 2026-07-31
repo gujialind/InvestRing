@@ -184,6 +184,16 @@ export function usePortfolioReturns(code: string, enabled = true) {
   });
 }
 
+// 组合全量绩效指标 Hook（TWR / MWR / 区间收益 / 回撤 / 波动率）
+export function usePortfolioPerformance(code: string, enabled = true) {
+  return useQuery({
+    queryKey: [PORTFOLIO_QUERY_KEY, code, "performance"],
+    queryFn: () => portfolioApi.getPerformance(code),
+    enabled: enabled && !!code,
+    staleTime: 60 * 1000,
+  });
+}
+
 // ==================== 持仓相关 Hooks ====================
 
 // 持仓列表 Hook

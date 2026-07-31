@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass } from "@/lib/utils";
+import { formatCurrency, formatNumber } from "@/lib/utils";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import {
@@ -18,11 +18,12 @@ import {
   useClosePortfolio,
   useActivatePortfolio,
   useNavHistory,
-  usePortfolioReturns,
+  usePortfolioPerformance,
 } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import NavCurve from "@/components/charts/NavCurve";
 import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
+import PerformanceMetrics from "@/components/shared/PerformanceMetrics";
 import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
 import ClosePortfolioDialog from "@/components/shared/dialogs/ClosePortfolioDialog";
 import LoadingState from "@/components/shared/LoadingState";
@@ -44,12 +45,11 @@ export default function PortfolioDetailPage() {
   const isLoading = portfolioLoading || snapshotLoading || investorsLoading || positionsLoading;
 
   const [showCloseDialog, setShowCloseDialog] = useState(false);
-  const [returnType, setReturnType] = useState<"cumulative" | "annualized">("cumulative");
 
-  // 净值历史与收益率（后端计算）：draft 组合无快照，不请求
+  // 净值历史与绩效指标（后端计算）：draft 组合无快照，不请求绩效
   const isDraftStatus = portfolio?.status === "draft";
   const { data: navHistoryData } = useNavHistory(code, undefined);
-  const { data: returnsData } = usePortfolioReturns(code, !isDraftStatus);
+  const { data: performance } = usePortfolioPerformance(code, !isDraftStatus);
   const navHistory = (navHistoryData || [])
     .filter((r) => r.unit_price !== null)
     .map((r) => ({ date: r.snapshot_date, nav: r.unit_price as number }));
@@ -144,48 +144,8 @@ export default function PortfolioDetailPage() {
               variant="desktop"
             />
 
-            {/* Return Type Switcher（数据来自 GET /portfolios/{code}/returns；后端暂不提供 TWR） */}
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-medium">收益率类型</span>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant={returnType === "cumulative" ? "default" : "outline"}
-                      onClick={() => setReturnType("cumulative")}
-                      className="text-xs"
-                    >
-                      累计收益
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={returnType === "annualized" ? "default" : "outline"}
-                      onClick={() => setReturnType("annualized")}
-                      className="text-xs"
-                    >
-                      年化收益
-                    </Button>
-                  </div>
-                </div>
-                <div className="text-center py-4">
-                  {(() => {
-                    const value = returnType === "cumulative"
-                      ? returnsData?.cumulative_return
-                      : returnsData?.annualized_return;
-                    return (
-                      <div className={`text-3xl font-bold ${getReturnColorClass(value ?? null)}`}>
-                        {value !== null && value !== undefined ? formatReturnRate(value) : "--"}
-                      </div>
-                    );
-                  })()}
-                  <p className="text-sm text-muted-foreground mt-2">
-                    {returnType === "cumulative" && "累计收益率：从组合成立至今的总收益"}
-                    {returnType === "annualized" && `年化收益率：按年计算的复合收益率${returnsData?.holding_days ? `（持有 ${returnsData.holding_days} 天）` : ""}`}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+            {/* 绩效指标（数据来自 GET /portfolios/{code}/performance） */}
+            <PerformanceMetrics data={performance} variant="desktop" />
           </div>
         )}
 
