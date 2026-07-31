@@ -35,6 +35,34 @@ def get_tasks(
     }
 
 
+@router.get("/executions", response_model=PaginatedTaskLogResponse)
+def get_all_task_executions(
+    task_code: Optional[str] = None,
+    page: Optional[int] = 1,
+    page_size: Optional[int] = 20,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_admin),
+):
+    """全局执行历史（跨任务，可选按 task_code 过滤）。
+
+    注意：必须注册在 GET /{code} 之前，否则 "executions" 会被当作任务 code 捕获。
+    """
+    query = db.query(TaskExecutionLog)
+    if task_code:
+        query = query.filter(TaskExecutionLog.task_code == task_code)
+    query = query.order_by(TaskExecutionLog.created_at.desc(), TaskExecutionLog.id.desc())
+
+    total = query.count()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 @router.post("/{code}/run")
 def run_task(
     code: str,

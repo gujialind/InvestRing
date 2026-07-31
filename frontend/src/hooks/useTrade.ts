@@ -59,6 +59,24 @@ export function useCreateTrade() {
       });
     },
     onError: (error: unknown) => {
+      if (error instanceof ApiException) {
+        // DUPLICATE_TRADE：调用方（交易表单）会弹确认框引导 allow_duplicate 重试，此处不叠加 toast
+        if (error.code === "DUPLICATE_TRADE") {
+          return;
+        }
+        // MARKET_AMBIGUOUS：展示后端 details.available_markets，引导用户指定市场
+        if (error.code === "MARKET_AMBIGUOUS") {
+          const markets = (error.details?.available_markets as string[] | undefined) || [];
+          addToast({
+            type: "error",
+            title: "市场不明确",
+            message: markets.length
+              ? `该代码存在多个市场：${markets.join(" / ")}，请指定市场后重试`
+              : error.message,
+          });
+          return;
+        }
+      }
       addToast({
         type: "error",
         title: "交易创建失败",
@@ -377,6 +395,31 @@ export function useUnconfirmSubscription() {
         type: "error",
         title: "取消确认失败",
         message: getErrorMessage(error, "操作失败，请重试"),
+      });
+    },
+  });
+}
+
+// 删除申购赎回 Hook（仅 pending/cancelled 可删；confirmed 需先 unconfirm）
+export function useDeleteSubscription() {
+  const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
+
+  return useMutation({
+    mutationFn: (id: number) => subscriptionApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, "list"] });
+      addToast({
+        type: "success",
+        title: "删除成功",
+        message: "申请已删除",
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "删除失败",
+        message: getErrorMessage(error, "已确认的申请需先取消确认"),
       });
     },
   });

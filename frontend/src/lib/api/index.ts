@@ -35,7 +35,6 @@ export type {
   LoginLog,
   AuditLog,
   ErrorLog,
-  TaskLog,
   ScheduledTask,
   TaskExecution,
 } from "@/types/log";

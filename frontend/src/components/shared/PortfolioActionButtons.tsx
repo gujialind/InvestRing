@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Power, PowerOff, Plus, ArrowRightLeft, Trash2, RefreshCw } from "lucide-react";
+import { Power, PowerOff, Plus, ArrowRightLeft, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 interface PortfolioActionButtonsProps {
@@ -13,15 +13,14 @@ interface PortfolioActionButtonsProps {
   variant?: "desktop" | "mobile";
   onCloseClick: () => void;
   onActivateClick: () => void;
-  onDeleteClick: () => void;
   isClosePending?: boolean;
   isActivatePending?: boolean;
-  isDeletePending?: boolean;
 }
 
 /**
  * 组合详情页操作按钮组（草稿/活跃/关闭三态）。
  * 业务逻辑两端一致，仅布局与链接前缀通过 variant / basePath 区分。
+ * 注：后端不提供删除组合能力（外键 RESTRICT，生命周期由关闭/重新激活管理），故无删除入口。
  */
 export default function PortfolioActionButtons({
   portfolioCode,
@@ -30,10 +29,8 @@ export default function PortfolioActionButtons({
   variant = "desktop",
   onCloseClick,
   onActivateClick,
-  onDeleteClick,
   isClosePending,
   isActivatePending,
-  isDeletePending,
 }: PortfolioActionButtonsProps) {
   const cls = variant === "mobile" ? "w-full" : "";
 
@@ -46,10 +43,6 @@ export default function PortfolioActionButtons({
             {variant === "mobile" ? "首次申购" : "首次申购激活"}
           </Button>
         </Link>
-        <Button variant="outline" onClick={onDeleteClick} disabled={isDeletePending} className={cls}>
-          <Trash2 className="mr-2 h-4 w-4 text-red-500" />
-          {variant === "mobile" ? "删除" : "删除组合"}
-        </Button>
       </div>
     );
   }

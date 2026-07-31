@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useState } from "react";
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,20 +17,17 @@ import {
   usePositionList,
   useClosePortfolio,
   useActivatePortfolio,
-  useDeletePortfolio,
 } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import NavCurve from "@/components/charts/NavCurve";
 import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
 import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
 import ClosePortfolioDialog from "@/components/shared/dialogs/ClosePortfolioDialog";
-import DeletePortfolioDialog from "@/components/shared/dialogs/DeletePortfolioDialog";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 
 export default function PortfolioDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const code = params.code as string;
 
   const { data: portfolio, isLoading: portfolioLoading } = usePortfolio(code);
@@ -39,14 +36,12 @@ export default function PortfolioDetailPage() {
   const { data: positionsData, isLoading: positionsLoading } = usePositionList(code, { page_size: 100 });
   const closePortfolio = useClosePortfolio();
   const activatePortfolio = useActivatePortfolio();
-  const deletePortfolio = useDeletePortfolio();
   const { isAdmin } = useRoleCheck();
 
   const positions = positionsData?.items || [];
   const isLoading = portfolioLoading || snapshotLoading || investorsLoading || positionsLoading;
 
   const [showCloseDialog, setShowCloseDialog] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [returnType, setReturnType] = useState<"cumulative" | "annualized" | "twr">("twr");
 
   if (isLoading) {
@@ -91,15 +86,6 @@ export default function PortfolioDetailPage() {
     activatePortfolio.mutate(code);
   };
 
-  const handleDelete = () => {
-    deletePortfolio.mutate(code, {
-      onSuccess: () => {
-        setShowDeleteDialog(false);
-        router.push("/portfolio");
-      },
-    });
-  };
-
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -123,10 +109,8 @@ export default function PortfolioDetailPage() {
               variant="desktop"
               onCloseClick={() => setShowCloseDialog(true)}
               onActivateClick={handleActivate}
-              onDeleteClick={() => setShowDeleteDialog(true)}
               isClosePending={closePortfolio.isPending}
               isActivatePending={activatePortfolio.isPending}
-              isDeletePending={deletePortfolio.isPending}
             />
           )}
         </div>
@@ -361,13 +345,6 @@ export default function PortfolioDetailPage() {
         isPending={closePortfolio.isPending}
         positions={positions}
         investors={investors}
-      />
-
-      <DeletePortfolioDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        onConfirm={handleDelete}
-        isPending={deletePortfolio.isPending}
       />
     </MainLayout>
   );

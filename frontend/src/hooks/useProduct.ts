@@ -51,14 +51,15 @@ export function useCreateProduct() {
   });
 }
 
-// 更新产品 Hook
-export function useUpdateProduct(code: string, market?: string) {
+// 更新产品 Hook（code/market 随 mutate 传入，避免闭包捕获空值）
+export function useUpdateProduct() {
   const queryClient = useQueryClient();
   const addToast = useUIStore((state) => state.addToast);
 
   return useMutation({
-    mutationFn: (data: ProductUpdate) => productApi.update(code, data, market),
-    onSuccess: () => {
+    mutationFn: ({ code, data, market }: { code: string; data: ProductUpdate; market?: string }) =>
+      productApi.update(code, data, market),
+    onSuccess: (_, { code }) => {
       queryClient.invalidateQueries({ queryKey: [PRODUCT_QUERY_KEY, code] });
       queryClient.invalidateQueries({ queryKey: [PRODUCT_QUERY_KEY, "list"] });
       addToast({
@@ -97,6 +98,68 @@ export function useDeleteProduct() {
         type: "error",
         title: "删除失败",
         message: getErrorMessage(error, "该产品已被使用，无法删除"),
+      });
+    },
+  });
+}
+
+// 产品价格/净值历史 Hook（后端路径要求 market 必填）
+export function useProductPrices(code?: string, market?: string, limit = 30) {
+  return useQuery({
+    queryKey: [PRODUCT_QUERY_KEY, "prices", code, market],
+    queryFn: () => productApi.getPriceData(code!, market!, { limit }),
+    enabled: !!code && !!market,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// 同步最新价格 Hook
+export function useSyncProductPrice() {
+  const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
+
+  return useMutation({
+    mutationFn: ({ code, market }: { code: string; market?: string }) =>
+      productApi.syncPrice(code, market),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [PRODUCT_QUERY_KEY] });
+      addToast({
+        type: "success",
+        title: "同步成功",
+        message: `已同步 ${data.synced_count || 0} 条价格数据`,
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "同步失败",
+        message: getErrorMessage(error, "请检查数据源配置"),
+      });
+    },
+  });
+}
+
+// 同步历史价格 Hook
+export function useSyncProductHistory() {
+  const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
+
+  return useMutation({
+    mutationFn: ({ code, market }: { code: string; market?: string }) =>
+      productApi.syncHistory(code, market),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [PRODUCT_QUERY_KEY] });
+      addToast({
+        type: "success",
+        title: "同步成功",
+        message: `已同步 ${data.synced_count || 0} 条历史价格数据`,
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "同步失败",
+        message: getErrorMessage(error, "请检查数据源配置"),
       });
     },
   });

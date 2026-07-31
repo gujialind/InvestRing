@@ -37,6 +37,8 @@ import {
 import { formatCurrency, formatNumber, formatMarketName, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo } from "lucide-react";
 import Link from "next/link";
+import { ApiException } from "@/lib/api";
+import type { TradeCreate } from "@/types/trade";
 import {
   useTradeList,
   useCreateTrade,
@@ -111,10 +113,17 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   // 编辑提示（原 alert 改为内部状态展示）
   const [editHint, setEditHint] = useState(false);
+  // 命中 DUPLICATE_TRADE 时暂存待重试的交易，由确认框引导 allow_duplicate 重试
+  const [duplicateTrade, setDuplicateTrade] = useState<TradeCreate | null>(null);
+
+  const resetTradeForm = () => {
+    setIsDialogOpen(false);
+    setFormData({ product_code: "", market: "", platform_code: "", shares: "", amount: "", price: "", trade_date: toDateOnly(new Date()) });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = {
+    const payload: TradeCreate = {
       portfolio_code: code,
       product_code: formData.product_code,
       market: formData.market || undefined,
@@ -127,9 +136,12 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
         : { shares: parseFloat(formData.shares) }),
     };
     createTrade.mutate(payload, {
-      onSuccess: () => {
-        setIsDialogOpen(false);
-        setFormData({ product_code: "", market: "", platform_code: "", shares: "", amount: "", price: "", trade_date: toDateOnly(new Date()) });
+      onSuccess: resetTradeForm,
+      onError: (error: unknown) => {
+        // 重复交易：弹确认框引导 allow_duplicate 重试（hook 层已抑制该错误码的 toast）
+        if (error instanceof ApiException && error.code === "DUPLICATE_TRADE") {
+          setDuplicateTrade(payload);
+        }
       },
     });
   };
@@ -433,6 +445,34 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogAction>知道了</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* DUPLICATE_TRADE 确认重试 */}
+      <AlertDialog open={!!duplicateTrade} onOpenChange={(open) => !open && setDuplicateTrade(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>检测到重复交易</AlertDialogTitle>
+            <AlertDialogDescription>
+              存在同组合/产品/方向/交易日且金额或份额相同的交易，是否仍要提交？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (duplicateTrade) {
+                  createTrade.mutate(
+                    { ...duplicateTrade, allow_duplicate: true },
+                    { onSuccess: resetTradeForm }
+                  );
+                }
+                setDuplicateTrade(null);
+              }}
+            >
+              仍要提交
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

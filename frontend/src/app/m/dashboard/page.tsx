@@ -1,6 +1,5 @@
 "use client";
 
-import MobileLayout from "@/components/mobile/MobileLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatReturnRate, getReturnColorClass } from "@/lib/utils";
 import Link from "next/link";
@@ -23,125 +22,121 @@ export default function MobileDashboardPage() {
 
   if (isLoading) {
     return (
-      <MobileLayout>
-        <LoadingState />
-      </MobileLayout>
+      <LoadingState />
     );
   }
 
   return (
-    <MobileLayout>
-      <div className="space-y-4 p-4">
-        {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold">首页</h1>
-          <p className="text-sm text-muted-foreground">投资组合概览</p>
-        </div>
+    <div className="space-y-4 p-4">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold">首页</h1>
+        <p className="text-sm text-muted-foreground">投资组合概览</p>
+      </div>
 
-        {/* Summary Cards */}
-        <DashboardStatsCards
-          totalValue={totalValue}
-          avgReturn={avgReturn}
-          activeCount={activePortfolios.length}
-          totalCount={portfolios.length}
-          investorCount={investors.length}
-          variant="mobile"
-        />
+      {/* Summary Cards */}
+      <DashboardStatsCards
+        totalValue={totalValue}
+        avgReturn={avgReturn}
+        activeCount={activePortfolios.length}
+        totalCount={portfolios.length}
+        investorCount={investors.length}
+        variant="mobile"
+      />
 
-        {/* Pending Transactions Alert */}
-        {pendingSubscriptions.length > 0 && (
-          <Card className="bg-yellow-50 border-yellow-200">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
-                <span className="text-sm font-medium text-yellow-800">
-                  {pendingSubscriptions.length} 笔待确认交易
-                </span>
-              </div>
+      {/* Pending Transactions Alert */}
+      {pendingSubscriptions.length > 0 && (
+        <Card className="bg-yellow-50 border-yellow-200">
+          <CardContent className="p-3">
+            <div className="flex items-center gap-2">
+              <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
+              <span className="text-sm font-medium text-yellow-800">
+                {pendingSubscriptions.length} 笔待确认交易
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Active Portfolios List */}
+      <div>
+        <h2 className="text-base font-semibold mb-3">活跃组合</h2>
+        {activePortfolios.length === 0 ? (
+          <Card>
+            <CardContent className="p-8 text-center text-muted-foreground">
+              暂无活跃组合，请先创建组合
             </CardContent>
           </Card>
-        )}
-
-        {/* Active Portfolios List */}
-        <div>
-          <h2 className="text-base font-semibold mb-3">活跃组合</h2>
-          {activePortfolios.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center text-muted-foreground">
-                暂无活跃组合，请先创建组合
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {activePortfolios.map((portfolio) => (
-                <Link key={portfolio.code} href={`/m/portfolio/${portfolio.code}`}>
-                  <Card className="hover:bg-accent transition-colors">
-                    <CardContent className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-medium text-sm">{portfolio.name}</p>
-                          <p className="text-xs text-muted-foreground">{portfolio.code}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-medium text-sm">{formatCurrency(portfolio.total_value || 0)}</p>
-                          <p className={`text-xs ${getReturnColorClass(portfolio.cumulative_return || 0)}`}>
-                            {formatReturnRate(portfolio.cumulative_return || 0)}
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Recent Activity */}
-        {subscriptions.length > 0 && (
-          <div>
-            <h2 className="text-base font-semibold mb-3">最近交易</h2>
-            <div className="space-y-2">
-              {subscriptions.slice(0, 5).map((sub) => (
-                <Card key={sub.id}>
+        ) : (
+          <div className="space-y-2">
+            {activePortfolios.map((portfolio) => (
+              <Link key={portfolio.code} href={`/m/portfolio/${portfolio.code}`}>
+                <Card className="hover:bg-accent transition-colors">
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium">
-                          {sub.sub_type === "subscribe" ? "申购" : "赎回"}
-                          <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
-                            sub.status === "pending"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : sub.status === "confirmed"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-gray-100 text-gray-800"
-                          }`}>
-                            {sub.status === "pending" ? "待确认" : sub.status === "confirmed" ? "已确认" : "已取消"}
-                          </span>
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {sub.portfolio_code} | {sub.investor_code}
-                        </p>
+                        <p className="font-medium text-sm">{portfolio.name}</p>
+                        <p className="text-xs text-muted-foreground">{portfolio.code}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-medium">
-                          {sub.sub_type === "subscribe"
-                            ? formatCurrency(sub.amount || 0)
-                            : `${sub.shares?.toLocaleString() || 0} 份`
-                          }
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {sub.apply_date}
+                        <p className="font-medium text-sm">{formatCurrency(portfolio.total_value || 0)}</p>
+                        <p className={`text-xs ${getReturnColorClass(portfolio.cumulative_return || 0)}`}>
+                          {formatReturnRate(portfolio.cumulative_return || 0)}
                         </p>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
+              </Link>
+            ))}
           </div>
         )}
       </div>
-    </MobileLayout>
+
+      {/* Recent Activity */}
+      {subscriptions.length > 0 && (
+        <div>
+          <h2 className="text-base font-semibold mb-3">最近交易</h2>
+          <div className="space-y-2">
+            {subscriptions.slice(0, 5).map((sub) => (
+              <Card key={sub.id}>
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {sub.sub_type === "subscribe" ? "申购" : "赎回"}
+                        <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
+                          sub.status === "pending"
+                            ? "bg-yellow-100 text-yellow-800"
+                            : sub.status === "confirmed"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-gray-100 text-gray-800"
+                        }`}>
+                          {sub.status === "pending" ? "待确认" : sub.status === "confirmed" ? "已确认" : "已取消"}
+                        </span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {sub.portfolio_code} | {sub.investor_code}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium">
+                        {sub.sub_type === "subscribe"
+                          ? formatCurrency(sub.amount || 0)
+                          : `${sub.shares?.toLocaleString() || 0} 份`
+                        }
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {sub.apply_date}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

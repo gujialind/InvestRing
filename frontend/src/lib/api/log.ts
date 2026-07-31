@@ -1,5 +1,5 @@
 import { request } from "./client";
-import { LoginLog, AuditLog, ErrorLog, TaskLog } from "@/types/log";
+import { LoginLog, AuditLog, ErrorLog } from "@/types/log";
 
 // 日志查询通用分页参数
 interface LogQueryParams {
@@ -29,6 +29,6 @@ export const logApi = {
   errorLogs: (params?: LogQueryParams) =>
     request<LogListResponse<ErrorLog> | ErrorLog[]>({ method: "GET", url: "/system/logs/error", params }).then(unwrap),
 
-  taskLogs: (params?: LogQueryParams) =>
-    request<LogListResponse<TaskLog> | TaskLog[]>({ method: "GET", url: "/system/logs/task", params }).then(unwrap),
+  // 任务执行历史请用 taskApi.executionHistory（GET /system/tasks/executions），
+  // 后端不存在 /system/logs/task 端点
 };

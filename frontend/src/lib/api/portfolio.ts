@@ -27,8 +27,7 @@ export const portfolioApi = {
   activate: (code: string) =>
     request<Portfolio>({ method: "POST", url: `/portfolios/${code}/reactivate` }),
 
-  remove: (code: string) =>
-    request<{ message: string }>({ method: "DELETE", url: `/portfolios/${code}` }),
+  // 注：后端无 DELETE /portfolios/{code} 端点（实体删除均为 RESTRICT，用关闭代替删除）
 
   getLatestSnapshot: (code: string) =>
     request<PortfolioValueSnapshot>({ method: "GET", url: `/portfolios/${code}/snapshots/latest` }),

@@ -31,15 +31,18 @@ export interface TradeCreate {
   actual_amount?: number;
   trade_date: string;
   notes?: string;
+  /** 命中 DUPLICATE_TRADE 时用户确认后重试传 true（后端默认 false） */
+  allow_duplicate?: boolean;
 }
 
+// 字段与后端 schemas/trade.py::TradeUpdate 对齐：
+// 不含 confirm_date/status（后端会静默丢弃）；改状态请走 confirm/unconfirm/cancel 端点
 export interface TradeUpdate {
   shares?: number;
   amount?: number;
   price?: number;
   fee?: number;
   actual_amount?: number;
-  confirm_date?: string;
-  status?: string;
+  trade_date?: string;
   notes?: string;
 }

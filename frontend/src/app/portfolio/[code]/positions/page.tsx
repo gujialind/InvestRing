@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,12 +32,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatNumber, formatReturnRate, toDateOnly } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass, toDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { tradeApi, positionApi, platformApi, getErrorMessage, cashTransferApi } from "@/lib/api";
+import { platformApi, ApiException } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
-import { usePositionList } from "@/hooks/usePosition";
+import { usePositionList, useUpdateCashPosition } from "@/hooks/usePosition";
+import { useCreateTrade } from "@/hooks/useTrade";
+import { useCreateCashTransfer } from "@/hooks/useCashTransfer";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { Position } from "@/types/position";
 import type { Platform } from "@/types/platform";
@@ -47,7 +59,6 @@ import { parseDateOnly } from "@/lib/utils";
 export default function PositionsPage() {
   const params = useParams();
   const code = params.code as string;
-  const queryClient = useQueryClient();
   const addToast = useUIStore((state) => state.addToast);
 
   const { data: positionsData, isLoading } = usePositionList(code);
@@ -87,56 +98,18 @@ export default function PositionsPage() {
   const totalCost = positions.reduce((sum, p) => sum + ((p.shares || 0) * (p.cost_price || 0)), 0);
   const totalProfitLoss = totalMarketValue - totalCost;
 
-  const createTrade = useMutation({
-    mutationFn: tradeApi.create,
-    onSuccess: () => {
-      addToast({
-        type: "success",
-        title: "交易提交成功",
-        message: "调仓交易已提交，等待确认",
-      });
-      setIsDialogOpen(false);
-      setFormData({ product_code: "", shares: "", amount: "", price: "" });
-      queryClient.invalidateQueries({ queryKey: ["trades", code] });
-    },
-    onError: (error: unknown) => {
-      addToast({
-        type: "error",
-        title: "交易提交失败",
-        message: getErrorMessage(error, "请检查输入数据后重试"),
-      });
-    },
-  });
+  // 创建交易走统一 hook（内部已正确 invalidate trades/positions/portfolios）
+  const createTrade = useCreateTrade();
+  // 命中 DUPLICATE_TRADE 时暂存待重试的交易，由确认框引导 allow_duplicate 重试
+  const [duplicateTrade, setDuplicateTrade] = useState<TradeCreate | null>(null);
 
-  // 更新非净值资产的 mutation
-  const updateCashPosition = useMutation({
-    mutationFn: async ({ amount, platformCode, updateDate }: {
-      amount: string;
-      platformCode: string;
-      updateDate?: string;
-    }) => {
-      return positionApi.updateCashPosition(code, parseFloat(amount), platformCode, updateDate);
-    },
-    onSuccess: () => {
-      addToast({
-        type: "success",
-        title: "更新成功",
-        message: "非净值资产金额已更新",
-      });
-      setIsCashUpdateOpen(false);
-      setCashAmount("");
-      setSelectedPlatform("");
-      setSelectedDate(undefined);
-      queryClient.invalidateQueries({ queryKey: ["positions", code] });
-    },
-    onError: (error: unknown) => {
-      addToast({
-        type: "error",
-        title: "更新失败",
-        message: getErrorMessage(error, "更新失败，请检查网络连接或联系管理员"),
-      });
-    },
-  });
+  const resetTradeForm = () => {
+    setIsDialogOpen(false);
+    setFormData({ product_code: "", shares: "", amount: "", price: "" });
+  };
+
+  // 更新非净值资产走统一 hook（与移动端持仓页共用）
+  const updateCashPosition = useUpdateCashPosition(code);
 
   const handleCashUpdateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,54 +131,35 @@ export default function PositionsPage() {
       });
       return;
     }
-    
-    if (selectedDate) {
-      const dateStr = toDateOnly(selectedDate);
-      updateCashPosition.mutate({
-        amount: cashAmount,
+
+    updateCashPosition.mutate(
+      {
+        amount: parseFloat(cashAmount),
         platformCode: selectedPlatform,
-        updateDate: dateStr,
-      });
-    } else {
-      updateCashPosition.mutate({
-        amount: cashAmount,
-        platformCode: selectedPlatform,
-      });
-    }
+        updateDate: selectedDate ? toDateOnly(selectedDate) : undefined,
+      },
+      {
+        onSuccess: () => {
+          setIsCashUpdateOpen(false);
+          setCashAmount("");
+          setSelectedPlatform("");
+          setSelectedDate(undefined);
+        },
+      }
+    );
   };
 
-  // 现金转移 mutation
-  const createCashTransfer = useMutation({
-    mutationFn: (data: {
-      from_platform: string;
-      to_platform: string;
-      amount: number;
-      cross_day: boolean;
-      transfer_date: string;
-    }) => cashTransferApi.create(code, data),
-    onSuccess: () => {
-      addToast({
-        type: "success",
-        title: "转移成功",
-        message: "现金转移已创建",
-      });
-      setIsTransferOpen(false);
-      setTransferFrom("");
-      setTransferTo("");
-      setTransferAmount("");
-      setTransferDate(toDateOnly(new Date()));
-      setTransferCrossDay(false);
-      queryClient.invalidateQueries({ queryKey: ["positions", code] });
-      queryClient.invalidateQueries({ queryKey: ["cash-transfers", "list", code] });
-    },
-    onError: (error: unknown) => {
-      addToast({
-        type: "error",
-        title: "转移失败",
-        message: getErrorMessage(error, "请检查输入信息"),
-      });
-    },
-  });
+  // 现金转移走统一 hook
+  const createCashTransfer = useCreateCashTransfer(code);
+
+  const resetTransferForm = () => {
+    setIsTransferOpen(false);
+    setTransferFrom("");
+    setTransferTo("");
+    setTransferAmount("");
+    setTransferDate(toDateOnly(new Date()));
+    setTransferCrossDay(false);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -252,7 +206,15 @@ export default function PositionsPage() {
       fee: 0,
     };
 
-    createTrade.mutate(tradeData);
+    createTrade.mutate(tradeData, {
+      onSuccess: resetTradeForm,
+      onError: (error: unknown) => {
+        // 重复交易：弹确认框引导 allow_duplicate 重试（hook 层已抑制该错误码的 toast）
+        if (error instanceof ApiException && error.code === "DUPLICATE_TRADE") {
+          setDuplicateTrade(tradeData);
+        }
+      },
+    });
   };
 
   return (
@@ -457,13 +419,16 @@ export default function PositionsPage() {
                   addToast({ type: "error", title: "输入错误", message: "请输入有效的转移金额" });
                   return;
                 }
-                createCashTransfer.mutate({
+              createCashTransfer.mutate(
+                {
                   from_platform: transferFrom,
                   to_platform: transferTo,
                   amount: parseFloat(transferAmount),
                   cross_day: transferCrossDay,
                   transfer_date: transferDate,
-                });
+                },
+                { onSuccess: resetTransferForm }
+              );
               }}>
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
@@ -566,7 +531,7 @@ export default function PositionsPage() {
                   </Card>
                   <Card>
                     <CardContent className="pt-6">
-                      <div className={`text-2xl font-bold ${totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}>
+                      <div className={`text-2xl font-bold ${getReturnColorClass(totalProfitLoss)}`}>
                         {formatCurrency(totalProfitLoss)}
                       </div>
                       <p className="text-sm text-muted-foreground">总收益</p>
@@ -608,7 +573,7 @@ export default function PositionsPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           {position.profit_loss !== undefined && position.profit_loss !== null ? (
-                            <span className={position.profit_loss >= 0 ? "text-green-600" : "text-red-600"}>
+                            <span className={getReturnColorClass(position.profit_loss)}>
                               {formatCurrency(position.profit_loss)}
                             </span>
                           ) : (
@@ -617,7 +582,7 @@ export default function PositionsPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           {position.profit_loss_percent !== undefined && position.profit_loss_percent !== null ? (
-                            <span className={position.profit_loss_percent >= 0 ? "text-green-600" : "text-red-600"}>
+                            <span className={getReturnColorClass(position.profit_loss_percent)}>
                               {formatReturnRate(position.profit_loss_percent)}
                             </span>
                           ) : (
@@ -638,6 +603,34 @@ export default function PositionsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* DUPLICATE_TRADE 确认重试 */}
+      <AlertDialog open={!!duplicateTrade} onOpenChange={(open) => !open && setDuplicateTrade(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>检测到重复交易</AlertDialogTitle>
+            <AlertDialogDescription>
+              存在同组合/产品/方向/交易日且金额或份额相同的交易，是否仍要提交？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (duplicateTrade) {
+                  createTrade.mutate(
+                    { ...duplicateTrade, allow_duplicate: true },
+                    { onSuccess: resetTradeForm }
+                  );
+                }
+                setDuplicateTrade(null);
+              }}
+            >
+              仍要提交
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }
