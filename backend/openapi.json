@@ -928,6 +928,54 @@
         }
       }
     },
+    "/api/portfolios/{code}/performance": {
+      "get": {
+        "tags": [
+          "组合管理"
+        ],
+        "summary": "Get Portfolio Performance",
+        "description": "组合绩效全指标：TWR / MWR(XIRR) / 区间收益 / 最大回撤 / 年化波动率。\n\n与 /returns 的关系：/returns 保留为轻量口径（累计+年化）供列表页复用，\n本端点提供详情页所需的全量绩效与风险指标。",
+        "operationId": "get_portfolio_performance_api_portfolios__code__performance_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioPerformance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/portfolios/{code}/cash-flow": {
       "get": {
         "tags": [
@@ -6884,6 +6932,195 @@
         ],
         "title": "PortfolioListItem",
         "description": "列表项：附聚合字段（issue #69），无快照时为 None/0。"
+      },
+      "PortfolioPerformance": {
+        "properties": {
+          "portfolio_code": {
+            "type": "string",
+            "title": "Portfolio Code"
+          },
+          "twr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Twr"
+          },
+          "twr_chained": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Twr Chained"
+          },
+          "annualized_twr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualized Twr"
+          },
+          "mwr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mwr"
+          },
+          "initial_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Nav"
+          },
+          "current_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Nav"
+          },
+          "holding_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holding Days"
+          },
+          "return_1m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 1M"
+          },
+          "return_3m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 3M"
+          },
+          "return_ytd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Ytd"
+          },
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown"
+          },
+          "max_drawdown_peak_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Peak Date"
+          },
+          "max_drawdown_trough_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Trough Date"
+          },
+          "annualized_volatility": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualized Volatility"
+          },
+          "cash_flow_count": {
+            "type": "integer",
+            "title": "Cash Flow Count",
+            "default": 0
+          },
+          "nav_series_consistent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Series Consistent"
+          },
+          "annualization_reliable": {
+            "type": "boolean",
+            "title": "Annualization Reliable",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_code"
+        ],
+        "title": "PortfolioPerformance",
+        "description": "组合绩效指标（快照不足时相应字段为 None）。\n\ntwr：时间加权收益率，消除资金进出影响（净值化系统下等于净值增长率）\nmwr：资金加权收益率（XIRR），反映实际投入资金的年化回报"
       },
       "PortfolioResponse": {
         "properties": {

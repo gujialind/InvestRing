@@ -25,6 +25,20 @@ RESPONSE_FIELDS: dict = {
                 "_": "单层列表按snapshot_date升序（#62已修复，勿再按data.data/date取值）",
                 "total_value": "组合总市值（快照口径，为持仓行market_value之和）"
             }
+        },
+        "performance": {
+            "shape": "object",
+            "fields": "portfolio_code:str,twr:num?,twr_chained:num?,annualized_twr:num?,mwr:num?,initial_nav:num?,current_nav:num?,holding_days:int?,return_1m:num?,return_3m:num?,return_ytd:num?,max_drawdown:num?,max_drawdown_peak_date:str?,max_drawdown_trough_date:str?,annualized_volatility:num?,cash_flow_count:int,nav_series_consistent:bool?,annualization_reliable:bool",
+            "notes": {
+                "_": "百分数口径（1.5表示1.5%）。快照不足时字段为null而非0，draft组合全为null",
+                "twr": "时间加权收益率，消除资金进出影响；净值化记账下与累计净值增长率等价",
+                "twr_chained": "逐期几何连乘的TWR，与twr应相等；不等说明净值序列异常",
+                "mwr": "资金加权收益率(XIRR，年化)，考虑申赎时点；低于twr说明大部分资金买在高位。无现金流或无解时为null",
+                "max_drawdown": "正值表示回撤幅度（如8.07表示最大跌8.07%），全程上涨时0",
+                "annualized_volatility": "日收益率标准差按252交易日年化（收益率则按365日历日，口径不同）",
+                "nav_series_consistent": "两种TWR算法一致性自检；false说明快照断层或净值异常，指标不可信",
+                "annualization_reliable": "false表示持有期<90天，年化指标属大幅外推（MWR可能达数百%），勿直接引用"
+            }
         }
     },
     "snapshot": {

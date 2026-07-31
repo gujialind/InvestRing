@@ -134,9 +134,17 @@ def nav_history(
 
 @app.command("returns")
 def returns(code: str = typer.Argument(..., help="组合代码")):
-    """获取收益率"""
+    """获取收益率（轻量口径：累计 + 年化）"""
     client = APIClient.from_config()
     result = client.get(f"/api/portfolios/{code}/returns")
+    success(data=result["data"])
+
+
+@app.command("performance")
+def performance(code: str = typer.Argument(..., help="组合代码")):
+    """获取全量绩效指标（TWR / MWR / 区间收益 / 回撤 / 波动率）"""
+    client = APIClient.from_config()
+    result = client.get(f"/api/portfolios/{code}/performance")
     success(data=result["data"])
 
 
