@@ -41,6 +41,7 @@ def create_product(
     asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code"),
     is_qdii: bool = typer.Option(False, "--is-qdii"),
     data_source: Optional[str] = typer.Option(None, "--data-source"),
+    sync: bool = typer.Option(False, "--sync", help="创建后立即回填历史净值（issue #90）"),
 ):
     """创建产品（自动计算 confirm_days）"""
     with cli_context() as db:
@@ -55,10 +56,15 @@ def create_product(
             asset_class_code=asset_class_code,
             is_qdii=is_qdii,
             data_source=data_source,
+            sync_history=sync,
         )
         db.flush()
         db.refresh(product)
-        success(data=serialize_model(product))
+        data = serialize_model(product)
+        sync_result = getattr(product, "sync_result", None)
+        if sync_result is not None:
+            data["sync_result"] = sync_result
+        success(data=data)
 
 
 @app.command("get")

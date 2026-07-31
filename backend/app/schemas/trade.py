@@ -24,6 +24,8 @@ class TradeBase(BaseModel):
 class TradeCreate(TradeBase):
     # 自然键防重（#82）：命中同参数 pending/confirmed 交易时需显式传 True 强制创建
     allow_duplicate: bool = False
+    # 跨平台现金腿（#91）：买=扣款平台、卖=到账平台，缺省同基金腿平台
+    cash_platform_code: Optional[str] = None
 
 
 class TradeUpdate(BaseModel):

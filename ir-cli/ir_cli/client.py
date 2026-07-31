@@ -208,7 +208,8 @@ class APIClient:
             error(
                 "TIMEOUT_ERROR",
                 f"请求超时: {self.base_url}{path}；服务端可能仍在执行，请用对应查询命令（如 ir snapshot status）"
-                "回查结果，勿盲目重发；可用 IR_HTTP_TIMEOUT 环境变量调大（当前默认 300s）",
+                "回查结果，勿盲目重发；长任务（如区间重算）建议改用 ir snapshot recalculate --async 提交后台任务；"
+                "也可用 IR_HTTP_TIMEOUT 环境变量调大（当前默认 300s）",
                 exit_code=EXIT_CONNECTION,
             )
         if isinstance(last_exc, httpx.ConnectError):

@@ -361,6 +361,24 @@ ir position update-cash <PORTFOLIO_CODE> --platform-code <平台代码> --cash-a
 | `--cash-amount` | 是 | 现金金额（绝对值，覆盖当日该平台现金市值） |
 | `--update-date` | 否 | 更新日期（默认今天，必须是交易日） |
 
+> 同日该平台存在已确认 CASH 交易时，响应 `warnings` 非空（覆盖层优先级高于当日交易，会压制其效果，不阻断写入）。
+
+#### `ir position list-cash-overrides`
+
+查询现金手动覆盖记录（`manual_market_value` 的 CASH 行，issue #88）。
+
+```bash
+ir position list-cash-overrides --portfolio-code <组合代码> [--platform-code <平台>] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD]
+```
+
+#### `ir position delete-cash`
+
+删除现金手动覆盖记录（issue #88）。删除后该日该平台回退到自然计算值；若覆盖已被快照纳入（响应 `requires_snapshot_regen: true`），需重算快照才生效。无对应记录返回 `MANUAL_OVERRIDE_NOT_FOUND`。
+
+```bash
+ir position delete-cash --portfolio-code <组合代码> --platform-code <平台> --update-date YYYY-MM-DD
+```
+
 ---
 
 ### 4.5 `ir sub` — 申购赎回管理
@@ -462,12 +480,12 @@ ir trade list [--portfolio-code <组合>] [--page N] [--page-size N] [--all]
 # 买入
 ir trade create --portfolio-code <组合> --product-code <产品> [--market <市场>] \
   --type buy --actual-amount <实际金额> --fee <手续费> --price <价格> \
-  --trade-date YYYY-MM-DD [--platform-code <平台>] [--shares <份额>] [--notes <备注>]
+  --trade-date YYYY-MM-DD [--platform-code <平台>] [--cash-platform-code <现金平台>] [--shares <份额>] [--notes <备注>]
 
 # 卖出
 ir trade create --portfolio-code <组合> --product-code <产品> [--market <市场>] \
   --type sell --shares <份额> --trade-date YYYY-MM-DD [--actual-amount <实际金额>] \
-  [--fee <手续费>] [--platform-code <平台>] [--notes <备注>]
+  [--fee <手续费>] [--platform-code <平台>] [--cash-platform-code <现金平台>] [--notes <备注>]
 ```
 
 | 参数 | 必填 | 说明 |
@@ -476,11 +494,12 @@ ir trade create --portfolio-code <组合> --product-code <产品> [--market <市
 | `--product-code` | 是 | 产品代码 |
 | `--market` | 否 | 市场类型：`CN_OTC` / `CN_EXCHANGE` / `HK_MUTUAL`；省略时自动解析，一码多市场（如 LOF）返回 `MARKET_AMBIGUOUS`，需显式指定 |
 | `--type` | 是 | `buy`（买入）或 `sell`（卖出） |
-| `--actual-amount` | 买入时必填 | 实际支付金额（必须 > 0，不超过可用现金） |
+| `--actual-amount` | 买入时必填 | 实际支付金额（必须 > 0，不超过扣款平台可用现金） |
 | `--fee` | 否（默认0） | 手续费 |
 | `--price` | 否 | 交易价格 |
 | `--shares` | 卖出时必填 | 卖出份额（必须 > 0；先量化到 2 位小数再校验，不超过可用份额） |
 | `--platform-code` | 否 | 平台代码 |
+| `--cash-platform-code` | 否 | 现金腿平台（issue #91）：买=扣款平台、卖=到账平台，缺省同基金腿平台；买入可用现金按扣款平台校验，两腿同 transfer_group 原子翻转 |
 | `--trade-date` | 是 | 交易日期（必须是交易日） |
 | `--notes` | 否 | 备注 |
 
@@ -511,7 +530,7 @@ ir trade preview <ID> [--confirm-date YYYY-MM-DD] [--price <价格>]
 确认交易（自动获取净值，QDII 产品特殊处理）。
 
 ```bash
-ir trade confirm <ID> [--confirm-date YYYY-MM-DD] [--price <价格>]
+ir trade confirm <ID> [--confirm-date YYYY-MM-DD] [--price <价格>] [--sync-nav]
 ```
 
 > **业务规则**：
@@ -520,6 +539,7 @@ ir trade confirm <ID> [--confirm-date YYYY-MM-DD] [--price <价格>]
 > - 场外净值类产品（OEF/LOF + CN_OTC）自动从 `PriceRecord` 获取净值
 > - **QDII 产品**：使用交易日当天的净值（需 T+2 日后确认）
 > - 可通过 `--price` 手动覆盖价格
+> - `--sync-nav`（issue #90）：命中 `MISSING_NAV` 时自动回填该标的历史净值后重试一次（会访问外部数据源），同步后仍缺失则照常报 `MISSING_NAV`
 
 #### `ir trade cancel`
 
@@ -742,7 +762,7 @@ ir product list [--product-type <类型>] [--page N] [--page-size N] [--all]
 
 ```bash
 ir product create --code <代码> --market <市场> --name <名称> --product-type <类型> \
-  [--asset-class-code <资产类别>] [--is-qdii] [--data-source <数据源>]
+  [--asset-class-code <资产类别>] [--is-qdii] [--data-source <数据源>] [--sync]
 ```
 
 | 参数 | 必填 | 说明 |
@@ -754,6 +774,7 @@ ir product create --code <代码> --market <市场> --name <名称> --product-ty
 | `--asset-class-code` | 否 | 资产类别代码 |
 | `--is-qdii` | 否 | 是否为 QDII 产品（默认 false） |
 | `--data-source` | 否 | 数据源（如 `tushare`） |
+| `--sync` | 否 | 创建后立即回填历史净值（issue #90）；同步结果在响应 `sync_result`，失败不阻断创建 |
 
 **confirm_days 自动计算规则：**
 
@@ -851,10 +872,14 @@ ir snapshot generate --portfolio-code <组合> --target-date YYYY-MM-DD
 
 #### `ir snapshot recalculate`
 
-区间重算快照。
+区间重算快照。大区间重算耗时长，ir-cli（HTTP）建议加 `--async` 提交后台任务，避免客户端超时后无法判定终态（issue #89）；管理 CLI 直连数据库无超时问题，保持同步。
 
 ```bash
 ir snapshot recalculate --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--portfolio-code <组合>] [--force]
+
+# ir-cli 异步模式（issue #89）
+ir snapshot recalculate --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--portfolio-code <组合>] --async
+ir snapshot recalculate ... --wait [--poll-interval 5]   # 提交后轮询至终态再返回
 ```
 
 | 参数 | 说明 |
@@ -863,6 +888,10 @@ ir snapshot recalculate --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--portfol
 | `--start-date` | 起始日期（必填） |
 | `--end-date` | 截止日期（必填） |
 | `--force` | 跳过校验强制重算 |
+| `--async` | （仅 ir-cli）提交后台任务立即返回 job_id，用 `ir sync-job status <id>` 轮询终态（success=已提交 / failed=已整体回滚） |
+| `--wait` | （仅 ir-cli）隐含 `--async`，提交后轮询至终态再返回；每次轮询都是短请求，不受长事务超时影响 |
+
+> 异步模式事务语义与同步一致：后台按 errors 统一 commit/rollback，对外仍是「要么完整成功，要么无变化」；已有重算任务在跑时返回 409 `RECALC_JOB_CONFLICT`。
 
 #### `ir snapshot catch-up`
 

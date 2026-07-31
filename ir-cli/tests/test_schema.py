@@ -87,12 +87,14 @@ class TestIndexOnly:
         for group, sub in CONTRACT_COMMANDS:
             assert sub in parsed[group]
 
-    def test_index_has_no_details_and_under_1kb(self, root):
+    def test_index_has_no_details_and_under_budget(self, root):
         index = build_schema(root, index_only=True)
         raw = json.dumps(index, ensure_ascii=False)
         assert "params" not in raw
         assert '"output"' not in raw
-        assert len(raw.encode("utf-8")) < 1024, f"索引超过 1KB: {len(raw.encode('utf-8'))} bytes"
+        # 索引预算随命令面增长适度上调（#88 新增 position 子命令后约 1KB），
+        # 目标仍是保持极简可低成本加载
+        assert len(raw.encode("utf-8")) < 1280, f"索引超过预算: {len(raw.encode('utf-8'))} bytes"
 
 
 class TestBackwardCompat:

@@ -1,0 +1,150 @@
+# ============================================================================
+# 集成测试：issue #89 快照重算异步 job 化 (test_snapshot_recalc_async.py)
+# ============================================================================
+# - submit_snapshot_recalc_job：落 job / 同类型单 active 锁 / 与价格同步锁互不阻塞
+# - _run_snapshot_recalc_job_impl：成功 commit、errors 整体回滚、异常兜底的 job 终态
+# - REST POST /api/v1/snapshots/recalculate-async：提交 / 409 冲突 / 404 组合不存在
+# ============================================================================
+
+import pytest
+from unittest.mock import patch, MagicMock
+
+from app.models.sync_job import SyncJob
+from app.services.market_data_service import ConflictError, submit_price_sync_job
+from app.services.snapshot_recalc_job import (
+    submit_snapshot_recalc_job,
+    _run_snapshot_recalc_job_impl,
+)
+from tests.factories import create_portfolio, create_sync_job
+
+
+PARAMS = {"portfolio_code": None, "start_date": "2025-01-06", "end_date": "2025-01-07"}
+
+
+def _mock_executor():
+    return patch("app.services.snapshot_recalc_job._get_executor", return_value=MagicMock())
+
+
+class TestSubmit:
+    """提交与锁语义"""
+
+    def test_submit_creates_pending_job(self, test_db):
+        with _mock_executor():
+            job_id = submit_snapshot_recalc_job(PARAMS, db=test_db)
+        job = test_db.query(SyncJob).filter(SyncJob.id == job_id).first()
+        assert job.job_type == "snapshot_recalc"
+        assert job.status == "pending"
+        assert job.params["start_date"] == "2025-01-06"
+
+    def test_conflict_when_recalc_job_active(self, test_db):
+        create_sync_job(test_db, job_type="snapshot_recalc", status="running")
+        with pytest.raises(ConflictError, match="已有快照重算任务在运行中"):
+            submit_snapshot_recalc_job(PARAMS, db=test_db)
+
+    def test_price_job_does_not_block_recalc(self, test_db):
+        """价格同步任务运行中不阻塞重算提交（锁按 job_type 分离）"""
+        create_sync_job(test_db, job_type="price_history_sync", status="running")
+        with _mock_executor():
+            job_id = submit_snapshot_recalc_job(PARAMS, db=test_db)
+        assert job_id is not None
+
+    def test_recalc_job_does_not_block_price(self, test_db):
+        """重算任务运行中不阻塞价格同步提交"""
+        create_sync_job(test_db, job_type="snapshot_recalc", status="running")
+        with patch("app.services.market_data_service._get_executor", return_value=MagicMock()):
+            job_id = submit_price_sync_job({"scope": "all"}, db=test_db)
+        assert job_id is not None
+
+
+class TestRunImpl:
+    """后台执行体终态（注入 test_db，mock recalculate_snapshots）"""
+
+    def _make_job(self, db, params=PARAMS):
+        return create_sync_job(db, job_type="snapshot_recalc", status="pending", params=params)
+
+    def test_success_sets_job_success(self, test_db):
+        job = self._make_job(test_db)
+        result = {"success": True, "message": "ok", "results": [
+            {"portfolio_code": "P1", "errors": [], "total_processed": 3},
+        ]}
+        with patch(
+            "app.services.snapshot_recalc_job.recalculate_snapshots",
+            return_value=result,
+        ):
+            _run_snapshot_recalc_job_impl(job.id, db=test_db)
+        test_db.refresh(job)
+        assert job.status == "success"
+        assert job.success_count == 3
+        assert job.failed_count == 0
+        assert job.finished_at is not None
+
+    def test_errors_set_job_failed_with_message(self, test_db):
+        """任一日 errors → job failed，error_message 含失败日期"""
+        job = self._make_job(test_db)
+        result = {"success": True, "message": "ok", "results": [
+            {"portfolio_code": "P1", "errors": [
+                {"date": "2025-01-07", "error": "校验失败: NAV 缺失"},
+            ], "total_processed": 1},
+        ]}
+        with patch(
+            "app.services.snapshot_recalc_job.recalculate_snapshots",
+            return_value=result,
+        ):
+            _run_snapshot_recalc_job_impl(job.id, db=test_db)
+        test_db.refresh(job)
+        assert job.status == "failed"
+        assert "2025-01-07" in job.error_message
+        assert job.failed_count == 1
+
+    def test_precheck_exception_sets_job_failed(self, test_db):
+        """预校验 ValueError → job failed（未删任何快照，整体无变化）"""
+        job = self._make_job(test_db)
+        with patch(
+            "app.services.snapshot_recalc_job.recalculate_snapshots",
+            side_effect=ValueError("预校验失败，未删除任何快照"),
+        ):
+            _run_snapshot_recalc_job_impl(job.id, db=test_db)
+        test_db.refresh(job)
+        assert job.status == "failed"
+        assert "预校验失败" in job.error_message
+
+
+class TestRestAsyncEndpoint:
+    """REST POST /api/v1/snapshots/recalculate-async"""
+
+    def test_submit_returns_job_id(self, client, admin_headers, test_db):
+        create_portfolio(test_db, code="RCA_P1", status="active")
+        with _mock_executor():
+            resp = client.post(
+                "/api/v1/snapshots/recalculate-async",
+                json={"portfolio_code": "RCA_P1",
+                      "start_date": "2025-01-06", "end_date": "2025-01-07"},
+                headers=admin_headers,
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "pending"
+        job = test_db.query(SyncJob).filter(SyncJob.id == data["job_id"]).first()
+        assert job.job_type == "snapshot_recalc"
+
+    def test_conflict_returns_409(self, client, admin_headers, test_db):
+        create_portfolio(test_db, code="RCA_P2", status="active")
+        create_sync_job(test_db, job_type="snapshot_recalc", status="running")
+        resp = client.post(
+            "/api/v1/snapshots/recalculate-async",
+            json={"portfolio_code": "RCA_P2",
+                  "start_date": "2025-01-06", "end_date": "2025-01-07"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["error"] == "RECALC_JOB_CONFLICT"
+
+    def test_portfolio_not_found_returns_404(self, client, admin_headers, test_db):
+        resp = client.post(
+            "/api/v1/snapshots/recalculate-async",
+            json={"portfolio_code": "NO_SUCH_PORT",
+                  "start_date": "2025-01-06", "end_date": "2025-01-07"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["error"] == "PORTFOLIO_NOT_FOUND"

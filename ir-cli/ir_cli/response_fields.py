@@ -10,7 +10,7 @@ RESPONSE_FIELDS: dict = {
     "position": {
         "list": {
             "shape": "list",
-            "fields": "*portfolio_code:str,*product_code:str,*market:str?,*platform_code:str?,*shares:num?,frozen_shares:num?,cost_price:num?,*unit_price:num?,*market_value:num?,*cash_amount:num?,frozen_amount:num?,*snapshot_date:date,*id:int,created_at:datetime?",
+            "fields": "*portfolio_code:str,*product_code:str,*market:str?,*platform_code:str?,*shares:num?,frozen_shares:num?,cost_price:num?,*unit_price:num?,*market_value:num?,*cash_amount:num?,frozen_amount:num?,asset_type:str?,*snapshot_date:date,*id:int,created_at:datetime?,product_name:str?,profit_loss:num?,profit_loss_percent:num?",
             "notes": {
                 "shares": "净值型资产有值，CASH行为null",
                 "cash_amount": "仅CASH行有值，基金行恒为null（CHECK约束shares/cash_amount二选一），市值请用market_value"

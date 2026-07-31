@@ -23,6 +23,8 @@ export interface TradeCreate {
   product_code: string;
   market?: string;
   platform_code?: string;
+  // 跨平台现金腿（#91）：买=扣款平台、卖=到账平台，缺省同基金腿平台
+  cash_platform_code?: string;
   trade_type: string;
   shares?: number;
   amount?: number;

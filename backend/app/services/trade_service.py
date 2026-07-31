@@ -16,6 +16,7 @@ from app.models.trade import Trade
 from app.models.product import Product
 from app.models.price_record import PriceRecord
 from app.models.portfolio import Portfolio
+from app.models.platform import Platform
 from app.services.trading_utils import get_next_trading_day, is_trading_day, get_latest_snapshot_date
 from app.services.position_service import calculate_available_cash, calculate_available_shares
 from app.services.product_service import resolve_product_market
@@ -63,10 +64,13 @@ def attach_paired_cash_leg(
     cash_amount: Decimal,
     confirm_date: Optional[date],
     status: str = "pending",
+    cash_platform_code: Optional[str] = None,
 ) -> Trade:
     """为基金腿生成 transfer_group 并构造/加入配对 CASH 腿。
 
     cash_amount 采用 router 语义 = 基金腿 actual_amount（买入=支出含费，卖出=收入）。
+    cash_platform_code（issue #91）：CASH 腿平台，缺省同基金腿；传入时支持
+    跨平台扣款（买）/到账（卖），两腿同 transfer_group 原子翻转。
     供 REST router 与后端 CLI 共用，确保基金买/卖必配 CASH 腿。
 
     Returns:
@@ -76,7 +80,7 @@ def attach_paired_cash_leg(
     fund_trade.transfer_group = group
     cash_trade = Trade(
         portfolio_code=fund_trade.portfolio_code,
-        platform_code=fund_trade.platform_code,
+        platform_code=cash_platform_code or fund_trade.platform_code,
         product_code="CASH",
         market="",
         trade_type="sell" if fund_trade.trade_type == "buy" else "buy",
@@ -279,6 +283,7 @@ def confirm_single_trade(
     confirm_date: Optional[date] = None,
     price: Optional[Decimal] = None,
     skip_cash_check: bool = False,
+    sync_nav: bool = False,
 ) -> Trade:
     """
     确认单笔调仓交易的核心逻辑，供手动确认与 auto_confirm 共用。
@@ -288,6 +293,8 @@ def confirm_single_trade(
     - confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
     - 场外基金（OEF/LOF 且 CN_OTC）确认时统一获取 T 日（成交当日）净值并重算 shares/amount，
       不区分 QDII/非 QDII，一律以净值计算；缺失 T 日净值时抛 MISSING_NAV 拒绝确认
+    - sync_nav=True（issue #90，显式选择）：命中 MISSING_NAV 时自动回填该标的历史净值
+      后重试一次；同步后仍缺失则照常抛 MISSING_NAV
     - 场外基金若传入 price 仅作一致性校验：须与 T 日净值相等，否则抛 PRICE_NAV_MISMATCH，
       手动价不覆盖净值（不传则直接取净值）
     - 场内基金不取净值，使用创建时录入的成交价（成交价录入时必填，见 trades.py 创建校验）
@@ -303,13 +310,31 @@ def confirm_single_trade(
         price: 手动价格；场外基金仅用于与 T 日净值一致性校验（不覆盖净值），
             场内基金作为覆盖成交价
         skip_cash_check: 跳过买入确认时的可用现金校验（auto_confirm 专用）
+        sync_nav: MISSING_NAV 时自动回填净值并重试一次（显式选择，会访问外部数据源）
 
     Returns:
         确认后的 trade 对象（未 commit，事务由调用方控制）
     """
-    preview = calculate_confirm_preview(
-        db, trade, product, confirm_date=confirm_date, price=price
-    )
+    try:
+        preview = calculate_confirm_preview(
+            db, trade, product, confirm_date=confirm_date, price=price
+        )
+    except BusinessError as e:
+        if not (sync_nav and e.code == "MISSING_NAV"):
+            raise
+        # issue #90：显式请求时自动回填该标的历史净值后重试一次
+        from app.services.market_data_service import sync_price_data
+
+        try:
+            sync_price_data(db, trade.product_code, trade.market, None, date.today())
+        except Exception as sync_err:
+            raise BusinessError(
+                "MISSING_NAV",
+                f"{e.message}；自动同步净值失败: {sync_err}",
+            )
+        preview = calculate_confirm_preview(
+            db, trade, product, confirm_date=confirm_date, price=price
+        )
 
     # 基金买入确认时校验可用现金（#70/#78：按生效确认日时点口径）
     if (
@@ -320,13 +345,10 @@ def confirm_single_trade(
         effective_confirm_date = (
             confirm_date if confirm_date is not None else trade.confirm_date
         )
-        available = calculate_available_cash(
-            db, trade.portfolio_code, trade.platform_code,
-            as_of_date=effective_confirm_date,
-        )
-        # 加回自身在途 CASH sell 腿：该腿已作为 pending sell 计提预留，
-        # 若不加回会与 paired_cash_amount 双重计数导致误拒
-        own_leg_amount = Decimal("0")
+        # #91：扣款平台 = 配对 CASH sell 腿的平台（跨平台扣款时与基金腿不同），
+        # 无配对腿时回退基金腿平台
+        cash_check_platform = trade.platform_code
+        own_legs = []
         if trade.transfer_group:
             own_legs = db.query(Trade).filter(
                 Trade.transfer_group == trade.transfer_group,
@@ -334,8 +356,17 @@ def confirm_single_trade(
                 Trade.trade_type == "sell",
                 Trade.status == "pending",
             ).all()
-            for leg in own_legs:
-                own_leg_amount += Decimal(str(leg.amount or 0))
+            if own_legs:
+                cash_check_platform = own_legs[0].platform_code
+        available = calculate_available_cash(
+            db, trade.portfolio_code, cash_check_platform,
+            as_of_date=effective_confirm_date,
+        )
+        # 加回自身在途 CASH sell 腿：该腿已作为 pending sell 计提预留，
+        # 若不加回会与 paired_cash_amount 双重计数导致误拒
+        own_leg_amount = Decimal("0")
+        for leg in own_legs:
+            own_leg_amount += Decimal(str(leg.amount or 0))
         available_excl_own = available + own_leg_amount
         paired = preview["paired_cash_amount"]
         if paired is not None:
@@ -343,7 +374,7 @@ def confirm_single_trade(
             if paired_d > available_excl_own:
                 raise BusinessError(
                     "INSUFFICIENT_CASH",
-                    f"平台 {trade.platform_code} 可用现金不足"
+                    f"平台 {cash_check_platform} 可用现金不足"
                     f"（需 {paired_d}，可用 {available_excl_own}）",
                     details={
                         "deficit": str(paired_d - available_excl_own),
@@ -391,6 +422,7 @@ def create_trade(
     platform_code: Optional[str] = None,
     notes: Optional[str] = None,
     allow_duplicate: bool = False,
+    cash_platform_code: Optional[str] = None,
 ) -> Trade:
     """创建买入/卖出交易（含全部校验与配对 CASH 腿），供 REST 与 CLI 共用。
 
@@ -399,6 +431,8 @@ def create_trade(
     自然键防重（#82）：同组合/产品/市场/平台/方向/交易日且金额（买）或份额（卖）
     相同的 pending/confirmed 交易视为重复，抛 DUPLICATE_TRADE；
     allow_duplicate=True 强制放行，cancelled 记录不算重复。
+    cash_platform_code（issue #91）：现金腿平台，买=扣款平台、卖=到账平台，
+    缺省同基金腿；买入可用现金按扣款平台校验。
     不 commit，事务由调用方控制。返回基金腿 Trade。
     """
     if not is_trading_day(db, trade_date):
@@ -444,6 +478,16 @@ def create_trade(
             "不支持直接创建 CASH 交易，请使用现金转移或申购赎回入口",
         )
 
+    # #91：现金腿平台规范化——与基金腿同平台时等价于不传；传入时校验存在
+    if cash_platform_code == platform_code:
+        cash_platform_code = None
+    if cash_platform_code and not db.query(Platform).filter(
+        Platform.code == cash_platform_code
+    ).first():
+        raise NotFoundError(
+            "PLATFORM_NOT_FOUND", f"现金平台 {cash_platform_code} 不存在"
+        )
+
     # 场内交易必须提供有效价格（实时撚合价，不能用收盘价替代）
     if product.market == "CN_EXCHANGE" and (price is None or Decimal(str(price)) <= 0):
         raise BusinessError(
@@ -462,13 +506,15 @@ def create_trade(
         if cash_out is None or Decimal(str(cash_out)) <= 0:
             raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
         cash_out_d = Decimal(str(cash_out))
+        # #91：可用现金按扣款平台校验（缺省同基金腿平台）
+        cash_check_platform = cash_platform_code or platform_code
         available_cash = calculate_available_cash(
-            db, portfolio_code, platform_code, as_of_date=trade_date
+            db, portfolio_code, cash_check_platform, as_of_date=trade_date
         )
         if cash_out_d > available_cash:
             msg = "买入金额超过可用现金"
-            if platform_code:
-                msg = f"平台 {platform_code} 的可用现金不足"
+            if cash_check_platform:
+                msg = f"平台 {cash_check_platform} 的可用现金不足"
             raise BusinessError("INSUFFICIENT_CASH", msg)
         net_amount = cash_out_d - fee_d
         shares_d = quantize_shares(net_amount / price_d) if price_d else Decimal("0")
@@ -535,9 +581,12 @@ def create_trade(
                 details={"existing_trade_id": existing.id},
             )
 
-    # 基金腿必配 CASH 腿（显式记录现金变动）
+    # 基金腿必配 CASH 腿（显式记录现金变动；#91 支持跨平台现金腿）
     db.add(new_trade)
-    attach_paired_cash_leg(db, new_trade, actual_amount_final, expected_confirm_date)
+    attach_paired_cash_leg(
+        db, new_trade, actual_amount_final, expected_confirm_date,
+        cash_platform_code=cash_platform_code,
+    )
     return new_trade
 
 

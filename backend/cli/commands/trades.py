@@ -44,6 +44,10 @@ def create_trade(
     price: Optional[float] = typer.Option(None, "--price"),
     shares: Optional[float] = typer.Option(None, "--shares"),
     platform_code: Optional[str] = typer.Option(None, "--platform-code"),
+    cash_platform_code: Optional[str] = typer.Option(
+        None, "--cash-platform-code",
+        help="现金腿平台（#91）：买=扣款平台、卖=到账平台，缺省同基金腿平台",
+    ),
     trade_date: str = typer.Option(..., "--trade-date", help="YYYY-MM-DD"),
     notes: Optional[str] = typer.Option(None, "--notes"),
     allow_duplicate: bool = typer.Option(
@@ -73,6 +77,7 @@ def create_trade(
             platform_code=platform_code,
             notes=notes,
             allow_duplicate=allow_duplicate,
+            cash_platform_code=cash_platform_code,
         )
         db.flush()
         db.refresh(new_trade)
@@ -133,6 +138,7 @@ def confirm_trade(
     id: int = typer.Argument(...),
     confirm_date: str = typer.Option(None, "--confirm-date", help="YYYY-MM-DD"),
     price: Optional[float] = typer.Option(None, "--price"),
+    sync_nav: bool = typer.Option(False, "--sync-nav", help="MISSING_NAV 时自动回填净值并重试（issue #90）"),
 ):
     """确认交易（委托服务层：T 日净值、配对 CASH 腿原子同步）"""
     with cli_context() as db:
@@ -154,7 +160,7 @@ def confirm_trade(
 
         cd = parse_date(confirm_date) if confirm_date else None
         price_d = Decimal(str(price)) if price is not None else None
-        confirm_single_trade(db, trade, product, confirm_date=cd, price=price_d)
+        confirm_single_trade(db, trade, product, confirm_date=cd, price=price_d, sync_nav=sync_nav)
         db.flush()
         db.refresh(trade)
         success(data={"message": "交易确认成功", "trade": serialize_model(trade)})

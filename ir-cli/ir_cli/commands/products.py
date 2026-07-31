@@ -39,6 +39,7 @@ def create(
     asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code", help="资产分类代码"),
     confirm_days: int = typer.Option(1, "--confirm-days", help="确认天数"),
     is_qdii: bool = typer.Option(False, "--is-qdii/--no-qdii", help="是否QDII"),
+    sync: bool = typer.Option(False, "--sync", help="创建后立即回填历史净值"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """创建产品"""
@@ -53,6 +54,7 @@ def create(
         asset_class_code=asset_class_code,
         confirm_days=confirm_days,
         is_qdii=is_qdii,
+        sync_history=sync,
     )
     result = client.post("/api/products", json_data=body)
     success(data=result["data"])

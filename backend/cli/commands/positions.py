@@ -141,4 +141,56 @@ def update_cash_position(
             "computed_value": result["computed_value"],
             "update_date": result["update_date"].isoformat(),
             "requires_snapshot_regen": True,
+            "warnings": result["warnings"],
+        })
+
+
+@app.command("list-cash-overrides")
+def list_cash_overrides(
+    portfolio_code: str = typer.Option(..., "--portfolio-code", help="组合代码"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="YYYY-MM-DD"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="YYYY-MM-DD"),
+):
+    """查询现金手动覆盖记录（manual_market_value，issue #88）"""
+    with cli_context() as db:
+        from app.services.position_service import list_manual_cash_overrides
+
+        items = list_manual_cash_overrides(
+            db,
+            portfolio_code,
+            platform_code=platform_code,
+            start_date=parse_date(start_date) if start_date else None,
+            end_date=parse_date(end_date) if end_date else None,
+        )
+        for item in items:
+            item["value_date"] = item["value_date"].isoformat()
+            if item.get("created_at"):
+                item["created_at"] = item["created_at"].isoformat()
+        success(data=items, meta={"total": len(items)})
+
+
+@app.command("delete-cash")
+def delete_cash_override(
+    portfolio_code: str = typer.Option(..., "--portfolio-code", help="组合代码"),
+    platform_code: str = typer.Option(..., "--platform-code", help="平台代码"),
+    update_date: str = typer.Option(..., "--update-date", help="YYYY-MM-DD，覆盖记录日期"),
+):
+    """删除现金手动覆盖记录（issue #88），删除后该日回退自然计算值（需重算快照生效）"""
+    with cli_context() as db:
+        from app.services.position_service import delete_manual_cash_override
+
+        result = delete_manual_cash_override(
+            db,
+            portfolio_code=portfolio_code,
+            platform_code=platform_code,
+            value_date=parse_date(update_date),
+        )
+        success(data={
+            "message": f"已删除 {portfolio_code}/{platform_code} 在 {update_date} 的现金覆盖记录",
+            "portfolio_code": result["portfolio_code"],
+            "platform_code": result["platform_code"],
+            "update_date": result["value_date"].isoformat(),
+            "deleted_value": result["deleted_value"],
+            "requires_snapshot_regen": result["requires_snapshot_regen"],
         })

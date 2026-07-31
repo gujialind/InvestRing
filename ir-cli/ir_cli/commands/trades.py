@@ -42,6 +42,7 @@ def create(
     actual_amount: Optional[float] = typer.Option(None, "--actual-amount", help="实际金额"),
     fee: float = typer.Option(0, "--fee", help="手续费"),
     platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
+    cash_platform_code: Optional[str] = typer.Option(None, "--cash-platform-code", help="现金腿平台：买=扣款平台、卖=到账平台，缺省同基金腿平台"),
     market: Optional[str] = typer.Option(None, "--market", help="市场类型（省略时自动解析；LOF 多市场须显式指定）"),
     price: Optional[float] = typer.Option(None, "--price", help="价格"),
     shares: Optional[float] = typer.Option(None, "--shares", help="份额"),
@@ -69,6 +70,7 @@ def create(
         actual_amount=actual_amount,
         fee=fee,
         platform_code=platform_code,
+        cash_platform_code=cash_platform_code,
         market=market,
         price=price,
         shares=shares,
@@ -145,6 +147,7 @@ def confirm(
     id: int = typer.Argument(..., help="交易ID"),
     confirm_date: Optional[str] = typer.Option(None, "--confirm-date", help="确认日期(YYYY-MM-DD)"),
     price: Optional[float] = typer.Option(None, "--price", help="确认价格"),
+    sync_nav: bool = typer.Option(False, "--sync-nav", help="MISSING_NAV 时自动回填净值并重试"),
     quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
 ):
     """确认交易"""
@@ -154,6 +157,8 @@ def confirm(
         params["confirm_date"] = confirm_date
     if price is not None:
         params["price"] = price
+    if sync_nav:
+        params["sync_nav"] = True
     result = client.post(f"/api/trades/{id}/confirm", params=params)
     data = result["data"]
     success(data=project_fields(data, QUIET_FIELDS) if quiet else data, hints=[SNAPSHOT_HINT])
