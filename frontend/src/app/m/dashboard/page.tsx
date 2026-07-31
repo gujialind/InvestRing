@@ -1,12 +1,11 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { formatCurrency, formatReturnRate, getReturnColorClass } from "@/lib/utils";
+import { formatCurrency, formatShares, formatReturnRate, getReturnColorClass } from "@/lib/utils";
 import Link from "next/link";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import DashboardStatsCards from "@/components/shared/DashboardStatsCards";
 import LoadingState from "@/components/shared/LoadingState";
-import EmptyState from "@/components/shared/EmptyState";
 
 export default function MobileDashboardPage() {
   const {
@@ -123,7 +122,7 @@ export default function MobileDashboardPage() {
                       <p className="text-sm font-medium">
                         {sub.sub_type === "subscribe"
                           ? formatCurrency(sub.amount || 0)
-                          : `${sub.shares?.toLocaleString() || 0} 份`
+                          : `${formatShares(sub.shares || 0)} 份`
                         }
                       </p>
                       <p className="text-xs text-muted-foreground">

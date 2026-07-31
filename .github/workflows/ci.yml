@@ -1,7 +1,7 @@
 # ============================================================================
 # InvestRing CI 持续集成流水线
 # ============================================================================
-# 范围：仅后端测试（前端未部署，暂不纳入 CI 门禁）
+# 范围：后端测试 + CLI 契约校验 + 前端 lint/类型/构建门禁
 # 触发条件：push 或 pull request 到 main/dev 分支
 # 测试数据库：
 #   - SQLite（conftest.py 默认模式，快速反馈）
@@ -138,3 +138,39 @@ jobs:
       - name: Check response fields contract
         run: |
           python ir-cli/scripts/gen_response_fields.py --check
+
+  # 前端门禁：前端已容器化部署，类型/语法错误与构建失败必须在 CI 拦住
+  # （历史上因无前端门禁漏过任务页 map 崩溃等问题）
+  frontend-check:
+    name: "Frontend Lint & Build"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # Node 版本与 frontend/Dockerfile、frontend/.nvmrc 保持一致
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      # next build 内部也会跑 lint + tsc，但单独前置两步能更快定位失败原因
+      - name: Next.js build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build

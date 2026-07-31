@@ -7,6 +7,7 @@ from decimal import Decimal
 from app.database import get_db
 from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+from app.models.product import Product
 from app.schemas.position import PositionCreate, PositionUpdate, PositionResponse, CashPositionUpdate
 from app.services.position_service import (
     calculate_available_cash,
@@ -51,8 +52,27 @@ def get_positions(
         )
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
+
+    # 读侧派生字段：批量取产品名称，计算盈亏/收益率（仅净值型资产；现金行为 None）
+    codes = {p.product_code for p in items}
+    name_map = {}
+    if codes:
+        for prod in db.query(Product.code, Product.market, Product.name).filter(Product.code.in_(codes)).all():
+            name_map[(prod.code, prod.market)] = prod.name
+
+    enriched = []
+    for p in items:
+        row = PositionResponse.model_validate(p).model_dump()
+        row["product_name"] = name_map.get((p.product_code, p.market))
+        if p.shares is not None and p.cost_price is not None and p.market_value is not None:
+            cost = float(p.shares) * float(p.cost_price)
+            profit_loss = float(p.market_value) - cost
+            row["profit_loss"] = round(profit_loss, 4)
+            row["profit_loss_percent"] = round(profit_loss / cost * 100, 4) if cost else None
+        enriched.append(row)
+
     return {
-        "items": items,
+        "items": enriched,
         "total": total,
         "page": page,
         "page_size": page_size,

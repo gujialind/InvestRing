@@ -11,6 +11,9 @@ export interface SnapshotValidationResult {
   checks: SnapshotValidationCheck[];
 }
 
+// 后端非阻断告警（issue #71：如负现金）
+export type SnapshotWarning = Record<string, unknown>;
+
 export interface SnapshotGenerationResult {
   success: boolean;
   message: string;
@@ -19,6 +22,7 @@ export interface SnapshotGenerationResult {
   total_value?: number;
   total_shares?: number;
   unit_price?: number;
+  warnings?: SnapshotWarning[] | null;
 }
 
 export interface RecalculationPortfolioResult {
@@ -26,6 +30,7 @@ export interface RecalculationPortfolioResult {
   processed_dates: string[];
   total_processed: number;
   errors: Array<{ date: string; error: string }>;
+  warnings?: SnapshotWarning[] | null;
 }
 
 export interface RecalculationResult {
@@ -40,4 +45,6 @@ export interface SnapshotStatusResponse {
   total_snapshots: number;
   first_snapshot_date?: string;
   missing_dates: string[];
+  /** 最新快照日 CASH 持仓 cash_amount < 0 的平台清单（正常为空） */
+  negative_cash_platforms?: string[];
 }

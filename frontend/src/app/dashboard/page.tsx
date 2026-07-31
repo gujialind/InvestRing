@@ -2,7 +2,7 @@
 
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency, formatReturnRate, getReturnColorClass } from "@/lib/utils";
+import { formatCurrency, formatShares, formatReturnRate, getReturnColorClass } from "@/lib/utils";
 import { ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
@@ -15,7 +15,6 @@ export default function DashboardPage() {
     portfolios,
     activePortfolios,
     subscriptions,
-    trades,
     investors,
     totalValue,
     avgReturn,
@@ -71,7 +70,7 @@ export default function DashboardPage() {
                     <span className="text-yellow-700 font-mono tabular-nums">
                       {sub.sub_type === "subscribe"
                         ? formatCurrency(sub.amount || 0)
-                        : `${sub.shares?.toLocaleString() || 0} 份`
+                        : `${formatShares(sub.shares || 0)} 份`
                       }
                     </span>
                   </div>
@@ -105,7 +104,7 @@ export default function DashboardPage() {
                     <span className="text-blue-700 font-mono tabular-nums">
                       {trade.trade_type === "buy"
                         ? formatCurrency(trade.amount || 0)
-                        : `${trade.shares?.toLocaleString() || 0} 份`
+                        : `${formatShares(trade.shares || 0)} 份`
                       }
                     </span>
                   </div>
@@ -192,7 +191,7 @@ export default function DashboardPage() {
                       <p className="font-medium">
                         {sub.sub_type === "subscribe"
                           ? formatCurrency(sub.amount || 0)
-                          : `${sub.shares?.toLocaleString() || 0} 份`
+                          : `${formatShares(sub.shares || 0)} 份`
                         }
                       </p>
                       <p className="text-sm text-muted-foreground">

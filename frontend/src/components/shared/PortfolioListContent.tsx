@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Eye, TrendingUp, Users, Loader2, Power, PowerOff } from "lucide-react";
+import { Plus, Eye, Users, Loader2, Power, PowerOff } from "lucide-react";
 import { formatCurrency, formatReturnRate, getReturnColorClass } from "@/lib/utils";
 import {
   usePortfolioList,

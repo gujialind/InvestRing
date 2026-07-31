@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ArrowLeft, Wallet, Plus, ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
-import { usePortfolio, useLatestSnapshot, useClosePortfolio, useActivatePortfolio } from "@/hooks/usePortfolio";
+import { usePortfolio, useLatestSnapshot, useClosePortfolio, useActivatePortfolio, useNavHistory } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import NavCurveSimple from "@/components/charts/NavCurveSimple";
 import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
@@ -25,6 +25,12 @@ export default function MobilePortfolioDetailPage() {
   const closePortfolio = useClosePortfolio();
   const activatePortfolio = useActivatePortfolio();
   const { isAdmin } = useRoleCheck();
+
+  // 净值走势用历史序列（不再只画最新快照单点）
+  const { data: navHistoryData } = useNavHistory(code);
+  const navHistory = (navHistoryData || [])
+    .filter((r) => r.unit_price !== null)
+    .map((r) => ({ date: r.snapshot_date, nav: r.unit_price as number }));
 
   const isLoading = portfolioLoading || snapshotLoading;
 
@@ -119,17 +125,11 @@ export default function MobilePortfolioDetailPage() {
       )}
 
       {/* NAV Chart - Simplified for mobile */}
-      {!isDraft && snapshot && (
+      {!isDraft && navHistory.length > 0 && (
         <Card>
           <CardContent className="p-4">
             <h3 className="text-sm font-medium mb-3">净值走势</h3>
-            <NavCurveSimple
-              data={[{
-                date: snapshot.snapshot_date,
-                nav: snapshot.unit_price
-              }]}
-              height={200}
-            />
+            <NavCurveSimple data={navHistory} height={200} />
           </CardContent>
         </Card>
       )}

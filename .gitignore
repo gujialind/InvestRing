@@ -94,6 +94,7 @@ coverage.xml
 frontend/playwright-report/
 frontend/test-results/
 frontend/playwright/.cache/
+frontend/e2e/.auth/
 
 # Turborepo
 .turbo/

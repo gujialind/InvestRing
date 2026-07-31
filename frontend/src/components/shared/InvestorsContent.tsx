@@ -25,6 +25,7 @@ import {
 import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 import { useInvestorList, useCreateInvestor, useUpdateInvestor, useRemoveInvestor } from "@/hooks/useInvestor";
 import { Investor } from "@/types/investor";
+import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
 
 export default function InvestorsContent() {
   const { data, isLoading } = useInvestorList({ page_size: 100 });
@@ -36,6 +37,7 @@ export default function InvestorsContent() {
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingInvestor, setEditingInvestor] = useState<Investor | null>(null);
+  const [pendingRemoveCode, setPendingRemoveCode] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Investor & { password?: string }>>({
     code: "",
     name: "",
@@ -96,9 +98,7 @@ export default function InvestorsContent() {
   };
 
   const handleDelete = (code: string) => {
-    if (confirm("确定要移除该投资人吗？此操作不可撤销。")) {
-      removeInvestor.mutate(code);
-    }
+    setPendingRemoveCode(code);
   };
 
   if (isLoading) {
@@ -274,6 +274,18 @@ export default function InvestorsContent() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={!!pendingRemoveCode}
+        onOpenChange={(open) => !open && setPendingRemoveCode(null)}
+        title="移除投资人"
+        description="确定要移除该投资人吗？持有份额的投资人无法移除。"
+        confirmText="移除"
+        onConfirm={() => {
+          if (pendingRemoveCode) removeInvestor.mutate(pendingRemoveCode);
+          setPendingRemoveCode(null);
+        }}
+      />
     </div>
   );
 }

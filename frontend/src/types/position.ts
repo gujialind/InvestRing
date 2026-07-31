@@ -12,6 +12,7 @@ export interface Position {
   market_value?: number;
   cash_amount?: number;
   frozen_amount?: number;
+  asset_type?: string;
   profit_loss?: number;
   profit_loss_percent?: number;
   snapshot_date: string;

@@ -37,7 +37,36 @@
 - **已修复的 P1**：P1-4（配色统一 getReturnColorClass）、P1-5（akshare 独立 PUT + 开关回填 + 空 token 不覆盖）、P1-7（401 统一 authStore.logout）、P1-11（ApiException 保留 details；DUPLICATE_TRADE 确认重试、MARKET_AMBIGUOUS 展示可选市场、PLATFORM_NOT_COVERED 引导 force_cover）、P1-13（字符串 detail 分支）、P1-14（SubscriptionsContent 改用统一 hook）、P1-17（三处 invalidate 错 key 随内联 mutation 消灭而根治）、P1-18（移动端水合等待）、P1-19 部分（TradeUpdate/SubscriptionUpdate 字段对齐，TradeCreate 补 allow_duplicate）、P1-20 部分（types/log.ts 字段全量对齐后端）。
 - **已顺带修复的 P2**：P2-1/P2-6 部分（新增 useTask/useShareChangeEvent/useSystem hooks + queryKeys 工厂，页面内联 mutation 已清零）、P2-2 部分（现金重估 mutation 双端共用 useUpdateCashPosition）、P2-7（lib/queryKeys.ts）、“Next.js 14”文案。
 - **验证**：`tsc --noEmit` 0 error、`eslint` 0 error/21 warning（均为存量死代码 no-unused-vars）、`next build` 通过；后端 `pytest` 390 个全部通过。
-- **尚未处理**（第三/四批）：P1-1/2/3/6/8/9/10/15/16、P1-20 其余类型缺口、P1-21 表格溢出，及 P2 死代码批量清理、CI 门禁、E2E 补充等。
+- **部署后回归**（dev 已上线）：移动 UA `/m/login` 正常渲染登录表单、`/api/system/tasks/executions` 200、改密 400+中文错误（不再 405/英文）、任务页无崩溃且执行历史自动刷新、编辑投资人 200、删除组合与日志入口已消失。
+
+## 修复进度（第三批已实施）
+
+功能闭环与契约对齐：
+
+- **P1-1 持仓盈亏三列**：后端 `GET /api/positions` 补读侧派生字段 `product_name`（批量取 product 表）、`profit_loss`、`profit_loss_percent`（仅净值型；现金行为 None），`PositionResponse` 同步补 `asset_type`。
+- **P1-2 净值曲线**：新增 `portfolioApi.getNavHistory` + `useNavHistory`，PC 与移动端详情页改用历史序列（不再只传最新快照单点）。
+- **P1-3 收益率**：新增 `getReturns` + `usePortfolioReturns`，tab 改为累计/年化两项并展示后端真实值（移除后端不提供的 TWR 假选项，年化附持有天数）。
+- **P1-15 现金转移闭环**：新增 `CashTransferListDialog`（持仓页“转移记录”入口），展示分组记录并为在途（两腿 pending）转移提供“确认到账”——跨天转移不再永久卡在 pending。
+- **P1-16 通知入口**：新增 `useNotification` + `NotificationBell`（Navbar 铃铛、未读角标、单条/全部已读、60s 轮询）；types/notification.ts 字段全量对齐后端。
+- **P1-8 角色守卫**：新增 `AdminGuard`，包裹 investors/platforms/products/settings-tasks 的 PC 与移动端共 8 个页面（viewer 直接输 URL 得到友好提示而非空表格 + 一串 403）。
+- **P1-9 登出**：`useLogout` 补调 `POST /api/auth/logout`（token 黑名单 + 登出日志，失败不阻断本地）；Navbar 改用该 hook，同时清 react-query 缓存。
+- **P1-19/20 类型与路径**：`ShareChangeEvent*` 补 `entitlement_shares`/`cash_product_code`/`event_source`/`parent_event_id`/`tushare_event_id` 并移除 Update 中的 `status`；`snapshot.ts` 补 `warnings` 与 `negative_cash_platforms`（快照页已接入负现金预警 Alert）；`ProductCreate` 补 `data_source`/`sync_history`；`TradingCalendarDay` 移除后端不返回的 `week_day`/`notes`；`productApi` 的 market 改为必填校验（`requireMarket` 抛 `MARKET_REQUIRED`，不再发出 `/products/CODE/` 畸形 URL），`get` 改走路径参数而非无效 query。
+- **验证**：`tsc` 0 error、`eslint` 0 error/19 warning（较上一批减 2）、`next build` 通过；后端 `pytest` **420 个全部通过**。
+
+第四批（工程治理）已实施：
+
+- **P2-3/4/5 死代码与未用依赖**：删除 9 个零引用组件（desktop/Sidebar、DataTable、SplitPane、mobile/ActionSheet、CardStack、charts/AllocationPie、ReturnChart、shared/TradeForm、StatCard，约 780 行）；`sonner` 依赖从 package.json 与 lockfile 彻底移除（实际用自研 ToastContainer）。
+- **lint warning 清零**：从 21 降至 **0 warning / 0 error**（清理未使用 import 与变量）。其中 snapshots 页的 `handleDelete` 未被调用是真实功能缺口，已补上“删除最新快照”入口（遵循快照连续原则，仅允许从最新日往前删）。
+- **P2-9/10 精度口径**：新增语义化函数 `formatShares`（2 位）、`formatNav`（4 位、不带 ¥）、`formatAmount4`；持仓页净值/成本价列、交易与申赎价格列、产品价格历史、dashboard 份额展示全部改用新函数（不再用 `formatCurrency` 展示净值或裸 `toLocaleString`）；份额事件的 `shares_change` 输入 step 由 0.0001 改为 0.01（对齐后端 2 位，避免静默量化）。
+- **P2-8 部分**：`deepClone` 改用 `structuredClone`（原 JSON 往返丢 Date/undefined）。**utils.ts 未做物理拆分** —— 拆分会牍动 100+ 处 import、收益纯机械，风险大于价值，保留分区注释以待后续需要时再拆。
+- **P2-11 原生 confirm 清零**：新增通用 `ConfirmDialog`，替换7 处原生 `confirm()`（任务执行、删除平台/产品/投资人/快照），全仓已无 `confirm()` 调用。
+- **P2-13**：`BottomNav` 路径加 `/m` 前缀（修正移动端高亮失效 + 每次点击多一次 307 重定向）；`app/page.tsx` 改为纯占位（去除与 middleware 重复的客户端跳转）；`key={idx}` 改为稳定 key。
+- **第二批漏项补完**：`PlatformsContent` 仍为内联 mutation，已补 `useCreatePlatform`/`useUpdatePlatform`/`useDeletePlatform` 并切换（现全仓页面/组件内联 mutation 彻底清零）。
+- **P2-14 CI 前端门禁**：`ci.yml` 新增 `frontend-check` job（Node 24 + `npm ci` + `eslint` + `tsc --noEmit` + `next build`），文件头注释同步更新。
+- **P2-16 E2E**：新增 `e2e/regression.spec.ts`（5 个用例，逐个标注所防 P0：任务页崩溃、日志死链、删除组合入口、`/m/login` 空白、移动端 PC 侧栏）。**顺带修了一个真 bug**：现有 `auth.spec.ts` 与 `auth.setup.ts` 用 `getByLabel('用户编码')`，而登录页实际 label 是“用户名”——原有 E2E 用例本身是坏的，一直无法通过。
+- **验证**：`eslint` **0 error / 0 warning**、`tsc` 0 error、`next build` 通过；后端 `pytest` 420 个全部通过；CI 现含 4 个 job（backend-test / backend-test-mysql / cli-contract-check / frontend-check）。
+
+尚未处理（需单独评估）：P1-6（dashboard 客户端聚合，需后端新增聚合端点）、P1-10（后端 viewer 可越权读 trades/positions，属后端权限设计）、P1-21（窄视口表格溢出，需移动端表格改卡片布局）、utils.ts 物理拆分、`Dialog modal={false}`（7 处，改动需逐个验证弹窗补捕行为）。
 
 ---
 

@@ -116,6 +116,38 @@ export function formatCurrency(
 }
 
 /**
+ * 格式化份额（固定 2 位小数，对齐后端 Numeric(15,2) 与场外基金行业惯例）。
+ * 份额不带货币符号，请勿用 formatCurrency 代替。
+ */
+export function formatShares(
+  num: number | string | undefined | null,
+  fallback: string = "--"
+): string {
+  return formatNumber(num, 2, fallback);
+}
+
+/**
+ * 格式化净值/价格（固定 4 位小数，对齐后端 Numeric(10,4)）。
+ * 净值不是货币量，不带 ¥ 符号。
+ */
+export function formatNav(
+  num: number | string | undefined | null,
+  fallback: string = "--"
+): string {
+  return formatNumber(num, 4, fallback);
+}
+
+/**
+ * 格式化 4 位小数金额（对齐后端 Numeric(15,4)，用于需与后端/CLI 精确对账的场景）
+ */
+export function formatAmount4(
+  num: number | string | undefined | null,
+  fallback: string = "--"
+): string {
+  return formatCurrency(num, 4, fallback);
+}
+
+/**
  * 获取数字显示的CSS类名（右对齐 + 等宽字体）
  * 用于金融数字展示，确保对齐和可读性
  */
@@ -258,10 +290,10 @@ export function truncateText(text: string, maxLength: number): string {
 }
 
 /**
- * 深拷贝
+ * 深拷贝（structuredClone 保留 Date/Map/Set 等，JSON 往返会丢失）
  */
 export function deepClone<T>(obj: T): T {
-  return JSON.parse(JSON.stringify(obj));
+  return structuredClone(obj);
 }
 
 /**

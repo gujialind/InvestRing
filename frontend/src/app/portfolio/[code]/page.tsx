@@ -17,6 +17,8 @@ import {
   usePositionList,
   useClosePortfolio,
   useActivatePortfolio,
+  useNavHistory,
+  usePortfolioReturns,
 } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import NavCurve from "@/components/charts/NavCurve";
@@ -42,7 +44,15 @@ export default function PortfolioDetailPage() {
   const isLoading = portfolioLoading || snapshotLoading || investorsLoading || positionsLoading;
 
   const [showCloseDialog, setShowCloseDialog] = useState(false);
-  const [returnType, setReturnType] = useState<"cumulative" | "annualized" | "twr">("twr");
+  const [returnType, setReturnType] = useState<"cumulative" | "annualized">("cumulative");
+
+  // 净值历史与收益率（后端计算）：draft 组合无快照，不请求
+  const isDraftStatus = portfolio?.status === "draft";
+  const { data: navHistoryData } = useNavHistory(code, undefined);
+  const { data: returnsData } = usePortfolioReturns(code, !isDraftStatus);
+  const navHistory = (navHistoryData || [])
+    .filter((r) => r.unit_price !== null)
+    .map((r) => ({ date: r.snapshot_date, nav: r.unit_price as number }));
 
   if (isLoading) {
     return (
@@ -134,7 +144,7 @@ export default function PortfolioDetailPage() {
               variant="desktop"
             />
 
-            {/* Return Type Switcher */}
+            {/* Return Type Switcher（数据来自 GET /portfolios/{code}/returns；后端暂不提供 TWR） */}
             <Card>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-3">
@@ -156,24 +166,22 @@ export default function PortfolioDetailPage() {
                     >
                       年化收益
                     </Button>
-                    <Button
-                      size="sm"
-                      variant={returnType === "twr" ? "default" : "outline"}
-                      onClick={() => setReturnType("twr")}
-                      className="text-xs"
-                    >
-                      时间加权
-                    </Button>
                   </div>
                 </div>
                 <div className="text-center py-4">
-                  <div className={`text-3xl font-bold ${getReturnColorClass(portfolio.cumulative_return || 0)}`}>
-                    {formatReturnRate(portfolio.cumulative_return || 0)}
-                  </div>
+                  {(() => {
+                    const value = returnType === "cumulative"
+                      ? returnsData?.cumulative_return
+                      : returnsData?.annualized_return;
+                    return (
+                      <div className={`text-3xl font-bold ${getReturnColorClass(value ?? null)}`}>
+                        {value !== null && value !== undefined ? formatReturnRate(value) : "--"}
+                      </div>
+                    );
+                  })()}
                   <p className="text-sm text-muted-foreground mt-2">
                     {returnType === "cumulative" && "累计收益率：从组合成立至今的总收益"}
-                    {returnType === "annualized" && "年化收益率：按年计算的复合收益率"}
-                    {returnType === "twr" && "时间加权收益率：消除资金流影响的收益率（默认）"}
+                    {returnType === "annualized" && `年化收益率：按年计算的复合收益率${returnsData?.holding_days ? `（持有 ${returnsData.holding_days} 天）` : ""}`}
                   </p>
                 </div>
               </CardContent>
@@ -319,14 +327,8 @@ export default function PortfolioDetailPage() {
                 <CardDescription>组合净值走势</CardDescription>
               </CardHeader>
               <CardContent>
-                {snapshot ? (
-                  <NavCurve
-                    data={[{
-                      date: snapshot.snapshot_date,
-                      nav: snapshot.unit_price
-                    }]}
-                    initialNav={1.0000}
-                  />
+                {navHistory.length > 0 ? (
+                  <NavCurve data={navHistory} initialNav={1.0000} />
                 ) : (
                   <div className="h-[300px] flex items-center justify-center text-muted-foreground">
                     暂无净值数据

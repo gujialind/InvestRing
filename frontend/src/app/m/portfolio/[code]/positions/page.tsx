@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass, toDateOnly } from "@/lib/utils";
+import { formatCurrency, getReturnColorClass, toDateOnly } from "@/lib/utils";
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { platformApi } from "@/lib/api";
