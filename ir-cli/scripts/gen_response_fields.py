@@ -34,6 +34,7 @@ REGEN_CMD = "python ir-cli/scripts/gen_response_fields.py"
 COMMAND_SCHEMA_MAP = [
     ("position", "list", "PositionResponse", "list", "position"),
     ("portfolio", "nav-history", "NavHistoryRecord", "list", None),
+    ("portfolio", "performance", "PortfolioPerformance", "object", None),
     ("snapshot", "status", "SnapshotStatusResponse", "object", None),
     ("trade", "list", "TradeResponse", "list", "trade"),
     ("sub", "list", "SubscriptionResponse", "list", "subscription"),
@@ -45,6 +46,14 @@ NOTES_OVERRIDES = {
     "position.list.shares": "净值型资产有值，CASH行为null",
     "portfolio.nav-history.total_value": "组合总市值（快照口径，为持仓行market_value之和）",
     "portfolio.nav-history": "单层列表按snapshot_date升序（#62已修复，勿再按data.data/date取值）",
+    "portfolio.performance": "百分数口径（1.5表示1.5%）。快照不足时字段为null而非0，draft组合全为null",
+    "portfolio.performance.twr": "时间加权收益率，消除资金进出影响；净值化记账下与累计净值增长率等价",
+    "portfolio.performance.twr_chained": "逐期几何连乘的TWR，与twr应相等；不等说明净值序列异常",
+    "portfolio.performance.mwr": "资金加权收益率(XIRR，年化)，考虑申赎时点；低于twr说明大部分资金买在高位。无现金流或无解时为null",
+    "portfolio.performance.max_drawdown": "正值表示回撤幅度（如8.07表示最大跌8.07%），全程上涨时0",
+    "portfolio.performance.annualized_volatility": "日收益率标准差按252交易日年化（收益率则按365日历日，口径不同）",
+    "portfolio.performance.annualization_reliable": "false表示持有期<90天，年化指标属大幅外推（MWR可能达数百%），勿直接引用",
+    "portfolio.performance.nav_series_consistent": "两种TWR算法一致性自检；false说明快照断层或净值异常，指标不可信",
 }
 
 # openapi 类型 → 缩写

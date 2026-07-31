@@ -134,11 +134,22 @@ def get_nav_history(
 def get_returns(
     code: str = typer.Argument(...),
 ):
-    """查看组合收益率"""
+    """查看组合收益率（轻量口径：累计 + 年化）"""
     with cli_context() as db:
         from app.services import portfolio_service
 
         success(data=portfolio_service.get_returns(db, code))
+
+
+@app.command("performance")
+def get_performance(
+    code: str = typer.Argument(...),
+):
+    """查看组合全量绩效指标（TWR / MWR / 区间收益 / 回撤 / 波动率）"""
+    with cli_context() as db:
+        from app.services import performance_service
+
+        success(data=performance_service.get_performance(db, code))
 
 
 @app.command("cash-flow")

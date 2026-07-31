@@ -34,10 +34,10 @@
 
 ## 更新摘要
 **所做更改**
-- 新增 ModelScope Studio 子路径部署支持，通过 getBasePath() 函数实现动态基础路径配置
-- 增强 axios baseURL 配置，支持在 /studios/{owner}/{repo} 路径下正确路由 API 请求
-- 改进 401 认证错误处理机制，提供更完善的令牌管理和自动刷新策略
-- 优化网络异常处理和离线支持方案，提升系统健壮性
+- 增强 handleApiError 函数支持字符串详细信息，提供更精确的错误信息处理
+- ApiException 类保留详细错误信息，提升错误诊断能力
+- 新增任务执行历史端点 GET /system/tasks/executions，完善任务管理功能
+- 改进错误处理机制，支持更丰富的错误上下文信息
 
 ## 目录
 1. [简介](#简介)
@@ -55,7 +55,7 @@
 
 InvestRing 项目采用前后端分离架构，前端使用 Next.js + TypeScript + React Query 构建，后端使用 FastAPI 提供 RESTful API 服务。本设计文档专注于前端 API 客户端的设计与实现，涵盖 HTTP 客户端封装、请求/响应拦截器、错误处理机制、认证令牌管理、重试策略、超时配置、并发控制以及最佳实践等内容。
 
-**重要变更**：项目已从单一 monolithic API 模块重构为模块化的业务域驱动架构。新的架构将 API 功能按业务领域进行模块化组织，提高了代码的可维护性和可扩展性。**最新更新**：新增了 ModelScope Studio 子路径部署支持，通过 getBasePath() 函数和增强的 axios baseURL 配置，确保在 /studios/{owner}/{repo} 路径下正确路由 API 请求。
+**重要变更**：项目已从单一 monolithic API 模块重构为模块化的业务域驱动架构。新的架构将 API 功能按业务领域进行模块化组织，提高了代码的可维护性和可扩展性。**最新更新**：增强了错误处理机制，handleApiError 函数现在支持字符串详细信息，ApiException 类能够保留详细的错误信息；新增了任务执行历史端点 GET /system/tasks/executions，完善了任务管理系统。
 
 ## 项目结构
 
@@ -134,12 +134,10 @@ IndexAPI --> TaskAPI
 
 项目基于 Axios 创建了统一的 HTTP 客户端实例，配置了基础 URL、请求头和超时时间：
 
-- **基础 URL**：从环境变量 `NEXT_PUBLIC_API_URL` 获取，默认为 `/api`，现在支持通过 `getBasePath()` 函数动态获取 ModelScope Studio 子路径
+- **基础 URL**：从环境变量 `NEXT_PUBLIC_API_URL` 获取，默认为 `/api`
 - **Content-Type**：固定为 `application/json`
 - **超时时间**：30000ms（30秒）
 - **支持请求/响应拦截器链式处理**
-
-**更新**：新增 `getBasePath()` 函数，支持 ModelScope Studio 子路径部署，确保在 `/studios/{owner}/{repo}` 路径下正确路由 API 请求。
 
 ### 模块化 API 设计
 
@@ -314,7 +312,10 @@ ReturnData --> End
 - `code`：错误码，来源于后端 API 错误详情
 - `status`：HTTP 状态码
 - `message`：错误描述信息
+- **更新**：现在支持保留详细的错误信息，包括字符串类型的详细信息字段
 - 继承自 Error，保持与 JavaScript 标准异常兼容
+
+**更新**：handleApiError 函数现在支持字符串详细信息参数，能够捕获和传递更丰富的错误上下文信息，提升了错误诊断和调试能力。
 
 **章节来源**
 - [frontend/src/lib/api/client.ts:80-120](file://frontend/src/lib/api/client.ts#L80-L120)
@@ -389,37 +390,38 @@ Note over Client,AuthRouter : 令牌有效期由配置决定
 
 **章节来源**
 - [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-95)
-- [backend/app/config.py:14-16](file://backend/app/config.py#L14-16)
+- [backend/app/config.py:14-16](file://backend/app/config.py#L14-L16)
 
-### ModelScope Studio 子路径部署支持
+### 任务执行历史端点
 
-**新增功能**：项目现在支持 ModelScope Studio 子路径部署，通过 `getBasePath()` 函数实现动态基础路径配置。
+**新增功能**：系统新增了任务执行历史端点 GET /system/tasks/executions，用于获取后台任务的执行历史记录。
 
-#### 动态路径解析
+#### 任务执行历史管理
 
 ```mermaid
 flowchart TD
-Start["应用启动"] --> DetectEnv["检测运行环境"]
-DetectEnv --> CheckStudio{"是否在 Studio 环境？"}
-CheckStudio --> |是| GetOwnerRepo["获取 owner/repo 信息"]
-CheckStudio --> |否| UseDefault["使用默认路径 /api"]
-GetOwnerRepo --> BuildPath["构建 /studios/{owner}/{repo}/api"]
-BuildPath --> SetBaseURL["设置 axios baseURL"]
-UseDefault --> SetBaseURL
-SetBaseURL --> Ready["API 客户端就绪"]
+TaskExecution["任务执行"] --> RecordHistory["记录执行历史"]
+RecordHistory --> StoreHistory["存储到数据库"]
+StoreHistory --> QueryEndpoint["GET /system/tasks/executions"]
+QueryEndpoint --> FilterHistory["过滤和排序"]
+FilterHistory --> ReturnResults["返回执行历史"]
 ```
 
 **图表来源**
-- [frontend/src/lib/api/client.ts:1-50](file://frontend/src/lib/api/client.ts#L1-50)
+- [backend/app/routers/tasks.py:1-100](file://backend/app/routers/tasks.py#L1-L100)
 
-#### 路径配置策略
+#### 执行历史数据结构
 
-- **开发环境**：直接使用 `/api` 作为基础路径
-- **ModelScope Studio 环境**：自动检测并构建 `/studios/{owner}/{repo}/api` 路径
-- **生产环境**：支持自定义环境变量覆盖
+任务执行历史包含以下关键信息：
+- 任务 ID 和执行 ID
+- 执行状态（成功、失败、运行中）
+- 开始时间和结束时间
+- 执行时长
+- 错误信息（如果执行失败）
+- 执行结果摘要
 
 **章节来源**
-- [frontend/src/lib/api/client.ts:1-50](file://frontend/src/lib/api/client.ts#L1-50)
+- [backend/app/routers/tasks.py:1-100](file://backend/app/routers/tasks.py#L1-L100)
 
 ## 依赖分析
 
@@ -502,8 +504,6 @@ Next --> FastAPI
 2. 跳转到登录页面
 3. 阻止后续请求
 
-**更新**：增强了 401 认证错误处理机制，提供更完善的令牌管理和自动刷新策略。
-
 #### 网络连接问题
 
 可能的原因包括：
@@ -520,13 +520,15 @@ Next --> FastAPI
 - 确认后端 JWT 密钥配置正确
 - 检查用户角色权限
 
-#### ModelScope Studio 部署问题
+#### 任务执行历史查询问题
 
-如果在使用 ModelScope Studio 时遇到路径问题：
-- 检查环境变量配置是否正确
-- 验证 owner/repo 参数是否正确传递
-- 确认 nginx 或反向代理配置支持子路径
-- 检查浏览器控制台的网络请求路径
+如果遇到任务执行历史查询问题：
+- 检查 GET /system/tasks/executions 端点是否正常响应
+- 验证任务执行记录是否正确存储
+- 确认查询参数格式是否正确
+- 检查数据库连接和表结构
+
+**更新**：增强了错误处理机制，handleApiError 函数现在支持字符串详细信息，能够更好地捕获和报告错误上下文。
 
 **章节来源**
 - [frontend/src/lib/api/client.ts:180-200](file://frontend/src/lib/api/client.ts#L180-L200)
@@ -538,7 +540,7 @@ Next --> FastAPI
 2. **检查网络面板**：观察请求和响应详情
 3. **验证令牌**：使用 JWT 解码工具检查 token 内容
 4. **监控查询状态**：使用 React DevTools 检查查询状态
-5. **路径调试**：在 ModelScope Studio 中检查实际请求路径是否符合预期
+5. **错误信息分析**：利用增强的错误详细信息进行问题定位
 
 ## 结论
 
@@ -550,9 +552,10 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 4. **状态管理集成**：与 React Query 和 Zustand 的无缝集成
 5. **可扩展的模块化设计**：支持新业务功能的快速添加
 6. **健壮的错误处理**：结构化的异常管理和用户体验
-7. **灵活的部署支持**：支持 ModelScope Studio 子路径部署
+7. **增强的错误诊断**：支持详细错误信息的捕获和传递
+8. **完整的任务管理**：新增任务执行历史端点，完善后台任务监控
 
-**重大架构升级**：从单一 monolithic API 模块迁移到模块化的业务域驱动架构，显著提升了代码的可维护性、可扩展性和团队协作效率。**最新增强**：新增 ModelScope Studio 子路径部署支持，通过 `getBasePath()` 函数和增强的 axios baseURL 配置，确保在 `/studios/{owner}/{repo}` 路径下正确路由 API 请求，同时改进了 401 认证错误处理机制，为后续的功能扩展和维护奠定了良好的基础，同时保证了系统的稳定性和可维护性。
+**重大架构升级**：从单一 monolithic API 模块迁移到模块化的业务域驱动架构，显著提升了代码的可维护性、可扩展性和团队协作效率。**最新增强**：增强了错误处理机制，handleApiError 函数支持字符串详细信息，ApiException 类能够保留详细的错误信息；新增了任务执行历史端点 GET /system/tasks/executions，完善了任务管理系统，为系统的稳定性和可维护性奠定了良好的基础。
 
 ## 附录
 
@@ -560,11 +563,11 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 
 1. **使用模块化的 API 客户端**：按业务领域导入相应的 API 模块
 2. **合理设置缓存策略**：根据数据变化频率选择合适的缓存时间
-3. **错误处理标准化**：统一使用 ApiException 进行错误处理
+3. **错误处理标准化**：统一使用 ApiException 进行错误处理，利用增强的错误信息
 4. **令牌管理自动化**：利用拦截器自动处理认证头
 5. **查询键值规范化**：确保查询参数的顺序和格式一致
 6. **模块间解耦**：通过统一的导出接口访问各业务模块
-7. **路径配置优化**：在 ModelScope Studio 环境中正确使用 `getBasePath()` 函数
+7. **任务执行监控**：使用新的任务执行历史端点进行任务状态监控
 
 ### 错误恢复策略
 
@@ -573,6 +576,7 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 3. **用户反馈**：及时向用户展示错误信息和恢复选项
 4. **日志记录**：记录详细的错误信息用于调试
 5. **令牌自动刷新**：在 401 错误时自动清理并重定向到登录页
+6. **详细错误追踪**：利用增强的错误信息机制进行问题诊断
 
 ### 离线支持方案
 
@@ -582,10 +586,27 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 3. **同步队列**：离线操作排队，网络恢复后同步
 4. **冲突解决**：处理离线期间的数据冲突
 
-### ModelScope Studio 部署配置
+### 任务执行历史查询示例
 
-在 ModelScope Studio 中部署时的配置要点：
-- 确保环境变量 `NEXT_PUBLIC_API_URL` 正确设置为 `/api`
-- 验证 `getBasePath()` 函数能正确检测 Studio 环境
-- 检查反向代理配置支持 `/studios/{owner}/{repo}/api` 路径
-- 测试所有 API 端点在子路径下的可用性
+使用新的任务执行历史端点：
+
+```typescript
+// 获取任务执行历史
+const getTaskExecutions = async () => {
+  try {
+    const response = await systemApi.getTaskExecutions();
+    return response.data;
+  } catch (error) {
+    // 利用增强的错误信息进行诊断
+    if (error instanceof ApiException) {
+      console.error('任务执行历史查询失败:', error.message);
+      console.error('详细错误信息:', error.details);
+    }
+    throw error;
+  }
+};
+```
+
+**章节来源**
+- [frontend/src/lib/api/system.ts:1-100](file://frontend/src/lib/api/system.ts#L1-L100)
+- [frontend/src/lib/api/client.ts:80-120](file://frontend/src/lib/api/client.ts#L80-L120)
