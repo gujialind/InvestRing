@@ -17,13 +17,13 @@ backend/app/schemas/portfolio.py
 <tool_call>
 <function=search_codebase>
 <parameter=query>
-portfolio list response total_value cumulative_return investor_count snapshots latest investors
+portfolio performance endpoint /api/portfolios/{code}/performance returns backward compatibility
 </parameter>
 <parameter=key_words>
-portfolio,snapshots,investors
+performance,endpoint,returns
 </parameter>
 <parameter=explanation>
-搜索投资组合列表响应增强和新端点的实现代码
+搜索投资组合性能端点和返回兼容性相关的新功能实现
 </parameter>
 </function>
 </tool_call>
