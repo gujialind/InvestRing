@@ -36,9 +36,8 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatNumber, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
-import { ShareChangeEvent, ShareChangeEventCreate, ApiException } from "@/lib/api";
+import { ShareChangeEventCreate, ApiException } from "@/lib/api";
 import { platformApi } from "@/lib/api";
-import { Platform } from "@/types/platform";
 import { EventType } from "@/types/common";
 import { useUIStore } from "@/stores/uiStore";
 import { useQuery } from "@tanstack/react-query";
@@ -326,10 +325,10 @@ export default function ShareChangeEventsPage() {
                         <Input
                           id="shares_change"
                           type="number"
-                          step="0.0001"
+                          step="0.01"
                           value={formData.shares_change}
                           onChange={(e) => setFormData({ ...formData, shares_change: parseFloat(e.target.value) || 0 })}
-                          placeholder="正数增加，负数减少"
+                          placeholder="正数增加，负数减少（份额 2 位小数）"
                         />
                       </div>
                       <div className="space-y-2">

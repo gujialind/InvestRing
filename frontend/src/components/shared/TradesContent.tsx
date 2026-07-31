@@ -34,7 +34,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatNumber, formatMarketName, toDateOnly, parseDateOnly } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatNav, formatMarketName, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo } from "lucide-react";
 import Link from "next/link";
 import { ApiException } from "@/lib/api";
@@ -366,7 +366,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                     <TableCell className="text-right">
                       {trade.amount ? formatCurrency(trade.amount) : formatNumber(trade.shares || 0)}
                     </TableCell>
-                    <TableCell className="text-right">{trade.price?.toFixed(4) || "--"}</TableCell>
+                    <TableCell className="text-right">{formatNav(trade.price)}</TableCell>
                     <TableCell>{trade.trade_date}</TableCell>
                     <TableCell>{trade.confirm_date || "-"}</TableCell>
                     <TableCell>

@@ -32,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatNumber, formatReturnRate, getReturnColorClass, toDateOnly } from "@/lib/utils";
+import { formatCurrency, formatShares, formatNav, formatReturnRate, getReturnColorClass, toDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { platformApi, ApiException } from "@/lib/api";
@@ -40,6 +40,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { usePositionList, useUpdateCashPosition } from "@/hooks/usePosition";
 import { useCreateTrade } from "@/hooks/useTrade";
 import { useCreateCashTransfer } from "@/hooks/useCashTransfer";
+import CashTransferListDialog from "@/components/shared/dialogs/CashTransferListDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -81,6 +82,7 @@ export default function PositionsPage() {
 
   // 现金转移相关状态
   const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [isTransferListOpen, setIsTransferListOpen] = useState(false);
   const [transferFrom, setTransferFrom] = useState("");
   const [transferTo, setTransferTo] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
@@ -233,6 +235,9 @@ export default function PositionsPage() {
             </div>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setIsTransferListOpen(true)}>
+              转移记录
+            </Button>
             <Button variant="outline" onClick={() => setIsTransferOpen(true)}>
               现金转移
             </Button>
@@ -560,13 +565,13 @@ export default function PositionsPage() {
                         <TableCell>{position.product_name}</TableCell>
                         <TableCell>{position.market || "--"}</TableCell>
                         <TableCell className="text-right">
-                          {position.shares ? formatNumber(position.shares) : "-"}
+                          {position.shares ? formatShares(position.shares) : "-"}
                         </TableCell>
                         <TableCell className="text-right">
-                          {position.cost_price ? formatCurrency(position.cost_price) : "-"}
+                          {position.cost_price ? formatNav(position.cost_price) : "-"}
                         </TableCell>
                         <TableCell className="text-right">
-                          {position.unit_price ? formatCurrency(position.unit_price) : "-"}
+                          {position.unit_price ? formatNav(position.unit_price) : "-"}
                         </TableCell>
                         <TableCell className="text-right">
                           {position.market_value ? formatCurrency(position.market_value) : "-"}
@@ -603,6 +608,13 @@ export default function PositionsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* 现金转移记录（含跨天转移确认到账） */}
+      <CashTransferListDialog
+        portfolioCode={code}
+        open={isTransferListOpen}
+        onOpenChange={setIsTransferListOpen}
+      />
 
       {/* DUPLICATE_TRADE 确认重试 */}
       <AlertDialog open={!!duplicateTrade} onOpenChange={(open) => !open && setDuplicateTrade(null)}>

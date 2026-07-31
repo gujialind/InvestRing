@@ -1,0 +1,62 @@
+/**
+ * 前端 E2E 测试：回归守卫用例
+ *
+ * 本文件针对排查报告中已修复的 P0 问题设立回归防线，
+ * 每个用例注明其防止复发的具体问题。
+ */
+import { test, expect } from '@playwright/test';
+
+test.describe('页面渲染回归（防 P0 复发）', () => {
+  // 防 P0-2：taskApi.list 返回分页对象却按数组处理，导致 tasks.map is not a function 白屏
+  test('任务管理页应正常渲染，不出现客户端崩溃', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+
+    await page.goto('/settings/tasks');
+
+    await expect(page.getByRole('heading', { name: '任务管理' })).toBeVisible();
+    await expect(page.getByText('定时任务')).toBeVisible();
+    // 执行历史区必须渲染（可以是空态，但不能是崩溃）
+    await expect(page.getByText('执行历史')).toBeVisible();
+    await expect(page.getByText(/Application error/i)).toHaveCount(0);
+    expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
+  });
+
+  // 防 P0-7：侧边栏曾有指向不存在页面的「日志」死链
+  test('侧边栏不应包含指向未实现页面的死链', async ({ page }) => {
+    await page.goto('/dashboard');
+    await expect(page.locator('aside a[href="/settings/logs"]')).toHaveCount(0);
+  });
+
+  // 防 P0-5：前端曾提供后端不存在的 DELETE /portfolios/{code}（405）
+  test('组合详情页不应出现删除组合入口', async ({ page }) => {
+    await page.goto('/portfolio');
+    const firstDetailLink = page.locator('a[href^="/portfolio/"]').first();
+    if ((await firstDetailLink.count()) === 0) {
+      test.skip(true, '环境中没有组合数据');
+    }
+    await firstDetailLink.click();
+    await expect(page.getByRole('button', { name: '删除组合' })).toHaveCount(0);
+  });
+});
+
+test.describe('移动端渲染回归（防 P0 复发）', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  // 防 P0-1：/m/login 曾被 m/layout 鉴权守卫拦截，渲染为空白导致移动端完全无法登录
+  test('移动端登录页应渲染登录表单', async ({ page }) => {
+    await page.goto('/m/login');
+    await expect(page.getByLabel('用户名')).toBeVisible();
+    await expect(page.getByLabel('密码')).toBeVisible();
+    await expect(page.getByRole('button', { name: '登录' })).toBeVisible();
+  });
+});
+
+test.describe('移动端布局回归（防 P0-8 复发）', () => {
+  // 防 P0-8：/m 页面曾直接复用含 MainLayout 的 PC 页面，导致 PC 侧栏 + 底部 Tab 双导航
+  test('移动端管理页不应出现 PC 侧边栏', async ({ page }) => {
+    await page.goto('/m/products');
+    // PC 侧边栏是 <aside>，移动端布局只应有 BottomNav（<nav>）
+    await expect(page.locator('aside')).toHaveCount(0);
+  });
+});

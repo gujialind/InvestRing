@@ -4,6 +4,8 @@ import {
   PortfolioCreate,
   PortfolioUpdate,
   PortfolioValueSnapshot,
+  NavHistoryRecord,
+  PortfolioReturns,
 } from "@/types/portfolio";
 import { Position, PositionCreate, PositionUpdate } from "@/types/position";
 import { PaginatedResponse } from "@/types/common";
@@ -31,6 +33,12 @@ export const portfolioApi = {
 
   getLatestSnapshot: (code: string) =>
     request<PortfolioValueSnapshot>({ method: "GET", url: `/portfolios/${code}/snapshots/latest` }),
+
+  getNavHistory: (code: string, params?: { start_date?: string; end_date?: string }) =>
+    request<NavHistoryRecord[]>({ method: "GET", url: `/portfolios/${code}/nav-history`, params }),
+
+  getReturns: (code: string) =>
+    request<PortfolioReturns>({ method: "GET", url: `/portfolios/${code}/returns` }),
 
   getAvailableCash: (code: string) =>
     request<{ available_cash: number }>({ method: "GET", url: `/positions/portfolio/${code}/available-cash` }),

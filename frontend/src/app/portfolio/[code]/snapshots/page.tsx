@@ -6,11 +6,19 @@ import { useState } from "react";
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +29,6 @@ import {
 } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/ui/date-picker";
 import { format } from "date-fns";
-import { zhCN } from "date-fns/locale";
 import { Loader2, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Trash2, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -120,10 +127,10 @@ export default function PortfolioSnapshotsPage() {
     setShowRecalcDialog(false);
   };
 
-  // 删除指定日期快照
+  // 删除指定日期快照（快照连续原则：仅允许从最新日往前删）
+  const [pendingDeleteDate, setPendingDeleteDate] = useState<string | null>(null);
+
   const handleDelete = async (date: string) => {
-    if (!confirm(`确定要删除 ${date} 的快照吗？`)) return;
-    
     await deleteSnapshot.mutateAsync({
       portfolioCode,
       snapshotDate: date,
@@ -171,6 +178,18 @@ export default function PortfolioSnapshotsPage() {
                 <div className="text-2xl font-bold mt-1">
                   {statusData?.latest_snapshot_date || "无"}
                 </div>
+                {statusData?.latest_snapshot_date && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => setPendingDeleteDate(statusData.latest_snapshot_date!)}
+                    disabled={deleteSnapshot.isPending}
+                  >
+                    <Trash2 className="mr-2 h-3 w-3" />
+                    删除最新快照
+                  </Button>
+                )}
               </div>
               <div className="p-4 border rounded-lg">
                 <div className="text-sm text-muted-foreground">快照总数</div>
@@ -271,6 +290,17 @@ export default function PortfolioSnapshotsPage() {
           </Card>
         </div>
 
+        {/* 负现金平台预警（issue #71：后端 negative_cash_platforms，此前前端不可见） */}
+        {statusData?.negative_cash_platforms && statusData.negative_cash_platforms.length > 0 && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              最新快照日以下平台现金为负，请排查资金流水：
+              {statusData.negative_cash_platforms.join("、")}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* 历史快照列表 */}
         {statusData?.missing_dates && statusData.missing_dates.length > 0 && (
           <Card>
@@ -321,9 +351,9 @@ export default function PortfolioSnapshotsPage() {
               <div className="space-y-2">
                 <Label>校验结果</Label>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {validationResult.map((check, idx) => (
+                  {validationResult.map((check) => (
                     <Alert
-                      key={idx}
+                      key={check.check_type}
                       variant={
                         check.status === "failed"
                           ? "destructive"
@@ -479,6 +509,29 @@ export default function PortfolioSnapshotsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 删除快照确认（替代原生 confirm） */}
+      <AlertDialog open={!!pendingDeleteDate} onOpenChange={(open) => !open && setPendingDeleteDate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除快照</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除 {pendingDeleteDate} 的快照吗？删除会级联回退该日的申购确认与份额事件，此操作不可恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDeleteDate) handleDelete(pendingDeleteDate);
+                setPendingDeleteDate(null);
+              }}
+            >
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

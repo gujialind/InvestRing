@@ -35,7 +35,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatNumber, toDateOnly, parseDateOnly } from "@/lib/utils";
+import { formatCurrency, formatShares, formatNav, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo } from "lucide-react";
 import Link from "next/link";
 import {
@@ -264,7 +264,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                       <Label htmlFor="shares">份额</Label>
                       {formData.investor_code && availableShares !== undefined && (
                         <span className="text-xs text-muted-foreground">
-                          可用 {formatNumber(availableShares, 2)} 份
+                          可用 {formatShares(availableShares)} 份
                         </span>
                       )}
                     </div>
@@ -350,9 +350,9 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                       </span>
                     </TableCell>
                     <TableCell className="text-right">
-                      {sub.amount ? formatCurrency(sub.amount) : formatNumber(sub.shares || 0)}
+                      {sub.amount ? formatCurrency(sub.amount) : formatShares(sub.shares || 0)}
                     </TableCell>
-                    <TableCell className="text-right">{sub.unit_price?.toFixed(4) || "--"}</TableCell>
+                    <TableCell className="text-right">{formatNav(sub.unit_price)}</TableCell>
                     <TableCell>{sub.apply_date}</TableCell>
                     <TableCell>{sub.confirm_date || "-"}</TableCell>
                     <TableCell>

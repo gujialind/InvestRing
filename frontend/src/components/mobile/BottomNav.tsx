@@ -11,7 +11,6 @@ import {
   Briefcase,
   Package,
   Settings,
-  Landmark,
 } from "lucide-react";
 
 const adminNavItems = [

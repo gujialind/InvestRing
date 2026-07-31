@@ -164,6 +164,26 @@ export function usePortfolioInvestors(code: string) {
   });
 }
 
+// 净值历史 Hook（净值走势图数据源，不再只画最新快照单点）
+export function useNavHistory(code: string, params?: { start_date?: string; end_date?: string }) {
+  return useQuery({
+    queryKey: [PORTFOLIO_QUERY_KEY, code, "nav-history", params],
+    queryFn: () => portfolioApi.getNavHistory(code, params),
+    enabled: !!code,
+    staleTime: 60 * 1000,
+  });
+}
+
+// 组合收益率 Hook（累计/年化，后端计算）
+export function usePortfolioReturns(code: string, enabled = true) {
+  return useQuery({
+    queryKey: [PORTFOLIO_QUERY_KEY, code, "returns"],
+    queryFn: () => portfolioApi.getReturns(code),
+    enabled: enabled && !!code,
+    staleTime: 60 * 1000,
+  });
+}
+
 // ==================== 持仓相关 Hooks ====================
 
 // 持仓列表 Hook

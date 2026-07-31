@@ -13,6 +13,8 @@ import {
 import { Play, Pause, RotateCcw, Loader2 } from "lucide-react";
 import { useTaskList, useTaskExecutions, useRunTask, useEnableTask, useDisableTask } from "@/hooks/useTask";
 import { formatDate } from "@/lib/utils";
+import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
+import { useState } from "react";
 
 export default function TasksContent() {
   const { data: tasksData, isLoading } = useTaskList();
@@ -24,6 +26,7 @@ export default function TasksContent() {
   const runTask = useRunTask();
   const enableTask = useEnableTask();
   const disableTask = useDisableTask();
+  const [pendingRunCode, setPendingRunCode] = useState<string | null>(null);
 
   const handleToggle = (code: string, isEnabled: boolean) => {
     if (isEnabled) {
@@ -34,9 +37,7 @@ export default function TasksContent() {
   };
 
   const handleRun = (code: string) => {
-    if (confirm(`确定要手动执行任务: ${code} 吗？`)) {
-      runTask.mutate(code);
-    }
+    setPendingRunCode(code);
   };
 
   if (isLoading) {
@@ -185,6 +186,18 @@ export default function TasksContent() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={!!pendingRunCode}
+        onOpenChange={(open) => !open && setPendingRunCode(null)}
+        title="手动执行任务"
+        description={`确定要立即执行任务 ${pendingRunCode} 吗？`}
+        confirmText="执行"
+        onConfirm={() => {
+          if (pendingRunCode) runTask.mutate(pendingRunCode);
+          setPendingRunCode(null);
+        }}
+      />
     </div>
   );
 }

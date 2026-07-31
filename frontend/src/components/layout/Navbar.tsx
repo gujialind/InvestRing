@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
+import { useLogout } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,16 +10,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User, LogOut, Menu } from "lucide-react";
+import NotificationBell from "./NotificationBell";
+import { User, LogOut } from "lucide-react";
 
 export default function Navbar() {
-  const router = useRouter();
-  const { user, logout } = useAuthStore();
-
-  const handleLogout = () => {
-    logout();
-    router.push("/login");
-  };
+  const { user } = useAuthStore();
+  // 统一走 useLogout：调后端登出 + 清 react-query 缓存（原内联登出两者都不做）
+  const handleLogout = useLogout();
 
   return (
     <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -33,6 +30,7 @@ export default function Navbar() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-4">
+          <NotificationBell />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-8 w-8 rounded-full">

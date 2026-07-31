@@ -35,14 +35,21 @@ export function useLogin() {
   });
 }
 
-// 登出 Hook
+// 登出 Hook：通知后端（token 黑名单 + 登出日志）→ 清本地三处存储 → 清 react-query 缓存，
+// 避免换账号登录后看到上个账号的缓存数据
 export function useLogout() {
   const router = useRouter();
   const logout = useAuthStore((state) => state.logout);
   const queryClient = useQueryClient();
   const addToast = useUIStore((state) => state.addToast);
 
-  return useCallback(() => {
+  return useCallback(async () => {
+    try {
+      // 须在本地清理 token 前调用；后端失败不阻断本地登出
+      await authApi.logout();
+    } catch {
+      // ignore
+    }
     logout();
     queryClient.clear();
     addToast({

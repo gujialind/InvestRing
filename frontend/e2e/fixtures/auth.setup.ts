@@ -10,8 +10,8 @@ setup('以管理员身份登录并保存状态', async ({ page }) => {
   // 访问登录页
   await page.goto('/login');
 
-  // 填写登录表单
-  await page.getByLabel('用户编码').fill('ADMIN');
+  // 填写登录表单（label 文案为「用户名」，见 app/login/page.tsx）
+  await page.getByLabel('用户名').fill('ADMIN');
   await page.getByLabel('密码').fill('admin@2026');
 
   // 提交登录

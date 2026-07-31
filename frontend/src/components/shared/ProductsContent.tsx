@@ -25,7 +25,8 @@ import {
 import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, TrendingUp, Eye } from "lucide-react";
 import { Product, ProductCreate } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
-import { formatCurrency } from "@/lib/utils";
+import { formatNav } from "@/lib/utils";
+import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
 import {
   useProductList,
   useCreateProduct,
@@ -101,10 +102,10 @@ export default function ProductsContent() {
   };
 
   const handleDelete = (code: string, market?: string) => {
-    if (confirm("确定要删除该产品吗？此操作不可撤销。")) {
-      deleteProduct.mutate({ code, market });
-    }
+    setPendingDelete({ code, market });
   };
+  
+  const [pendingDelete, setPendingDelete] = useState<{ code: string; market?: string } | null>(null);
 
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -397,7 +398,7 @@ export default function ProductsContent() {
                     <TableRow key={record.price_date}>
                       <TableCell>{record.price_date}</TableCell>
                       <TableCell className="text-right font-medium">
-                        {formatCurrency(record.unit_price)}
+                        {formatNav(record.unit_price)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -412,6 +413,18 @@ export default function ProductsContent() {
           )}
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+        title="删除产品"
+        description="确定要删除该产品吗？已被持仓或交易引用的产品无法删除。"
+        confirmText="删除"
+        onConfirm={() => {
+          if (pendingDelete) deleteProduct.mutate(pendingDelete);
+          setPendingDelete(null);
+        }}
+      />
     </div>
   );
 }

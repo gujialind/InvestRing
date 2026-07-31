@@ -21,6 +21,10 @@ export interface ProductCreate {
   asset_class_code?: string;
   confirm_days?: number;
   is_qdii?: boolean;
+  /** 数据源（后端默认 tushare） */
+  data_source?: string;
+  /** issue #90：创建后立即回填历史净值（同步失败不阻断创建） */
+  sync_history?: boolean;
 }
 
 export interface ProductUpdate {
