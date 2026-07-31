@@ -35,6 +35,7 @@ on:
   # 手动触发：留空 image_tag 则构建触发分支当前 commit 并部署；
   # 填写已有 tag（如短 commit SHA）则跳过构建直接部署该版本（用于回滚）。
   # 前后端镜像共用同一 tag（同一 commit 构建），回滚时两者一起回退。
+  # ⚠️ 回滚含数据库迁移的版本前，先按 docs/runbooks/deploy-rollback.md 判定迁移缺口。
   workflow_dispatch:
     inputs:
       image_tag:
@@ -275,6 +276,25 @@ jobs:
               docker logs --tail 100 investring-backend || true
               docker logs --tail 50 investring-frontend || true
               docker logs --tail 50 investring-nginx || true
+
+              # 回滚前置检查：失败版本可能已执行新的 alembic 迁移，而旧镜像的
+              # versions/ 目录中不存在该 revision——此时旧后端启动时 upgrade head
+              # 会报 "Can't locate revision"，盲目翻回镜像只会让回滚自身失败。
+              # 用旧镜像跑一次 alembic current 探测迁移缺口；其他错误（如网络抖动）
+              # 不阻断回滚，保持原有兜底行为。
+              # 决策路径见 docs/runbooks/deploy-rollback.md
+              if [ -n "$PREV_BACKEND" ]; then
+                ROLLBACK_CHECK=$(docker run --rm --env-file .env "$PREV_BACKEND" \
+                  python -m alembic current 2>&1) || true
+                if echo "$ROLLBACK_CHECK" | grep -q "Can't locate revision"; then
+                  echo "❌ 检测到迁移缺口：数据库已应用旧镜像不认识的 alembic revision，"
+                  echo "   直接回退镜像会导致旧后端启动失败，已跳过自动回滚。"
+                  echo "   请按 docs/runbooks/deploy-rollback.md §4 人工决策（前滚修复或先 downgrade）。"
+                  echo "   探测输出：$ROLLBACK_CHECK"
+                  exit 1
+                fi
+              fi
+
               if [ -n "$PREV_BACKEND" ]; then
                 echo "🔄 回滚后端到上一版本: $PREV_BACKEND"
                 update_image_ref BACKEND_IMAGE_REF "$PREV_BACKEND"
