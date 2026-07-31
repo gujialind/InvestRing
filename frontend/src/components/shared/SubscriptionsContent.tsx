@@ -36,8 +36,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { formatCurrency, formatNumber, toDateOnly, parseDateOnly } from "@/lib/utils";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { subscriptionApi } from "@/lib/api";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo } from "lucide-react";
 import Link from "next/link";
 import {
@@ -46,12 +44,12 @@ import {
   useConfirmSubscription,
   useCancelSubscription,
   useUnconfirmSubscription,
+  useDeleteSubscription,
 } from "@/hooks/useTrade";
 import { useInvestorList } from "@/hooks/useInvestor";
 import { usePlatformList } from "@/hooks/usePlatform";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useInvestorAvailableShares } from "@/hooks/usePosition";
-import { useUIStore } from "@/stores/uiStore";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 
@@ -83,8 +81,6 @@ const CONFIRM_TEXT: Record<"confirm" | "cancel" | "unconfirm" | "delete", { titl
 export default function SubscriptionsContent({ basePath, variant = "desktop" }: SubscriptionsContentProps) {
   const params = useParams();
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const addToast = useUIStore((state) => state.addToast);
   const code = params.code as string;
 
   const { data, isLoading } = useSubscriptionList({ portfolio_code: code, page_size: 100 });
@@ -127,22 +123,8 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     setFormData({ ...formData, shares: String(availableShares) });
   };
 
-  const deleteSubscriptionMutation = useMutation({
-    mutationFn: (id: number) => subscriptionApi.delete(id),
-    onSuccess: () => {
-      addToast({
-        type: "success",
-        title: "删除成功",
-        message: "建议前往快照管理页面重算相关日期的快照以保持数据一致性",
-      });
-      queryClient.invalidateQueries({ queryKey: ["subscriptions", code] });
-    },
-    onError: (error: unknown) => {
-      const e = error as { response?: { data?: { detail?: { message?: string } } }; message?: string };
-      const message = e.response?.data?.detail?.message || "删除失败";
-      addToast({ type: "error", title: "删除失败", message });
-    },
-  });
+  // 删除走统一 hook（原内联 mutation 的 invalidate key 与 hooks 实际 key 结构不匹配，列表不刷新）
+  const deleteSubscriptionMutation = useDeleteSubscription();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

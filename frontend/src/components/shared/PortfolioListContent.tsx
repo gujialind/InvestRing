@@ -23,14 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Eye, TrendingUp, Users, Loader2, Power, PowerOff, Trash2 } from "lucide-react";
+import { Plus, Eye, TrendingUp, Users, Loader2, Power, PowerOff } from "lucide-react";
 import { formatCurrency, formatReturnRate, getReturnColorClass } from "@/lib/utils";
 import {
   usePortfolioList,
   useCreatePortfolio,
   useClosePortfolio,
   useActivatePortfolio,
-  useDeletePortfolio,
 } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import LoadingState from "@/components/shared/LoadingState";
@@ -53,7 +52,7 @@ interface PortfolioListContentProps {
   variant?: "desktop" | "mobile";
 }
 
-type ConfirmAction = "close" | "activate" | "delete" | null;
+type ConfirmAction = "close" | "activate" | null;
 
 /**
  * 组合列表页内容（桌面/移动共用）。
@@ -66,7 +65,6 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
   const createPortfolio = useCreatePortfolio();
   const closePortfolio = useClosePortfolio();
   const activatePortfolio = useActivatePortfolio();
-  const deletePortfolio = useDeletePortfolio();
   const { isAdmin } = useRoleCheck();
 
   const portfolios = data?.items || [];
@@ -94,7 +92,6 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
     const { code, action } = confirmTarget;
     if (action === "close") closePortfolio.mutate(code);
     else if (action === "activate") activatePortfolio.mutate(code);
-    else if (action === "delete") deletePortfolio.mutate(code);
     setConfirmTarget(null);
   };
 
@@ -258,17 +255,6 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
                       <Power className="h-4 w-4 text-green-500" />
                     </Button>
                   )}
-                  {isAdmin && portfolio.status === "draft" && (
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setConfirmTarget({ code: portfolio.code, action: "delete" })}
-                      disabled={deletePortfolio.isPending}
-                      title="删除组合"
-                    >
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
-                  )}
                 </div>
               </div>
             </CardContent>
@@ -284,12 +270,10 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
             <AlertDialogTitle>
               {confirmTarget?.action === "close" && "关闭组合"}
               {confirmTarget?.action === "activate" && "重新激活组合"}
-              {confirmTarget?.action === "delete" && "删除组合"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmTarget?.action === "close" && "关闭后无法再进行申购/赎回/调仓操作。"}
               {confirmTarget?.action === "activate" && "确定要重新激活该组合吗？"}
-              {confirmTarget?.action === "delete" && "此操作不可恢复，删除后不可恢复。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

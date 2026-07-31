@@ -1,7 +1,8 @@
 "use client";
 
-import TasksPage from "@/app/settings/tasks/page";
+import TasksContent from "@/components/shared/TasksContent";
 
+// 薄壳页：MobileLayout 由 app/m/layout.tsx 统一提供，此处只渲染共享内容
 export default function MobileTasksPage() {
-  return <TasksPage />;
+  return <TasksContent />;
 }

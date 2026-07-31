@@ -131,31 +131,8 @@ export function useActivatePortfolio() {
   });
 }
 
-// 删除组合 Hook（仅 draft 状态可删除）
-export function useDeletePortfolio() {
-  const queryClient = useQueryClient();
-  const addToast = useUIStore((state) => state.addToast);
-
-  return useMutation({
-    mutationFn: (code: string) => portfolioApi.remove(code),
-    onSuccess: (_, code) => {
-      queryClient.invalidateQueries({ queryKey: [PORTFOLIO_QUERY_KEY, "list"] });
-      queryClient.removeQueries({ queryKey: [PORTFOLIO_QUERY_KEY, code] });
-      addToast({
-        type: "success",
-        title: "删除成功",
-        message: "组合已删除",
-      });
-    },
-    onError: (error: unknown) => {
-      addToast({
-        type: "error",
-        title: "删除失败",
-        message: getErrorMessage(error, "仅草稿状态组合可删除"),
-      });
-    },
-  });
-}
+// 注：后端不提供 DELETE /portfolios/{code}（外键 RESTRICT，生命周期由关闭/重新激活管理），
+// 故不提供删除组合 Hook。
 
 // 最新净值快照 Hook
 export function useLatestSnapshot(code: string) {

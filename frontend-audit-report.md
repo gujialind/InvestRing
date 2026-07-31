@@ -31,6 +31,14 @@
 | P1 | 20 | 数据错误、交互缺陷、契约不一致导致的隐性失效 |
 | P2 | 16 | 坏味道、死代码、一致性与工程治理 |
 
+## 修复进度（2026-07-30，第一批 + 第二批已实施）
+
+- **P0 全部 8 项已修复**：P0-1（/m/login 豁免 + 水合，含 P1-18）、P0-2/P0-6（task api 对齐分页，后端新增 `GET /system/tasks/executions` 全局执行历史端点）、P0-3（改密 PUT）、P0-4（useUpdateInvestor 传参重构）、P0-5（移除删除组合入口，对齐后端 RESTRICT 设计）、P0-7（删除日志导航死链，废弃 logApi.taskLogs）、P0-8（6 页抽为 shared Content + 移动端真薄壳，MobileLayout 只在 m/layout 出现一次）。
+- **已修复的 P1**：P1-4（配色统一 getReturnColorClass）、P1-5（akshare 独立 PUT + 开关回填 + 空 token 不覆盖）、P1-7（401 统一 authStore.logout）、P1-11（ApiException 保留 details；DUPLICATE_TRADE 确认重试、MARKET_AMBIGUOUS 展示可选市场、PLATFORM_NOT_COVERED 引导 force_cover）、P1-13（字符串 detail 分支）、P1-14（SubscriptionsContent 改用统一 hook）、P1-17（三处 invalidate 错 key 随内联 mutation 消灭而根治）、P1-18（移动端水合等待）、P1-19 部分（TradeUpdate/SubscriptionUpdate 字段对齐，TradeCreate 补 allow_duplicate）、P1-20 部分（types/log.ts 字段全量对齐后端）。
+- **已顺带修复的 P2**：P2-1/P2-6 部分（新增 useTask/useShareChangeEvent/useSystem hooks + queryKeys 工厂，页面内联 mutation 已清零）、P2-2 部分（现金重估 mutation 双端共用 useUpdateCashPosition）、P2-7（lib/queryKeys.ts）、“Next.js 14”文案。
+- **验证**：`tsc --noEmit` 0 error、`eslint` 0 error/21 warning（均为存量死代码 no-unused-vars）、`next build` 通过；后端 `pytest` 390 个全部通过。
+- **尚未处理**（第三/四批）：P1-1/2/3/6/8/9/10/15/16、P1-20 其余类型缺口、P1-21 表格溢出，及 P2 死代码批量清理、CI 门禁、E2E 补充等。
+
 ---
 
 # P0 —— 功能不可用 / 崩溃

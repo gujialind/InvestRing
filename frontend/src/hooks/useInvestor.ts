@@ -51,14 +51,15 @@ export function useCreateInvestor() {
   });
 }
 
-// 更新投资人 Hook
-export function useUpdateInvestor(code: string) {
+// 更新投资人 Hook（code 随 mutate 传入，避免闭包捕获空 code 导致请求打到错误 URL）
+export function useUpdateInvestor() {
   const queryClient = useQueryClient();
   const addToast = useUIStore((state) => state.addToast);
 
   return useMutation({
-    mutationFn: (data: InvestorUpdate) => investorApi.update(code, data),
-    onSuccess: () => {
+    mutationFn: ({ code, data }: { code: string; data: InvestorUpdate }) =>
+      investorApi.update(code, data),
+    onSuccess: (_, { code }) => {
       queryClient.invalidateQueries({ queryKey: [INVESTOR_QUERY_KEY, code] });
       queryClient.invalidateQueries({ queryKey: [INVESTOR_QUERY_KEY, "list"] });
       addToast({

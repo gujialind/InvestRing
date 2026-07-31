@@ -87,3 +87,32 @@ export function useUpdatePosition() {
     },
   });
 }
+
+// 更新非净值资产（现金重估，写 manual_market_value 绝对替换）——PC/移动端持仓页共用
+export function useUpdateCashPosition(portfolioCode: string) {
+  const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
+
+  return useMutation({
+    mutationFn: ({ amount, platformCode, updateDate }: {
+      amount: number;
+      platformCode: string;
+      updateDate?: string;
+    }) => positionApi.updateCashPosition(portfolioCode, amount, platformCode, updateDate),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [POSITION_QUERY_KEY, portfolioCode] });
+      addToast({
+        type: "success",
+        title: "更新成功",
+        message: "非净值资产金额已更新",
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "更新失败",
+        message: getErrorMessage(error, "更新失败，请检查网络连接或联系管理员"),
+      });
+    },
+  });
+}

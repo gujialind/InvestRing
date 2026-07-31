@@ -11,7 +11,6 @@ import {
   Package,
   Building2,
   Settings,
-  FileText,
   PlayCircle,
 } from "lucide-react";
 
@@ -21,7 +20,7 @@ const adminNavItems = [
   { href: "/portfolio", label: "组合", icon: Briefcase },
   { href: "/products", label: "产品", icon: Package },
   { href: "/platforms", label: "平台", icon: Building2 },
-  { href: "/settings/logs", label: "日志", icon: FileText },
+  // 注：日志页（/settings/logs）尚未实现，实现后再恢复导航项（避免死链 404）
   { href: "/settings/tasks", label: "任务", icon: PlayCircle },
   { href: "/settings", label: "设置", icon: Settings },
 ];

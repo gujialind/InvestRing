@@ -11,7 +11,7 @@ export const authApi = {
     request<LoginResponse>({ method: "POST", url: "/auth/login", data }),
 
   changePassword: (data: ChangePasswordRequest) =>
-    request<{ message: string }>({ method: "POST", url: "/auth/password", data }),
+    request<{ message: string }>({ method: "PUT", url: "/auth/password", data }),
 
   getCurrentUser: () =>
     request<UserInfo>({ method: "GET", url: "/auth/me" }),

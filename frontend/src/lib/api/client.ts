@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { ApiError } from "@/types/common";
+import { useAuthStore } from "@/stores/authStore";
 
 /**
  * 检测运行时基础路径（用于 ModelScope Studio 等子路径部署场景）。
@@ -45,8 +46,11 @@ api.interceptors.response.use(
   (error: AxiosError<ApiError>) => {
     if (typeof window !== "undefined") {
       if (error.response?.status === 401) {
-        localStorage.removeItem("token");
-        window.location.href = `${getBasePath()}/login`;
+        // 统一走 authStore.logout()：同时清理 localStorage / cookie / zustand，
+        // 避免三处存储状态不一致导致"页面认为已登录但所有请求 401"的僵死态
+        useAuthStore.getState().logout();
+        const loginPath = window.location.pathname.startsWith("/m") ? "/m/login" : "/login";
+        window.location.href = `${getBasePath()}${loginPath}`;
       }
     }
     return Promise.reject(error);
@@ -57,11 +61,14 @@ api.interceptors.response.use(
 export class ApiException extends Error {
   public code: string;
   public status: number;
+  /** 后端 BusinessError 附带的结构化上下文（如 MARKET_AMBIGUOUS 的 available_markets） */
+  public details?: Record<string, unknown>;
 
-  constructor(code: string, message: string, status: number) {
+  constructor(code: string, message: string, status: number, details?: Record<string, unknown>) {
     super(message);
     this.code = code;
     this.status = status;
+    this.details = details;
     this.name = "ApiException";
   }
 }
@@ -71,9 +78,13 @@ export function handleApiError(error: unknown): ApiException {
     const axiosError = error as AxiosError<ApiError>;
     const status = axiosError.response?.status || 500;
     const detail = axiosError.response?.data?.detail;
+    // 后端存在两种 detail 形态：结构化 {error, message, details} 与裸字符串（HTTPException(detail="...")）
+    if (typeof detail === "string") {
+      return new ApiException("UNKNOWN_ERROR", detail, status);
+    }
     const code = detail?.error || "UNKNOWN_ERROR";
     const message = detail?.message || axiosError.message || "请求失败";
-    return new ApiException(code, message, status);
+    return new ApiException(code, message, status, detail?.details);
   }
   if (error instanceof Error) {
     return new ApiException("UNKNOWN_ERROR", error.message, 500);

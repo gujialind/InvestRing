@@ -8,10 +8,13 @@ export interface PaginatedResponse<T> {
 export interface ApiErrorDetail {
   error: string;
   message: string;
+  /** 后端 BusinessError 附带的结构化上下文（如 MARKET_AMBIGUOUS 的 available_markets） */
+  details?: Record<string, unknown>;
 }
 
 export interface ApiError {
-  detail: ApiErrorDetail;
+  /** 后端存在两种形态：结构化对象与裸字符串（HTTPException(detail="...")） */
+  detail: ApiErrorDetail | string;
 }
 
 export type Role = "admin" | "viewer";

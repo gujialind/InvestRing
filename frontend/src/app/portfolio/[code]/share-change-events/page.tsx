@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,12 +36,28 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatNumber, toDateOnly, parseDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
-import { shareChangeEventApi, ShareChangeEvent, ShareChangeEventCreate, getErrorMessage } from "@/lib/api";
+import { ShareChangeEvent, ShareChangeEventCreate, ApiException } from "@/lib/api";
 import { platformApi } from "@/lib/api";
 import { Platform } from "@/types/platform";
 import { EventType } from "@/types/common";
 import { useUIStore } from "@/stores/uiStore";
 import { useQuery } from "@tanstack/react-query";
+import {
+  useShareChangeEventList,
+  useCreateShareChangeEvent,
+  useConfirmShareChangeEvent,
+  useCancelShareChangeEvent,
+} from "@/hooks/useShareChangeEvent";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const PLATFORM_LEVEL_TYPES: EventType[] = ["cash_dividend", "reinvest_dividend", "forced_adjustment"];
 
@@ -64,7 +79,6 @@ const STATUS_COLORS: Record<string, string> = {
 export default function ShareChangeEventsPage() {
   const params = useParams();
   const code = params.code as string;
-  const queryClient = useQueryClient();
   const addToast = useUIStore((state) => state.addToast);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -85,10 +99,7 @@ export default function ShareChangeEventsPage() {
   });
 
   // 查询份额变动事件列表
-  const { data: eventsData, isLoading } = useQuery({
-    queryKey: ["shareChangeEvents", code],
-    queryFn: () => shareChangeEventApi.list({ portfolio_code: code, page_size: 100 }),
-  });
+  const { data: eventsData, isLoading } = useShareChangeEventList(code);
 
   // 查询平台列表
   const { data: platformsData } = useQuery({
@@ -100,67 +111,13 @@ export default function ShareChangeEventsPage() {
 
   const events = eventsData?.items || [];
 
-  // 创建事件
-  const createEvent = useMutation({
-    mutationFn: shareChangeEventApi.create,
-    onSuccess: () => {
-      addToast({
-        type: "success",
-        title: "创建成功",
-        message: "份额变动事件已创建",
-      });
-      setIsDialogOpen(false);
-      resetForm();
-      queryClient.invalidateQueries({ queryKey: ["shareChangeEvents", code] });
-    },
-    onError: (error: unknown) => {
-      addToast({
-        type: "error",
-        title: "创建失败",
-        message: getErrorMessage(error, "请检查输入数据后重试"),
-      });
-    },
-  });
-
-  // 确认事件
-  const confirmEvent = useMutation({
-    mutationFn: shareChangeEventApi.confirm,
-    onSuccess: () => {
-      addToast({
-        type: "success",
-        title: "确认成功",
-        message: "份额变动事件已确认",
-      });
-      queryClient.invalidateQueries({ queryKey: ["shareChangeEvents", code] });
-    },
-    onError: (error: unknown) => {
-      addToast({
-        type: "error",
-        title: "确认失败",
-        message: getErrorMessage(error, "请稍后重试"),
-      });
-    },
-  });
-
-  // 取消事件
-  const cancelEvent = useMutation({
-    mutationFn: shareChangeEventApi.cancel,
-    onSuccess: () => {
-      addToast({
-        type: "success",
-        title: "取消成功",
-        message: "份额变动事件已取消",
-      });
-      queryClient.invalidateQueries({ queryKey: ["shareChangeEvents", code] });
-    },
-    onError: (error: unknown) => {
-      addToast({
-        type: "error",
-        title: "取消失败",
-        message: getErrorMessage(error, "请稍后重试"),
-      });
-    },
-  });
+  // 创建/确认/取消走统一 hooks
+  const createEvent = useCreateShareChangeEvent(code);
+  const confirmEvent = useConfirmShareChangeEvent(code);
+  const cancelEvent = useCancelShareChangeEvent(code);
+  // 命中 PLATFORM_NOT_COVERED 时暂存待强制提交的数据，由确认框引导 force_cover 重试
+  const [forceCoverData, setForceCoverData] = useState<ShareChangeEventCreate | null>(null);
+  const [forceCoverMessage, setForceCoverMessage] = useState("");
 
   const resetForm = () => {
     setFormData({
@@ -180,6 +137,25 @@ export default function ShareChangeEventsPage() {
     });
   };
 
+  const submitCreate = (data: ShareChangeEventCreate, forceCover = false) => {
+    createEvent.mutate(
+      { data, forceCover },
+      {
+        onSuccess: () => {
+          setIsDialogOpen(false);
+          resetForm();
+        },
+        onError: (error: unknown) => {
+          // 平台覆盖不全：弹确认框引导 force_cover 强制提交
+          if (!forceCover && error instanceof ApiException && error.code === "PLATFORM_NOT_COVERED") {
+            setForceCoverData(data);
+            setForceCoverMessage(error.message);
+          }
+        },
+      }
+    );
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -192,7 +168,7 @@ export default function ShareChangeEventsPage() {
       return;
     }
 
-    createEvent.mutate(formData);
+    submitCreate(formData);
   };
 
   return (
@@ -478,6 +454,32 @@ export default function ShareChangeEventsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* PLATFORM_NOT_COVERED 强制提交确认 */}
+      <AlertDialog open={!!forceCoverData} onOpenChange={(open) => !open && setForceCoverData(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>平台覆盖不完整</AlertDialogTitle>
+            <AlertDialogDescription>
+              {forceCoverMessage || "平台级事件未覆盖全部有持仓的平台。"}
+              确定要忽略此检查强制提交吗？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (forceCoverData) {
+                  submitCreate(forceCoverData, true);
+                }
+                setForceCoverData(null);
+              }}
+            >
+              强制提交
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

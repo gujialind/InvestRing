@@ -15,10 +15,11 @@ export const systemApi = {
   getDataSourceConfig: () =>
     request<DataSourceConfig[]>({ method: "GET", url: "/system/data-sources" }),
 
-  updateDataSourceConfig: (data: { source: string; config: Record<string, string> }) =>
-    request<{ message: string }>({
+  // 后端按数据源名称分别更新：tushare 只消费 api_key，akshare 只消费 is_enabled
+  updateDataSource: (name: "tushare" | "akshare", data: { api_key?: string; is_enabled?: boolean }) =>
+    request<{ message: string; name: string; is_enabled?: boolean }>({
       method: "PUT",
-      url: `/system/data-sources/${data.source}`,
-      data: { api_key: data.config.token, is_enabled: data.config.akshare_enabled === "true" },
+      url: `/system/data-sources/${name}`,
+      data,
     }),
 };
