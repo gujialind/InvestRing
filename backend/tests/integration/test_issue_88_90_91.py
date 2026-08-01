@@ -348,7 +348,7 @@ class TestCrossPlatformCashLeg:
         ).first()
         assert cash_leg.status == "confirmed"
         assert cash_leg.platform_code == "XP_ZG3"
-        assert cash_leg.confirm_date == fund.confirm_date
+        assert cash_leg.confirm_date == T  # #93: 买入扣款 T 日即扣，不与基金确认日一致
 
     def test_sell_cash_leg_on_destination_platform(self, test_db):
         """卖出：CASH buy 腿落在到账平台"""
