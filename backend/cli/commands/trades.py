@@ -53,6 +53,9 @@ def create_trade(
     allow_duplicate: bool = typer.Option(
         False, "--allow-duplicate", help="强制创建与既有 pending/confirmed 交易同参数的重复交易"
     ),
+    cash_confirm_date: Optional[str] = typer.Option(
+        None, "--cash-confirm-date", help="CASH 腿确认日（卖出到账日，缺省=确认日）"
+    ),
 ):
     """创建买入/卖出交易（校验/配对 CASH 腿由服务层统一处理）
 
@@ -78,6 +81,7 @@ def create_trade(
             notes=notes,
             allow_duplicate=allow_duplicate,
             cash_platform_code=cash_platform_code,
+            cash_confirm_date=parse_date(cash_confirm_date) if cash_confirm_date else None,
         )
         db.flush()
         db.refresh(new_trade)

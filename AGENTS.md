@@ -92,6 +92,7 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 - **现金中转约束**：卖出 pending 不自动增加可用现金，买入只能用已有可用现金；不足时须先卖后买两步操作。
 - **CASH trade 来源受限**：CASH trade 仅由申赎、基金调仓配对、跨平台现金转移三条路径生成（均预置 `transfer_group`）；`trade.transfer_group` 为 **NOT NULL**，REST 与 CLI 均禁止直接创建 `product_code="CASH"` 的交易（`CASH_TRADE_FORBIDDEN`）。
 - **平台维度**：现金按平台分别追踪，`portfolio_position` 的 CASH 记录唯一约束为 `(portfolio_code, product_code, market, platform_code, snapshot_date)`；申购/赎回必须指定 `platform_code`（现金归属平台）。跨平台转移的状态机见 §3.3。
+- **在途资金虚拟产品**（#93）：`portfolio_position` 除 CASH 行外还有 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL` 两类现金行，由 `snapshot_service._compute_in_transit_amounts` 每日独立计算、不继承前日。`IN_TRANSIT_BUY`（买入在途）= 已扣款但基金份额未确认（CASH sell 已确认、基金 buy 待确认）；`IN_TRANSIT_SELL`（卖出在途）= 已卖出但到账未确认（基金 sell 已确认、CASH buy 待确认）。两者 `market=""`、`asset_type="cash"`、`shares=NULL`、`cash_amount` 恒正，种子产品定义见 §4.4。
 
 ### 2.3 实时可用量计算
 
@@ -107,7 +108,8 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 
 - **初始净值固定 1.0000**：首次申购确认时净值 = 1.0000，份额 = 金额（无需行情）。
 - **净值稳定性**：申购/赎回/现金分红/份额拆分合并 → 净值不变；调仓 → 净值可能变化。
-- **市值** = Σ(场内份额 × 收盘价) + Σ(场外份额 × 净值) + Σ(非净值型资产金额)。
+- **市值** = Σ(场内份额 × 收盘价) + Σ(场外份额 × 净值) + Σ(非净值型资产金额)。非净值型资产金额即 `portfolio_position` 中 `cash_amount IS NOT NULL` 的行，含 CASH 与 IN_TRANSIT 两类现金行，故 `total_value = Σ(fund market_value) + Σ(CASH cash_amount) + Σ(IN_TRANSIT cash_amount)`。
+- **在途资金纳入市值**（#93）：IN_TRANSIT 行（`IN_TRANSIT_BUY`/`IN_TRANSIT_SELL`）因 `cash_amount IS NOT NULL` 自动计入 `total_value`，由 `_compute_in_transit_amounts` 每日独立计算、不继承前日；`portfolio_value_snapshot.in_transit_total` 单独记录在途合计。
 - **净值** `unit_price = total_value / total_shares`（4 位小数）。
 - **份额统一 2 位小数**（ROUND_HALF_UP 四舍五入，第 3 位 ≥5 进位；负数按绝对值对称、远离零进位，符合场外基金行业惯例，误差计入基金财产）：产生点（申购确认 `amount/nav`、调仓买入 `amount/price`、卖出/赎回用户输入、份额事件变动计算）统一经 `app/utils/quantize.py::quantize_shares` 量化；读取/累加路径不量化。净值 4 位、金额 4 位不变。
 - **卖出/赎回输入份额先量化再校验**：量化到 2 位后与可用份额**精确比较**（无容差），超出返回 `INSUFFICIENT_SHARES`。
@@ -144,13 +146,13 @@ draft ──首次申购确认──▶ active ──close──▶ closed ─�
 
 ### 3.3 transfer_group 原子翻转
 
-confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service.sync_transfer_group` 自动同步状态与 `confirm_date`；金额字段变动时同步 CASH 腿金额；delete 基金腿时级联删除配对 CASH 腿。
+confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service.sync_transfer_group` 自动同步状态与金额；delete 基金腿时级联删除配对 CASH 腿。**#93 起各腿保持创建时设定的独立确认日**——`sync_transfer_group` 不再传播 `confirm_date`（仅传播 `trade_date`/`status`/金额）；unconfirm 时 CASH 腿按方向回退默认确认日（买入扣款 T 日即 `trade_date`、卖出到账默认与基金确认日一致）。`attach_paired_cash_leg` 新增 `cash_confirm_date` 参数：缺省时按基金腿方向推导——买入扣款 T 日（= `trade_date`）、卖出到账默认与基金确认日一致（无延迟），亦可显式覆盖。
 
 **现金跨平台转移**（`cash_transfers.py`）是 transfer_group 的特例，复用 `trade` 表，一次转移生成两条 CASH 腿（sell + buy）：
 
 - **当天完成**（`cross_day=False`）：两腿立即 confirmed，`confirm_date = transfer_date`。
-- **跨天到账**（`cross_day=True`）：两腿均 `pending`，`confirm_date = next_trading_day`，次日经 `confirm` 端点同时 confirm。对称状态保证 D 日 NAV 不因在途转移虚跌。
-- 跨天判断：`cross_day = (confirm_date > trade_date)`。在途期间两腿均 pending，不计入任何平台可用现金；pending CASH sell 仍预留可用额度。
+- **跨天到账**（`cross_day=True`，#93 非对称模型）：转出方（sell）当日 confirmed、`confirm_date = transfer_date`；转入方（buy）pending、`confirm_date = next_trading_day`，次日经 `confirm` 端点确认。非对称状态保证 D 日 NAV 不因在途转移虚跌（转出方当日扣减，转入方在途不虚增）。`confirm_cash_transfer` 确认该组内所有仍为 pending 的 CASH legs（向后兼容旧对称模型）。
+- 跨天判断（`list_cash_transfers`）：以 buy 腿为准——`buy.status != "confirmed"` 或 `buy.confirm_date > buy.trade_date`。在途期间转入腿 pending 不计入目标平台可用现金；已确认的转出腿正常扣减源平台现金。
 
 ### 3.4 快照删除与重算
 
@@ -206,12 +208,12 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 ### 4.3 核心服务与关键函数
 
-- **`snapshot_service.py`**：`generate_daily_snapshots` / `recalculate_snapshots` / `validate_snapshot_dependencies`；三个生成函数 `_generate_portfolio_position` → `_generate_portfolio_value_snapshot` → `_generate_investor_holding`（固定顺序）；`auto_confirm_after_snapshot`（重算后自动重确认）；`_delete_existing_snapshots`（删除级联回退）。`_generate_portfolio_position` 走增量累加：前一日 CASH 基准 + 窗口内 confirmed CASH trades + event `cash_change` 增量，`manual_market_value` 绝对覆盖；事件只读 `platform_code IS NOT NULL` 的 confirmed 记录，按 `entitlement_date` 升序、`fund_key=(product_code, market, platform_code)` 精确匹配。
+- **`snapshot_service.py`**：`generate_daily_snapshots` / `recalculate_snapshots` / `validate_snapshot_dependencies`；三个生成函数 `_generate_portfolio_position` → `_generate_portfolio_value_snapshot` → `_generate_investor_holding`（固定顺序）；`auto_confirm_after_snapshot`（重算后自动重确认）；`_delete_existing_snapshots`（删除级联回退）。`_generate_portfolio_position` 走增量累加：前一日 CASH 基准 + 窗口内 confirmed CASH trades + event `cash_change` 增量，`manual_market_value` 绝对覆盖；事件只读 `platform_code IS NOT NULL` 的 confirmed 记录，按 `entitlement_date` 升序、`fund_key=(product_code, market, platform_code)` 精确匹配。`_compute_in_transit_amounts`（#93）每日按平台/方向绝对计算在途金额并生成 `IN_TRANSIT_BUY`/`IN_TRANSIT_SELL` 行（不继承前日）；`_generate_portfolio_value_snapshot` 汇总 `in_transit_total`。
 - **`position_service.py`**：`compute_cash_balance`、`get_cash_value`、`calculate_available_cash`、`calculate_available_shares`、`calculate_investor_available_shares`、`update_cash_position`（现金重估写 `manual_market_value` 绝对替换，绝不直接写 `portfolio_position`；同日存在 confirmed CASH trade 时返回 warnings 提示覆盖将压制交易效果）、`list_manual_cash_overrides` / `delete_manual_cash_override`（#88 覆盖层查询/删除，删除后需重算快照回退自然值）。
-- **`trade_service.py`**：`create_trade`（快照/价格/平台/`as_of_date` 校验 + 买卖金额份额计算 + `attach_paired_cash_leg`）、`confirm_single_trade`（含 QDII 净值获取规则，禁止向前查找）、`cancel_trade` / `unconfirm_trade`（快照保护 + `sync_transfer_group`）、`sync_transfer_group`（配对腿原子同步）、`attach_paired_cash_leg`（基金腿创建时生成 `rebal_` 组并构造配对 CASH 腿，REST/CLI 共用）。
+- **`trade_service.py`**：`create_trade`（快照/价格/平台/`as_of_date` 校验 + 买卖金额份额计算 + `attach_paired_cash_leg`）、`confirm_single_trade`（含 QDII 净值获取规则，禁止向前查找）、`cancel_trade` / `unconfirm_trade`（快照保护 + `sync_transfer_group`）、`sync_transfer_group`（配对腿同步状态/`trade_date`/金额，#93 起不再传播 `confirm_date`）、`attach_paired_cash_leg`（基金腿创建时生成 `rebal_` 组并构造配对 CASH 腿，#93 新增 `cash_confirm_date` 参数按方向推导 CASH 腿确认日，REST/CLI 共用）。
 - **`subscription_service.py`**：`create_subscription`（含 `DATE_BEFORE_SNAPSHOT`、创建即设 `confirm_date`）、`confirm_single_subscription` / `unconfirm_single_subscription`（首次申购净值 1.0000、生成/删除配对 CASH trade、首次确认激活组合）。
 - **`share_change_event_service.py`**：`create/confirm/cancel/unconfirm_share_change_event` 全套 + `_compute_event_fields` / `check_platform_coverage` / `_confirm_fund_level_event`（基金级自动拆分子记录、平台分级校验、快照保护）。`snapshot_service.auto_confirm_after_snapshot` 由此模块 import（消除 service→router 反向依赖）。
-- **`cash_transfer_service.py`**：`create_cash_transfer`（对称状态：跨天两腿 pending / 当天两腿 confirmed）、`confirm_cash_transfer`（两腿同时确认 + `TRANSFER_NOT_READY`）、`list_cash_transfers`（按 `transfer_group` 分组）。
+- **`cash_transfer_service.py`**：`create_cash_transfer`（#93 非对称状态：跨天转出方当日 confirmed/转入方 pending / 当天两腿 confirmed）、`confirm_cash_transfer`（确认组内所有 pending CASH legs + `TRANSFER_NOT_READY`，向后兼容）、`list_cash_transfers`（按 `transfer_group` 分组，跨天判断以 buy 腿状态/日期为准）。
 - **`portfolio_service.py`**：`create/update/close/reactivate_portfolio`（`closed_at=datetime.utcnow()` 统一口径）、`get_nav_history` / `get_returns` / `get_cash_flow`。
 - **`product_service.py`**：`calculate_confirm_days`（单一实现：CN_EXCHANGE=0 / CN_OTC 非 QDII=1 / CN_OTC QDII=2 / 其他=1）、`create_product` / `update_product`。
 - **`investor_service.py`**：`create_investor`（`role` 默认 viewer，CLI 可显式传入以建管理员）、`update_investor`（`password`→`password_hash`）、`delete_investor`（`INVESTOR_HAS_SHARES` 保护）。
@@ -233,10 +235,12 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 **外键**：所有实体删除行为均为 **RESTRICT**，通过业务流程（关闭/停用）管理生命周期，保留历史数据。
 
+**虚拟产品**（#93）：除 `CASH`（经 `scripts/init_data.py` 种子）外，迁移 0006 另种子两条 IN_TRANSIT 虚拟产品——`IN_TRANSIT_BUY`（买入在途资金）/ `IN_TRANSIT_SELL`（卖出在途资金），与 CASH 同构：`market=""`、`product_type="IN_TRANSIT"`、无 `asset_class_code`、`confirm_days=0`、`is_qdii=0`。**复用策略**：IN_TRANSIT 行以 `product_code` 区分方向（`IN_TRANSIT_BUY` vs `IN_TRANSIT_SELL`），与 CASH 用 `market=""` 标识一致；`asset_type="cash"` 使下游现金处理代码（市值汇总、可用现金计算）无需改动即自动纳入。
+
 ### 4.5 配置与运行
 
 - **数据库**：`config.py` 默认 `mysql+pymysql://{user}:{pwd}@{host}:{port}/{db}?charset=utf8mb4`；生产用 QueuePool（`pool_size=10`、`max_overflow=20`、`pool_pre_ping`、`pool_recycle=3600`、`pool_timeout=30`）。配置经 `.env` 覆盖。
-- **迁移**：`alembic/`；`main.py` 启动时自动 `upgrade head`。
+- **迁移**：`alembic/`；`main.py` 启动时自动 `upgrade head`。**0006（#93，不可逆）**：将 8 处 `product_code`/`code` 列由 `String(10)` 扩展为 `String(20)`（支持 `IN_TRANSIT_BUY`/`IN_TRANSIT_SELL` 长命名，`product.code` 为复合 FK 引用方，扩展后 FK 关系不变）；为 `portfolio_value_snapshot` 新增 `in_transit_total`（`Numeric(15,4)`，`server_default='0'`）；种子 IN_TRANSIT 产品记录。幂等设计（`alter_column` 对已是目标长度的列为 no-op、`add_column`/种子用 `ON DUPLICATE KEY UPDATE`/`INSERT OR IGNORE`）。
 - **调度**：`scheduler_enabled`；`init_tasks.py` 确保 3 个任务记录存在（见附录 B）；启动时同步任务 name/description 文案，但不覆盖已有 cron_expr。
 - **数据源**：Tushare（`TUSHARE_TOKEN`，限流/重试可配）、AkShare（`AKSHARE_ENABLED`）；`data_sources` 路由读写 `.env`。
 - **安全**：`token_expire_days=7`；登录失败锁定、Token 黑名单、改密后强制重登。
@@ -400,7 +404,7 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 |------|------|
 | `investor.role` | `admin`、`viewer` |
 | `portfolio.status` | `draft`、`active`、`closed` |
-| `product.product_type` | `ETF`、`OEF`、`LOF`、`CASH` |
+| `product.product_type` | `ETF`、`OEF`、`LOF`、`CASH`、`IN_TRANSIT` |
 | `product.market` | `CN_EXCHANGE`、`CN_OTC`、`HK_MUTUAL`、`NULL` |
 | `trade.trade_type` | `buy`、`sell` |
 | `subscription.sub_type` | `subscribe`、`redeem` |

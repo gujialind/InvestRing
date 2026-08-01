@@ -8,7 +8,7 @@ class NavSyncDetail(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_log_id = Column(Integer, ForeignKey("task_execution_log.id"))
     job_id = Column(Integer, ForeignKey("sync_job.id"), nullable=True, index=True)
-    product_code = Column(String(10), nullable=False)
+    product_code = Column(String(20), nullable=False)
     market = Column(String(20), nullable=False)
     nav_date = Column(String(20), nullable=False)
     status = Column(String(20), nullable=False)

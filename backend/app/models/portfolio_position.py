@@ -8,7 +8,7 @@ class PortfolioPosition(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
     platform_code = Column(String(20), ForeignKey("platform.code"))
-    product_code = Column(String(10), nullable=False)
+    product_code = Column(String(20), nullable=False)
     market = Column(String(20), nullable=False)
     shares = Column(Numeric(15, 2))
     frozen_shares = Column(Numeric(15, 2), default=0)

@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Any, List, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func, and_, or_, delete
 
 from app.models import (
@@ -33,6 +33,112 @@ from app.models.manual_market_value import ManualMarketValue
 from app.utils.quantize import quantize_shares
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_in_transit_amounts(
+    db: Session, portfolio_code: str, snapshot_date: date
+) -> Dict[Tuple[str, str], Decimal]:
+    """绝对计算各平台各方向的在途资金金额。
+    
+    Returns: dict[(platform_code, direction)] = amount（正数）
+        direction: "buy" | "sell"
+    
+    规则：
+    ① 基金调仓：同 transfer_group 内一腿已确认(confirm_date<=D)
+       另一腿虽 confirmed 但 confirm_date>D
+    ② 现金转移（cross_day）：CASH sell 已确认，CASH buy 未确认
+    买入和卖出在途均为正数。
+    """
+    from sqlalchemy.orm import aliased
+    from sqlalchemy import and_, func
+    
+    result: Dict[Tuple[str, str], Decimal] = {}
+    CashLeg = aliased(Trade)
+    FundLeg = aliased(Trade)
+    
+    # --- ① 基金调仓在途 ---
+    
+    # 买入在途: CASH sell confirmed (confirm_date<=D), fund buy confirmed but confirm_date>D
+    buy_transit_fund = db.query(
+        CashLeg.platform_code,
+        func.sum(CashLeg.amount)
+    ).join(
+        FundLeg,
+        and_(
+            CashLeg.transfer_group == FundLeg.transfer_group,
+            CashLeg.id != FundLeg.id,
+            FundLeg.product_code != "CASH"
+        )
+    ).filter(
+        CashLeg.portfolio_code == portfolio_code,
+        CashLeg.product_code == "CASH",
+        CashLeg.trade_type == "sell",
+        CashLeg.status == "confirmed",
+        CashLeg.confirm_date <= snapshot_date,
+        FundLeg.status == "confirmed",
+        FundLeg.confirm_date > snapshot_date,
+    ).group_by(CashLeg.platform_code).all()
+    
+    for platform_code, amount in buy_transit_fund:
+        if amount and amount > 0:
+            result[(platform_code, "buy")] = Decimal(str(amount))
+    
+    # 卖出在途: fund sell confirmed (confirm_date<=D), CASH buy confirmed but confirm_date>D
+    sell_transit_fund = db.query(
+        CashLeg.platform_code,
+        func.sum(CashLeg.amount)
+    ).join(
+        FundLeg,
+        and_(
+            CashLeg.transfer_group == FundLeg.transfer_group,
+            CashLeg.id != FundLeg.id,
+            FundLeg.product_code != "CASH"
+        )
+    ).filter(
+        CashLeg.portfolio_code == portfolio_code,
+        CashLeg.product_code == "CASH",
+        CashLeg.trade_type == "buy",
+        CashLeg.status == "confirmed",
+        CashLeg.confirm_date > snapshot_date,
+        FundLeg.status == "confirmed",
+        FundLeg.confirm_date <= snapshot_date,
+    ).group_by(CashLeg.platform_code).all()
+    
+    for platform_code, amount in sell_transit_fund:
+        if amount and amount > 0:
+            result[(platform_code, "sell")] = Decimal(str(amount))
+    
+    # --- ② 现金转移在途（cross_day：CASH sell confirmed, CASH buy pending）---
+    CashSell = aliased(Trade)
+    CashBuy = aliased(Trade)
+    
+    cash_transfer_transit = db.query(
+        CashBuy.platform_code,
+        func.sum(CashBuy.amount)
+    ).join(
+        CashSell,
+        and_(
+            CashBuy.transfer_group == CashSell.transfer_group,
+            CashBuy.id != CashSell.id,
+        )
+    ).filter(
+        CashBuy.portfolio_code == portfolio_code,
+        CashBuy.product_code == "CASH",
+        CashBuy.trade_type == "buy",
+        CashSell.product_code == "CASH",
+        CashSell.trade_type == "sell",
+        CashSell.status == "confirmed",
+        CashSell.confirm_date <= snapshot_date,
+        CashBuy.status != "confirmed",
+    ).group_by(CashBuy.platform_code).all()
+    
+    for platform_code, amount in cash_transfer_transit:
+        if amount and amount > 0:
+            result[(platform_code, "buy")] = (
+                result.get((platform_code, "buy"), Decimal("0")) + Decimal(str(amount))
+            )
+    
+    return result
 
 
 def generate_daily_snapshots(
@@ -705,6 +811,9 @@ def _generate_portfolio_position(
         ).all()
         
         for pos in prev_positions:
+            # #93: IN_TRANSIT 行不继承（每日独立计算）
+            if pos.product_code in ("IN_TRANSIT_BUY", "IN_TRANSIT_SELL"):
+                continue
             if pos.product_code == "CASH":
                 key = ("CASH", "", pos.platform_code)
                 positions[key] = {
@@ -855,11 +964,24 @@ def _generate_portfolio_position(
             if manual:
                 pos_data["cash_amount"] = Decimal(str(manual.market_value))
 
+    # #93: 计算在途资金，生成独立 IN_TRANSIT_BUY/IN_TRANSIT_SELL 行
+    in_transit = _compute_in_transit_amounts(db, portfolio_code, target_date)
+    for (platform_code, direction), amount in in_transit.items():
+        product_code = "IN_TRANSIT_BUY" if direction == "buy" else "IN_TRANSIT_SELL"
+        key = (product_code, "", platform_code)
+        positions[key] = {
+            "shares": None,
+            "cash_amount": amount,  # 始终正数
+            "cost_price": None,
+            "asset_type": "cash",  # 在途资金本质是现金
+        }
+
     # 构建最终的持仓快照对象
     result_positions = []
     for (product_code, market, platform_code), pos_data in positions.items():
         # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
         is_cash = pos_data.get("asset_type") == "cash"
+        is_in_transit = product_code in ("IN_TRANSIT_BUY", "IN_TRANSIT_SELL")
         if not is_cash:
             if pos_data["shares"] is not None and pos_data["shares"] <= 0 and (pos_data.get("cash_amount") or Decimal("0")) <= 0:
                 continue  # 跳过零持仓
@@ -899,12 +1021,17 @@ def _generate_portfolio_position(
                 market_value = pos_data["shares"] * unit_price
         
         # 计算冻结份额（pending卖出）
-        frozen_shares = _calculate_frozen_shares(db, portfolio_code, product_code, market, target_date)
+        if is_in_transit:
+            frozen_shares = Decimal("0")
+        else:
+            frozen_shares = _calculate_frozen_shares(db, portfolio_code, product_code, market, target_date)
         # 计算冻结金额（pending CASH sells，仅 CASH 持仓行；#40 改进1）
-        frozen_amount = (
-            _calculate_frozen_amount(db, portfolio_code, platform_code, target_date)
-            if is_cash else Decimal("0")
-        )
+        if is_in_transit:
+            frozen_amount = Decimal("0")
+        elif is_cash:
+            frozen_amount = _calculate_frozen_amount(db, portfolio_code, platform_code, target_date)
+        else:
+            frozen_amount = Decimal("0")
         
         position = PortfolioPosition(
             portfolio_code=portfolio_code,
@@ -1021,6 +1148,13 @@ def _generate_portfolio_value_snapshot(
     else:
         unit_price_change_pct = Decimal("0")
     
+    # #93: 在途资金合计
+    IN_TRANSIT_CODES = {"IN_TRANSIT_BUY", "IN_TRANSIT_SELL"}
+    in_transit_total = sum(
+        Decimal(str(pos.cash_amount)) for pos in positions
+        if pos.product_code in IN_TRANSIT_CODES and pos.cash_amount
+    )
+
     snapshot = PortfolioValueSnapshot(
         portfolio_code=portfolio_code,
         snapshot_date=target_date,
@@ -1029,6 +1163,7 @@ def _generate_portfolio_value_snapshot(
         unit_price=float(unit_price.quantize(Decimal("0.0001"))),
         unit_price_change_pct=float(unit_price_change_pct.quantize(Decimal("0.0001"))) if unit_price_change_pct else 0,
         frozen_shares=float(frozen_shares) if frozen_shares > 0 else 0,
+        in_transit_total=float(in_transit_total) if in_transit_total else 0,
     )
     
     return snapshot
@@ -1442,9 +1577,10 @@ def _check_price_data_completeness(
     qdii_missing = []
     
     for product_code, market in products_to_check:
-        if product_code == "CASH":
+        # #93: CASH 和 IN_TRANSIT 虚拟产品均无净值，跳过价格完整性校验
+        if product_code in ("CASH", "IN_TRANSIT_BUY", "IN_TRANSIT_SELL"):
             continue
-        
+
         product = db.query(Product).filter(
             Product.code == product_code,
             Product.market == market
