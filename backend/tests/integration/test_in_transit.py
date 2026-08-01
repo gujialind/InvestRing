@@ -209,6 +209,8 @@ class TestBuyInTransit:
         _setup_cash_snapshot(db, portfolio_code, D0, 50000.0, self.PLATFORM)
         # T 日净值
         create_price_record(db, self.FUND_CODE, self.FUND_MARKET, T, FUND_PRICE)
+        # T+1 日净值（#96 严格匹配：基金持仓出现于 T+1，快照要求当日净值，不再回退）
+        create_price_record(db, self.FUND_CODE, self.FUND_MARKET, T1, FUND_PRICE)
         # 创建已确认配对交易：基金买入 T+1 确认，CASH 卖出 T 日扣款
         _create_paired_buy_trades(
             db, portfolio_code, self.PLATFORM,

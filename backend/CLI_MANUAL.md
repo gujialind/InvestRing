@@ -85,7 +85,7 @@ ir portfolio create --help   # 查看具体命令的参数帮助
 | `INSUFFICIENT_CASH` | 买入金额超过可用现金 |
 | `INSUFFICIENT_SHARES` | 卖出/赎回份额超过可用份额 |
 | `NON_TRADING_DAY` | 提交日期不是交易日 |
-| `MISSING_NAV` | 确认时缺少净值数据 |
+| `MISSING_NAV` | 交易确认/快照生成时缺少净值数据 |
 | `PRODUCT_NOT_FOUND` | 产品不存在（`details` 含查询的 code/market） |
 | `MARKET_AMBIGUOUS` | 产品代码对应多个市场（如 LOF），需显式指定 market（`details.available_markets` 列出可选市场） |
 | `NO_SNAPSHOT_BASELINE` | 组合无任何快照基线，无法追平/推进（先用 `snapshot generate` 建首日快照） |
@@ -869,6 +869,9 @@ ir platform delete <CODE> [--yes]
 ```bash
 ir snapshot generate --portfolio-code <组合> --target-date YYYY-MM-DD
 ```
+
+> - 净值严格匹配（issue #96）：普通基金严格取 target_date 当日净值，QDII 严格取 T-1（前一交易日）净值，禁止向前回退；任一持仓缺失即失败并返回 `MISSING_NAV`（错误信息列出缺失产品与所需日期），先用 `ir market sync-history <product_code> <market>` 回填净值后重试
+> - 生成失败不产生任何快照数据（目标日仍缺失，可修复数据后安全重试）
 
 #### `ir snapshot recalculate`
 
