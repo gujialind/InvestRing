@@ -62,10 +62,15 @@ def upgrade():
     # SQLite: 不强制 String 长度，alter 失败可容忍（与 0004 同策略）
     for table, col in PRODUCT_CODE_COLUMNS:
         try:
+            kwargs = {}
+            # product.code 是主键，MySQL 要求主键列必须 NOT NULL
+            if (table, col) == ('product', 'code'):
+                kwargs['nullable'] = False
             op.alter_column(
                 table, col,
                 existing_type=sa.String(10),
                 type_=sa.String(20),
+                **kwargs,
             )
         except Exception:
             if is_sqlite:
