@@ -24,6 +24,7 @@ from app.services.trading_utils import (
 )
 from app.services.position_service import calculate_available_cash
 from app.services.exceptions import BusinessError, NotFoundError
+from app.utils.quantize import quantize_amount
 
 
 def create_cash_transfer(
@@ -69,15 +70,19 @@ def create_cash_transfer(
     if Decimal(str(amount)) <= 0:
         raise BusinessError("INVALID_AMOUNT", "转移金额必须大于0")
 
+    # 用户输入金额先量化到 2 位（四舍五入），再做精确比较（issue #94）
+    amt = quantize_amount(amount)
+    if amt <= 0:
+        raise BusinessError("INVALID_AMOUNT", "转移金额必须大于0")
+
     available_cash = calculate_available_cash(db, portfolio_code, from_platform)
-    if Decimal(str(amount)) > available_cash:
+    if amt > available_cash:
         raise BusinessError(
             "INSUFFICIENT_CASH",
             f"平台 {from_platform} 的可用现金不足（当前: {float(available_cash)}）",
         )
 
     transfer_group = uuid.uuid4().hex[:12]
-    amt = Decimal(str(amount))
 
     sell_trade = Trade(
         portfolio_code=portfolio_code, platform_code=from_platform,

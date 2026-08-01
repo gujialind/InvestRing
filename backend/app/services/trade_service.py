@@ -21,7 +21,7 @@ from app.services.trading_utils import get_next_trading_day, is_trading_day, get
 from app.services.position_service import calculate_available_cash, calculate_available_shares
 from app.services.product_service import resolve_product_market
 from app.services.exceptions import BusinessError, NotFoundError
-from app.utils.quantize import quantize_shares
+from app.utils.quantize import quantize_amount, quantize_shares
 
 logger = logging.getLogger(__name__)
 
@@ -264,22 +264,27 @@ def calculate_confirm_preview(
 
         result_price = final_price
         if trade.trade_type == "buy":
+            # actual_amount / fee 创建时已量化到 2 位（issue #94），差值仍精确为 2 位
             amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
             result_shares = quantize_shares(amount / final_price)
             result_amount = amount
         else:
-            amount = Decimal(str(trade.shares)) * final_price
+            # 金额统一量化到 2 位（issue #94）：shares(2位) × nav(4位) 的四舍五入
+            # 误差计入基金财产，现金回笼与平台 2 位口径一致
+            amount = quantize_amount(Decimal(str(trade.shares)) * final_price)
             result_actual_amount = amount - Decimal(str(trade.fee))
             result_amount = amount
     elif price is not None:
         # 场内基金/其他非净值型：仅在传入价格时按传入成交价重算（补录/手动覆盖场景）
         result_price = Decimal(str(price))
         if trade.trade_type == "buy":
+            # actual_amount / fee 创建时已量化到 2 位（issue #94），差值仍精确为 2 位
             amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
             result_shares = quantize_shares(amount / Decimal(str(price)))
             result_amount = amount
         else:
-            amount = Decimal(str(trade.shares)) * Decimal(str(price))
+            # 金额统一量化到 2 位（issue #94），同场外卖出分支
+            amount = quantize_amount(Decimal(str(trade.shares)) * Decimal(str(price)))
             result_actual_amount = amount - Decimal(str(trade.fee))
             result_amount = amount
     # else：场内不传价 → 不重算，返回 trade 现有字段原样
@@ -529,7 +534,8 @@ def create_trade(
 
     confirm_days = product.confirm_days or 0
     expected_confirm_date = get_next_trading_day(db, trade_date, days=confirm_days)
-    fee_d = Decimal(str(fee)) if fee else Decimal("0")
+    # 手续费为金额字段，统一量化到 2 位（issue #94）
+    fee_d = quantize_amount(fee) if fee else Decimal("0")
     price_d = Decimal(str(price)) if price else None
 
     if trade_type == "buy":
@@ -537,7 +543,10 @@ def create_trade(
         cash_out = actual_amount if actual_amount is not None else amount
         if cash_out is None or Decimal(str(cash_out)) <= 0:
             raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
-        cash_out_d = Decimal(str(cash_out))
+        # 用户输入金额先量化到 2 位（四舍五入），再做精确比较（issue #94）
+        cash_out_d = quantize_amount(Decimal(str(cash_out)))
+        if cash_out_d <= 0:
+            raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
         # #91：可用现金按扣款平台校验（缺省同基金腿平台）
         cash_check_platform = cash_platform_code or platform_code
         available_cash = calculate_available_cash(
@@ -570,7 +579,8 @@ def create_trade(
         )
         if shares_d > available_shares:
             raise BusinessError("INSUFFICIENT_SHARES", "卖出份额超过可用份额")
-        actual_amount_final = Decimal(str(actual_amount)) if actual_amount else Decimal("0")
+        # 用户输入金额先量化到 2 位（四舍五入）（issue #94）
+        actual_amount_final = quantize_amount(actual_amount) if actual_amount else Decimal("0")
         net_amount = actual_amount_final + fee_d
         new_trade = Trade(
             portfolio_code=portfolio_code, product_code=product_code, market=market,
