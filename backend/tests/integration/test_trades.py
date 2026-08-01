@@ -408,6 +408,7 @@ class TestUpdateDeletePairedSync:
         cash_leg = test_db.query(Trade).filter(
             Trade.transfer_group == tg, Trade.id != trade_id
         ).first()
+        # #93: CASH sell 腿独立确认日 = trade_date（T日扣款），不依赖基金腿
         assert cash_leg.confirm_date == date(2025, 10, 6)
 
         # confirm_date 不开放直改：额外字段被 schema 忽略，不产生变更
@@ -421,7 +422,7 @@ class TestUpdateDeletePairedSync:
         fund_leg = test_db.query(Trade).get(trade_id)
         assert fund_leg.confirm_date == date(2025, 10, 6)
 
-        # 改 trade_date → 按产品 confirm_days 联动重算 confirm_date 并同步 CASH 腿
+        # 改 trade_date → 基金腿按 confirm_days 联动重算；CASH sell 腿独立取 trade_date（#93）
         upd = client.put(
             f"/api/trades/{trade_id}",
             json={"trade_date": "2025-10-08"},
@@ -434,11 +435,13 @@ class TestUpdateDeletePairedSync:
         cash_leg = test_db.query(Trade).filter(
             Trade.transfer_group == tg, Trade.id != trade_id
         ).first()
+        # #93: CASH sell 腿独立确认日 = 新 trade_date
         assert cash_leg.confirm_date == date(2025, 10, 8)
         # CASH 腿 trade_date 随基金腿同步（组内不变量）
         assert cash_leg.trade_date == date(2025, 10, 8)
 
-        # 改日期后 confirm → unconfirm，CASH 腿确认日按新 trade_date 重算，与基金腿一致
+        # #93: confirm → unconfirm 后各腿独立回退默认确认日
+        # CASH sell 腿回退到 trade_date（T日扣款），基金腿按 confirm_days 重算
         conf = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
         assert conf.status_code == 200
         unconf = client.post(f"/api/trades/{trade_id}/unconfirm", headers=admin_headers)
@@ -450,7 +453,10 @@ class TestUpdateDeletePairedSync:
         ).first()
         assert fund_leg.status == "pending" and cash_leg.status == "pending"
         assert cash_leg.trade_date == date(2025, 10, 8)
-        assert cash_leg.confirm_date == fund_leg.confirm_date == date(2025, 10, 8)
+        # #93: CASH sell 腿独立确认日 = trade_date，基金腿独立按 confirm_days 重算
+        # 此处 confirm_days=0 所以两值相等，但语义独立（不再互相同步）
+        assert cash_leg.confirm_date == date(2025, 10, 8)  # = trade_date（T日扣款）
+        assert fund_leg.confirm_date == date(2025, 10, 8)  # = T+0（confirm_days=0）
 
     def test_update_trade_status_field_ignored(self, client, admin_headers, test_db):
         """PUT 传 status 被忽略（状态流转只走 confirm/cancel/unconfirm 端点）"""

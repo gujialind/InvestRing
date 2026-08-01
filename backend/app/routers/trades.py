@@ -70,6 +70,7 @@ def create_trade(
         notes=trade.notes,
         allow_duplicate=trade.allow_duplicate,
         cash_platform_code=trade.cash_platform_code,
+        cash_confirm_date=trade.cash_confirm_date,
     )
     db.commit()
     db.refresh(new_trade)

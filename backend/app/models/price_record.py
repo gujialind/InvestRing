@@ -6,7 +6,7 @@ class PriceRecord(Base):
     __tablename__ = "price_record"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    product_code = Column(String(10), nullable=False)
+    product_code = Column(String(20), nullable=False)
     market = Column(String(20), nullable=False)
     price_date = Column(Date, nullable=False)
     unit_price = Column(Numeric(10, 4))

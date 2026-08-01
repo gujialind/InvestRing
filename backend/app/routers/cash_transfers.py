@@ -1,7 +1,7 @@
 """
 平台间现金转移 API
 
-薄适配器：委托 cash_transfer_service（对称状态模型），router 仅负责鉴权/序列化/commit。
+薄适配器：委托 cash_transfer_service（非对称状态模型），router 仅负责鉴权/序列化/commit。
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -31,7 +31,7 @@ def create_cash_transfer(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    """创建平台间现金转移（对称状态：当天两腿立即 confirm；跨天两腿 pending 至次日同时 confirm）。"""
+    """创建平台间现金转移（当天两腿立即 confirm；跨天时转出方当日 confirm，转入方 pending 至下一交易日确认）。"""
     result = create_transfer_service(
         db,
         portfolio_code=portfolio_code,
@@ -53,7 +53,7 @@ def confirm_cash_transfer(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    """确认跨天转移的两条 pending Trade（对称状态，同时确认）。"""
+    """确认跨天转移中所有仍为 pending 的 CASH legs（新模型下通常仅转入腿）。"""
     result = confirm_transfer_service(
         db, portfolio_code=portfolio_code, transfer_group=transfer_group
     )
