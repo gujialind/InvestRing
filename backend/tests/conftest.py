@@ -136,6 +136,11 @@ def _seed_base_data(test_engine):
         products = [
             {"code": "CASH", "market": "", "name": "现金类资产", "product_type": "CASH",
              "asset_class_code": "CASH", "confirm_days": 0, "is_qdii": False},
+            # #93: 在途资金虚拟产品（与 CASH 同构：market='', 无 asset_class_code）
+            {"code": "IN_TRANSIT_BUY", "market": "", "name": "买入在途资金", "product_type": "IN_TRANSIT",
+             "asset_class_code": None, "confirm_days": 0, "is_qdii": False},
+            {"code": "IN_TRANSIT_SELL", "market": "", "name": "卖出在途资金", "product_type": "IN_TRANSIT",
+             "asset_class_code": None, "confirm_days": 0, "is_qdii": False},
             {"code": "510300.SH", "market": "CN_EXCHANGE", "name": "沪深300ETF", "product_type": "ETF",
              "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 0, "is_qdii": False},
             {"code": "000300.OF", "market": "CN_OTC", "name": "沪深300联接A", "product_type": "OEF",

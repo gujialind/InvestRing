@@ -7,7 +7,7 @@ class ShareChangeEvent(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
-    product_code = Column(String(10), nullable=False)
+    product_code = Column(String(20), nullable=False)
     market = Column(String(20), nullable=False)
     event_type = Column(String(30), nullable=False)
     ex_date = Column(Date, nullable=False)
@@ -23,7 +23,7 @@ class ShareChangeEvent(Base):
     div_cash = Column(Numeric(10, 4))
     reinvest_nav = Column(Numeric(10, 4))
     cash_change = Column(Numeric(15, 4))
-    cash_product_code = Column(String(10))
+    cash_product_code = Column(String(20))
     status = Column(String(20), default="pending")
     tushare_event_id = Column(String(50))
     notes = Column(Text)

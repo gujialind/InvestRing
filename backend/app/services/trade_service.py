@@ -21,7 +21,7 @@ from app.services.trading_utils import get_next_trading_day, is_trading_day, get
 from app.services.position_service import calculate_available_cash, calculate_available_shares
 from app.services.product_service import resolve_product_market
 from app.services.exceptions import BusinessError, NotFoundError
-from app.utils.quantize import quantize_shares
+from app.utils.quantize import quantize_amount, quantize_shares
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +65,15 @@ def attach_paired_cash_leg(
     confirm_date: Optional[date],
     status: str = "pending",
     cash_platform_code: Optional[str] = None,
+    cash_confirm_date: Optional[date] = None,
 ) -> Trade:
     """为基金腿生成 transfer_group 并构造/加入配对 CASH 腿。
 
     cash_amount 采用 router 语义 = 基金腿 actual_amount（买入=支出含费，卖出=收入）。
     cash_platform_code（issue #91）：CASH 腿平台，缺省同基金腿；传入时支持
     跨平台扣款（买）/到账（卖），两腿同 transfer_group 原子翻转。
+    cash_confirm_date（#93）：CASH 腿独立确认日，缺省时按基金腿方向推导——
+    买入扣款 T 日即扣（=trade_date），卖出到账默认与基金确认日一致（无延迟）。
     供 REST router 与后端 CLI 共用，确保基金买/卖必配 CASH 腿。
 
     Returns:
@@ -78,6 +81,16 @@ def attach_paired_cash_leg(
     """
     group = f"rebal_{uuid.uuid4().hex[:12]}"
     fund_trade.transfer_group = group
+    # #93: CASH 腿确认日独立于基金腿
+    if cash_confirm_date is None:
+        if fund_trade.trade_type == "buy":
+            # 买入扣款：T日即扣
+            effective_cash_confirm = fund_trade.trade_date
+        else:
+            # 卖出到账：默认与基金确认日一致（无延迟）
+            effective_cash_confirm = confirm_date
+    else:
+        effective_cash_confirm = cash_confirm_date
     cash_trade = Trade(
         portfolio_code=fund_trade.portfolio_code,
         platform_code=cash_platform_code or fund_trade.platform_code,
@@ -90,7 +103,7 @@ def attach_paired_cash_leg(
         fee=Decimal("0"),
         actual_amount=cash_amount,
         trade_date=fund_trade.trade_date,
-        confirm_date=confirm_date,
+        confirm_date=effective_cash_confirm,
         status=status,
         transfer_group=group,
     )
@@ -105,7 +118,8 @@ def sync_transfer_group(
 
     - 传播 `trade.trade_date`（组内不变量：同 transfer_group 各腿 trade_date 恒等；
       PUT 改基金腿 trade_date 时据此随动 CASH 腿，其余路径为幂等写入）
-    - 传播 `target_status` 与 `confirm_date`（unconfirm 时重算期望确认日）
+    - 传播 `target_status`（unconfirm 时各腿独立重算期望确认日，#93）
+    - #93: 不再传播 confirm_date，各腿保持创建时设定的独立确认日
     - 若源腿为基金腿（product_code != "CASH"），将其 actual_amount 镜像给配对
       CASH 腿（CASH 腿金额恒等于基金腿 actual_amount）。确认时净值型基金
       actual_amount 可能被重算，需同步；金额未变时为幂等写入
@@ -130,19 +144,34 @@ def sync_transfer_group(
             # 先同步 trade_date，保证下方 unconfirm 分支用新日期重算确认日
             paired_trade.trade_date = trade.trade_date
             paired_trade.status = target_status
-            if confirm_date is not None:
-                paired_trade.confirm_date = confirm_date
-            elif target_status == "pending":
-                # unconfirm 时需要重新计算期望确认日
-                paired_product = db.query(Product).filter(
-                    Product.code == paired_trade.product_code,
-                    Product.market == paired_trade.market,
-                ).first()
-                if paired_product:
-                    paired_confirm_days = paired_product.confirm_days or 0
-                    paired_trade.confirm_date = get_next_trading_day(
-                        db, paired_trade.trade_date, days=paired_confirm_days
-                    )
+            # #93: 各腿保持创建时设定的独立确认日，不再同步 confirm_date
+            if target_status == "pending":
+                if paired_trade.product_code == "CASH":
+                    # #93: unconfirm 时 CASH 腿回退到创建时的默认确认日
+                    if paired_trade.trade_type == "sell":
+                        # 买入的 CASH sell：回退到 trade_date（T日扣款）
+                        paired_trade.confirm_date = paired_trade.trade_date
+                    else:
+                        # 卖出的 CASH buy：回退到基金确认日（默认一致，无延迟）
+                        fund_leg = next(
+                            (p for p in paired if p.product_code != "CASH"), None
+                        )
+                        # 源腿本身可能是基金腿（unconfirm_trade 场景），补充查找
+                        if fund_leg is None and trade.product_code != "CASH":
+                            fund_leg = trade
+                        if fund_leg and fund_leg.confirm_date:
+                            paired_trade.confirm_date = fund_leg.confirm_date
+                else:
+                    # unconfirm 时需要重新计算期望确认日（基金腿按 product.confirm_days）
+                    paired_product = db.query(Product).filter(
+                        Product.code == paired_trade.product_code,
+                        Product.market == paired_trade.market,
+                    ).first()
+                    if paired_product:
+                        paired_confirm_days = paired_product.confirm_days or 0
+                        paired_trade.confirm_date = get_next_trading_day(
+                            db, paired_trade.trade_date, days=paired_confirm_days
+                        )
             # 同步配对 CASH 腿金额（确认时净值重算后需同步）
             if mirror_amount is not None and paired_trade.product_code == "CASH":
                 paired_trade.amount = mirror_amount
@@ -235,22 +264,27 @@ def calculate_confirm_preview(
 
         result_price = final_price
         if trade.trade_type == "buy":
+            # actual_amount / fee 创建时已量化到 2 位（issue #94），差值仍精确为 2 位
             amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
             result_shares = quantize_shares(amount / final_price)
             result_amount = amount
         else:
-            amount = Decimal(str(trade.shares)) * final_price
+            # 金额统一量化到 2 位（issue #94）：shares(2位) × nav(4位) 的四舍五入
+            # 误差计入基金财产，现金回笼与平台 2 位口径一致
+            amount = quantize_amount(Decimal(str(trade.shares)) * final_price)
             result_actual_amount = amount - Decimal(str(trade.fee))
             result_amount = amount
     elif price is not None:
         # 场内基金/其他非净值型：仅在传入价格时按传入成交价重算（补录/手动覆盖场景）
         result_price = Decimal(str(price))
         if trade.trade_type == "buy":
+            # actual_amount / fee 创建时已量化到 2 位（issue #94），差值仍精确为 2 位
             amount = Decimal(str(trade.actual_amount)) - Decimal(str(trade.fee))
             result_shares = quantize_shares(amount / Decimal(str(price)))
             result_amount = amount
         else:
-            amount = Decimal(str(trade.shares)) * Decimal(str(price))
+            # 金额统一量化到 2 位（issue #94），同场外卖出分支
+            amount = quantize_amount(Decimal(str(trade.shares)) * Decimal(str(price)))
             result_actual_amount = amount - Decimal(str(trade.fee))
             result_amount = amount
     # else：场内不传价 → 不重算，返回 trade 现有字段原样
@@ -423,6 +457,7 @@ def create_trade(
     notes: Optional[str] = None,
     allow_duplicate: bool = False,
     cash_platform_code: Optional[str] = None,
+    cash_confirm_date: Optional[date] = None,
 ) -> Trade:
     """创建买入/卖出交易（含全部校验与配对 CASH 腿），供 REST 与 CLI 共用。
 
@@ -433,6 +468,8 @@ def create_trade(
     allow_duplicate=True 强制放行，cancelled 记录不算重复。
     cash_platform_code（issue #91）：现金腿平台，买=扣款平台、卖=到账平台，
     缺省同基金腿；买入可用现金按扣款平台校验。
+    cash_confirm_date（#93）：CASH 腿独立确认日（卖出到账日），缺省时由
+    attach_paired_cash_leg 按基金腿方向推导（买入=T日扣款，卖出=基金确认日）。
     不 commit，事务由调用方控制。返回基金腿 Trade。
     """
     if not is_trading_day(db, trade_date):
@@ -488,7 +525,7 @@ def create_trade(
             "PLATFORM_NOT_FOUND", f"现金平台 {cash_platform_code} 不存在"
         )
 
-    # 场内交易必须提供有效价格（实时撚合价，不能用收盘价替代）
+    # 场内交易必须提供有效价格（实时撮合价，不能用收盘价替代）
     if product.market == "CN_EXCHANGE" and (price is None or Decimal(str(price)) <= 0):
         raise BusinessError(
             "MISSING_OR_INVALID_PRICE",
@@ -497,7 +534,8 @@ def create_trade(
 
     confirm_days = product.confirm_days or 0
     expected_confirm_date = get_next_trading_day(db, trade_date, days=confirm_days)
-    fee_d = Decimal(str(fee)) if fee else Decimal("0")
+    # 手续费为金额字段，统一量化到 2 位（issue #94）
+    fee_d = quantize_amount(fee) if fee else Decimal("0")
     price_d = Decimal(str(price)) if price else None
 
     if trade_type == "buy":
@@ -505,7 +543,10 @@ def create_trade(
         cash_out = actual_amount if actual_amount is not None else amount
         if cash_out is None or Decimal(str(cash_out)) <= 0:
             raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
-        cash_out_d = Decimal(str(cash_out))
+        # 用户输入金额先量化到 2 位（四舍五入），再做精确比较（issue #94）
+        cash_out_d = quantize_amount(Decimal(str(cash_out)))
+        if cash_out_d <= 0:
+            raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
         # #91：可用现金按扣款平台校验（缺省同基金腿平台）
         cash_check_platform = cash_platform_code or platform_code
         available_cash = calculate_available_cash(
@@ -538,7 +579,8 @@ def create_trade(
         )
         if shares_d > available_shares:
             raise BusinessError("INSUFFICIENT_SHARES", "卖出份额超过可用份额")
-        actual_amount_final = Decimal(str(actual_amount)) if actual_amount else Decimal("0")
+        # 用户输入金额先量化到 2 位（四舍五入）（issue #94）
+        actual_amount_final = quantize_amount(actual_amount) if actual_amount else Decimal("0")
         net_amount = actual_amount_final + fee_d
         new_trade = Trade(
             portfolio_code=portfolio_code, product_code=product_code, market=market,
@@ -586,6 +628,7 @@ def create_trade(
     attach_paired_cash_leg(
         db, new_trade, actual_amount_final, expected_confirm_date,
         cash_platform_code=cash_platform_code,
+        cash_confirm_date=cash_confirm_date,
     )
     return new_trade
 

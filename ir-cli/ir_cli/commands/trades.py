@@ -51,6 +51,7 @@ def create(
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
     allow_duplicate: bool = typer.Option(False, "--allow-duplicate", help="跳过重复交易检测（后端报 DUPLICATE_TRADE 且确需重复录入时使用）"),
     auto_confirm: bool = typer.Option(False, "--confirm", help="创建成功后立即确认（快捷组合）"),
+    cash_confirm_date: Optional[str] = typer.Option(None, "--cash-confirm-date", help="CASH 腿确认日（卖出到账日，缺省=确认日）"),
     quiet: bool = typer.Option(False, "--quiet", help="仅输出 id/status/confirm_date"),
 ):
     """创建交易（--confirm 可链式创建+确认）
@@ -76,6 +77,7 @@ def create(
         shares=shares,
         amount=amount,
         notes=notes,
+        cash_confirm_date=cash_confirm_date,
     )
     if allow_duplicate:
         body["allow_duplicate"] = True
@@ -208,6 +210,7 @@ def update(
     notes: Optional[str] = typer.Option(None, "--notes", help="备注"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
+
     """更新交易（仅 pending 状态可改，confirmed 需先 unconfirm）。
 
     改动 trade_date/status 会自动同步配对 CASH 腿；confirm_date 不开放直改，

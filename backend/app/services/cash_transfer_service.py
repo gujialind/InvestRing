@@ -2,8 +2,8 @@
 平台间现金转移服务
 
 复用 Trade 表实现：一次转移生成两条 CASH 交易（卖出+买入），通过 transfer_group 关联。
-对称状态模型：当天完成两腿立即 confirmed；跨天到账两腿均 pending 至下一交易日同时 confirm，
-保证 D 日 NAV 不因在途转移虚跌。供 REST 与 CLI 共用。
+非对称状态模型：当天完成两腿立即 confirmed；跨天到账转出方当日 confirmed、转入方 pending
+至下一交易日确认，保证 D 日 NAV 不因在途转移虚跌。供 REST 与 CLI 共用。
 
 service 层只抛领域异常，不 import fastapi、不 commit。
 """
@@ -24,6 +24,7 @@ from app.services.trading_utils import (
 )
 from app.services.position_service import calculate_available_cash
 from app.services.exceptions import BusinessError, NotFoundError
+from app.utils.quantize import quantize_amount
 
 
 def create_cash_transfer(
@@ -37,10 +38,10 @@ def create_cash_transfer(
     cross_day: bool = False,
     notes: Optional[str] = None,
 ) -> dict:
-    """创建平台间现金转移（对称状态）。不 commit。
+    """创建平台间现金转移（非对称状态）。不 commit。
 
     - cross_day=False：两腿立即 confirmed，confirm_date = transfer_date
-    - cross_day=True：两腿均 pending，confirm_date = 下一交易日（对称，D 日 NAV 不跌）
+    - cross_day=True：转出方当日 confirmed，转入方 pending 至下一交易日（D 日 NAV 不跌）
     """
     portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
     if not portfolio:
@@ -69,15 +70,19 @@ def create_cash_transfer(
     if Decimal(str(amount)) <= 0:
         raise BusinessError("INVALID_AMOUNT", "转移金额必须大于0")
 
+    # 用户输入金额先量化到 2 位（四舍五入），再做精确比较（issue #94）
+    amt = quantize_amount(amount)
+    if amt <= 0:
+        raise BusinessError("INVALID_AMOUNT", "转移金额必须大于0")
+
     available_cash = calculate_available_cash(db, portfolio_code, from_platform)
-    if Decimal(str(amount)) > available_cash:
+    if amt > available_cash:
         raise BusinessError(
             "INSUFFICIENT_CASH",
             f"平台 {from_platform} 的可用现金不足（当前: {float(available_cash)}）",
         )
 
     transfer_group = uuid.uuid4().hex[:12]
-    amt = Decimal(str(amount))
 
     sell_trade = Trade(
         portfolio_code=portfolio_code, platform_code=from_platform,
@@ -104,11 +109,11 @@ def create_cash_transfer(
         buy_trade.status = "confirmed"
         buy_trade.confirm_date = transfer_date
     else:
-        # 跨天到账：两腿均 pending，confirm_date = 下一交易日（对称状态）
+        # #93: 跨天到账——转出方当日确认，转入方 pending
         next_trading_day = get_next_trading_day(db, transfer_date, days=1)
-        sell_trade.status = "pending"
-        sell_trade.confirm_date = next_trading_day
-        buy_trade.status = "pending"
+        sell_trade.status = "confirmed"  # 转出方当日确认（资金已划出）
+        sell_trade.confirm_date = transfer_date
+        buy_trade.status = "pending"     # 转入方 pending（待到账）
         buy_trade.confirm_date = next_trading_day
 
     db.flush()
@@ -133,35 +138,33 @@ def confirm_cash_transfer(
     portfolio_code: str,
     transfer_group: str,
 ) -> dict:
-    """确认跨天转移的两条 pending Trade（对称状态：两腿同时确认）。不 commit。"""
-    pending_trades = db.query(Trade).filter(
+    """确认跨天转移中所有仍为 pending 的 CASH legs（新模型下通常仅转入腿）。不 commit。"""
+    pending_legs = db.query(Trade).filter(
         Trade.portfolio_code == portfolio_code,
         Trade.transfer_group == transfer_group,
         Trade.product_code == "CASH",
         Trade.status == "pending",
     ).all()
-    if not pending_trades:
+
+    if not pending_legs:
         raise NotFoundError(
             "TRANSFER_NOT_FOUND", f"未找到待确认的转移记录 {transfer_group}"
         )
 
-    confirm_date = pending_trades[0].confirm_date
-    if not confirm_date:
-        confirm_date = get_next_trading_day(db, pending_trades[0].trade_date, days=1)
-
+    confirm_date = pending_legs[0].confirm_date or get_next_trading_day(db, pending_legs[0].trade_date, days=1)
     if confirm_date > date.today():
         raise BusinessError(
             "TRANSFER_NOT_READY",
             f"跨天转移尚未到确认日期（预计确认日: {confirm_date}）",
         )
 
-    for trade in pending_trades:
-        trade.status = "confirmed"
-        trade.confirm_date = confirm_date
+    for leg in pending_legs:
+        leg.status = "confirmed"
+        # 保留各腿自身的 confirm_date 语义（新模型下：sell=转出日，buy=到账日）
 
     return {
         "transfer_group": transfer_group,
-        "confirmed_count": len(pending_trades),
+        "confirmed_count": len(pending_legs),
         "confirm_date": confirm_date,
     }
 
@@ -197,8 +200,8 @@ def list_cash_transfers(db: Session, portfolio_code: str) -> List[dict]:
             "from_platform": sell.platform_code or "",
             "to_platform": buy.platform_code or "",
             "amount": float(sell.amount or 0),
-            # 对称状态后：跨天判断依据为 confirm_date > trade_date
-            "cross_day": (sell.confirm_date is not None and sell.confirm_date > sell.trade_date),
+            # #93: 跨天判断依据 buy 腿状态（非对称：sell 当日确认，buy 延后）
+            "cross_day": buy.status != "confirmed" or (buy.confirm_date is not None and buy.confirm_date > buy.trade_date),
             "sell_status": sell.status,
             "buy_status": buy.status,
             "transfer_date": sell.trade_date,

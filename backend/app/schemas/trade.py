@@ -26,6 +26,8 @@ class TradeCreate(TradeBase):
     allow_duplicate: bool = False
     # 跨平台现金腿（#91）：买=扣款平台、卖=到账平台，缺省同基金腿平台
     cash_platform_code: Optional[str] = None
+    # #93: CASH 腿独立确认日（卖出到账日）
+    cash_confirm_date: Optional[date] = None
 
 
 class TradeUpdate(BaseModel):

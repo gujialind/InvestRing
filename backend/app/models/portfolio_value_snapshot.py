@@ -13,6 +13,7 @@ class PortfolioValueSnapshot(Base):
     unit_price = Column(Numeric(10, 4), nullable=False)
     frozen_shares = Column(Numeric(15, 2), default=0)
     unit_price_change_pct = Column(Numeric(8, 4))
+    in_transit_total = Column(Numeric(15, 4), server_default='0')
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (

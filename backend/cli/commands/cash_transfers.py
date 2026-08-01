@@ -23,7 +23,7 @@ def create_cash_transfer(
     cross_day: bool = typer.Option(False, "--cross-day", help="跨天到账（T+1确认）"),
     notes: Optional[str] = typer.Option(None, "--notes"),
 ):
-    """创建平台间现金转移（对称状态模型由服务层统一处理）
+    """创建平台间现金转移（非对称状态模型由服务层统一处理）
 
     \b
     示例:
@@ -67,7 +67,7 @@ def confirm_cash_transfer(
     transfer_group: str = typer.Argument(..., help="转移组标识"),
     portfolio_code: str = typer.Option(..., "--portfolio-code"),
 ):
-    """确认跨天转移（对称状态：两腿同时确认）"""
+    """确认跨天转移中所有 pending 的 CASH legs（新模型下通常仅转入腿）"""
     with cli_context() as db:
         from app.services.cash_transfer_service import (
             confirm_cash_transfer as confirm_transfer_service,

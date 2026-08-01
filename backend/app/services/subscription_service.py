@@ -24,7 +24,7 @@ from app.services.trading_utils import (
 )
 from app.services.position_service import calculate_investor_available_shares
 from app.services.exceptions import BusinessError, NotFoundError
-from app.utils.quantize import quantize_shares
+from app.utils.quantize import quantize_amount, quantize_shares
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +117,14 @@ def confirm_single_subscription(
 
     # 4. 计算份额/金额
     if subscription.sub_type == "subscribe":
-        # 确认份额量化到 2 位（四舍五入）；净值与金额保持原精度
+        # 确认份额量化到 2 位（四舍五入）；金额为创建时已量化的用户输入（issue #94）
         shares = quantize_shares(Decimal(str(subscription.amount)) / nav)
         subscription.unit_price = nav
         subscription.shares = shares
     else:
-        amount = Decimal(str(subscription.shares)) * nav
+        # 赎回金额量化到 2 位（issue #94）：shares(2位) × nav(4位) 四舍五入，
+        # 误差计入基金财产，现金划出与平台 2 位口径一致
+        amount = quantize_amount(Decimal(str(subscription.shares)) * nav)
         subscription.unit_price = nav
         subscription.amount = amount
 
@@ -283,10 +285,14 @@ def create_subscription(
     if sub_type == "subscribe":
         if amount is None or Decimal(str(amount)) <= 0:
             raise BusinessError("INVALID_AMOUNT", "申购金额必须大于0")
+        # 用户输入金额先量化到 2 位（四舍五入）（issue #94）
+        amount_d = quantize_amount(Decimal(str(amount)))
+        if amount_d <= 0:
+            raise BusinessError("INVALID_AMOUNT", "申购金额必须大于0")
         new_sub = Subscription(
             portfolio_code=portfolio_code, investor_code=investor_code,
             platform_code=platform_code, sub_type="subscribe",
-            amount=Decimal(str(amount)), apply_date=apply_date,
+            amount=amount_d, apply_date=apply_date,
             confirm_date=confirm_date, status="pending", notes=notes,
         )
     elif sub_type == "redeem":
