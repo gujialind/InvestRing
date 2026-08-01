@@ -1,0 +1,140 @@
+{
+  "summary": {
+    "projectName": "InvestRing",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 25,
+    "overview": "项目具备完整的 CI/CD、测试与规则机制（1 份 AGENTS.md、2 条工作流、48 个测试文件、22 条项目记忆），但本窗口内会话证据几乎不可观测（2 个会话、0 个情节记录），且部署回滚路径未覆盖数据库迁移状态——多数机制处于「存在但未被验证运转」的状态。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Rules",
+        "Workflows"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Rules",
+          "scopes": [
+            "Project"
+          ],
+          "count": 1,
+          "paths": [
+            "AGENTS.md"
+          ]
+        },
+        {
+          "surface": "Workflows",
+          "scopes": [
+            "Project"
+          ],
+          "count": 2,
+          "paths": [
+            ".github/workflows/ci.yml",
+            ".github/workflows/deploy.yml"
+          ]
+        },
+        {
+          "surface": "Memories",
+          "scopes": [
+            "Project"
+          ],
+          "count": 22
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        }
+      ]
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 68,
+        "summary": "根 AGENTS.md 详尽且引用完整（lint 0 错误），能为任务提供领域不变量与边界；但 285 个源文件、3 个子项目仅此一份 462 行文档，前端与 ir-cli 缺少就近指引，且窗口内无任务情节可证明上下文被正确取用。",
+        "findingRefs": [
+          "single-agents-md-for-three-subprojects"
+        ]
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 60,
+        "summary": "后端/前端/CLI 三套清单与启动路径有文档（CLI_MANUAL、docker-compose），但会话层观测到两次会话均出现失败的 SessionStart hook 事件，且无任何受控操作的已观测情节，支持状态止步于 Present。",
+        "findingRefs": [
+          "session-start-hook-failed-events"
+        ]
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 72,
+        "summary": "48 个测试文件与源码路径相关（15 组源/测试共变更候选均 path-correlated），CI 提供 SQLite+MySQL 双模式后端测试与前端 lint/type/build 门禁——验证路由已接线；但窗口内会话未观测到任何编辑或验证命令，本地验证行为不可证。",
+        "findingRefs": []
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 52,
+        "summary": "CD 有健康检查与镜像自动回滚（deploy.yml），验收链路 main-CI→部署已声明；但回滚仅回退镜像引用，未绑定已执行的 alembic 迁移状态，含迁移版本的回滚路径未解决，且回滚从未被演练，CI/部署结果在本次评审边界内均 UNVERIFIED。",
+        "findingRefs": [
+          "rollback-not-bound-to-migrations"
+        ]
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 42,
+        "summary": "22 条项目记忆存在且完整性检查干净（0 冲突、0 相似候选），但本窗口会话证据层无归一化情节（episodeCount=0，30 天内代码库却有 123 次提交），Capture/Pattern Detection/Routing/Application 均不可评估——该未观测缺口保留在证据边界内，无法证明记忆被检索、应用并改善后续结果，维持 59 以下。",
+        "findingRefs": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "rollback-not-bound-to-migrations",
+      "title": "部署回滚只回退镜像，不处理已执行的数据库迁移，含迁移的版本无法用现有路径回滚",
+      "severity": "Medium",
+      "reason": "事实：deploy.yml 的健康检查失败分支仅将 BACKEND_IMAGE_REF/FRONTEND_IMAGE_REF 改回上一 tag 后 compose up；而 backend/app/main.py 的 lifespan 在每次启动时自动执行 alembic upgrade head。推断：若失败版本已应用新迁移，回滚后的旧镜像启动时其 alembic 版本目录中不存在数据库当前 revision，upgrade head 将报无法定位 revision，旧后端无法启动，自动回滚自身失败。该路径从未被演练（不确定性：未在含迁移的真实回滚中观察，属配置推导的确定性缺口，owner 为 deploy.yml 与部署 runbook）。",
+      "expectedOutput": [
+        "给下一次失败部署的操作者一条覆盖迁移状态的回滚决策路径，并有一次演练结果证明旧镜像可恢复服务。"
+      ],
+      "expectedArtifact": "Runbook",
+      "aiFixPrompt": "/better-harness fix this issue\n\n为含数据库迁移的版本补上最小的、有归属的回滚路径：在 deploy.yml 回滚分支或部署 runbook 中明确「镜像回退前先判断待回滚版本是否包含新 alembic revision」，若包含则给出降级或前滚（roll-forward）决策与执行者，不改变现有健康检查与镜像回退逻辑。\n\n## Validation\n\n- 在非生产环境对一个包含新迁移的版本演练一次完整回滚，记录 alembic 版本判断结果与旧镜像启动结果\n- 确认 deploy.yml 或 runbook 中回滚步骤、执行者与后置校验（后端 /health 通过）均有明确记录",
+      "dimensionRefs": [
+        "reliable-delivery"
+      ]
+    },
+    {
+      "id": "single-agents-md-for-three-subprojects",
+      "title": "3 个子项目、285 个源文件共用一份 462 行根 AGENTS.md，维护成本集中且前端/CLI 无就近指引",
+      "severity": "Low",
+      "reason": "事实：项目仅 1 份根 AGENTS.md（分析器判定 thin，建议最少 2 份），frontend/src（127 文件）、backend/app（90 文件）、ir-cli/ir_cli（28 文件）均无嵌套指引；该文件 30 天内 22 次提交、churn 1109，是变更最频繁的支撑文件之一。推断：任何子项目的任务都须加载并维护同一份全量文档，后端业务不变量的频繁修订与前端/CLI 指引耦合在同一文件中。不确定性：lint 显示引用完整、结构清晰，实际模型加载损耗未直接测量；owner 为 AGENTS.md 及各子项目目录。",
+      "expectedOutput": [
+        "前端与 CLI 任务无需通读 462 行全量文档即可获得正确的边界、命令与验证路径，根文档修订不再牵动子项目指引。"
+      ],
+      "expectedArtifact": "Rule",
+      "aiFixPrompt": "/better-harness fix this issue\n\n保持根 AGENTS.md 作为领域不变量的单一事实来源，为 frontend/ 与 ir-cli/ 各新增一份最小的嵌套 AGENTS.md：只写该子项目的技术栈、目录职责、质量门禁命令与到根文档相应章节的指引，不复制业务规则本体。\n\n## Validation\n\n- 确认新增文件不与根 AGENTS.md 重复陈述领域规则（抽查净值/快照等章节仅在根文档出现）\n- 在 frontend 或 ir-cli 内发起一次典型任务，确认就近指引可独立回答技术栈与验证命令问题",
+      "dimensionRefs": [
+        "task-understanding"
+      ]
+    },
+    {
+      "id": "session-start-hook-failed-events",
+      "title": "两个被分析会话均在启动阶段出现失败的 hook 事件，会话启动路径带有持续噪声",
+      "severity": "Low",
+      "reason": "事实：会话事实数据中摩擦分类 failed-event 共 2 次，均绑定 hook.finished 证据，最常见被观测 hook 为 SessionStart（2 次）；项目资产清单中 Hooks=0，说明失败并非项目内配置的 hook。推断：失败来自会话环境层（provider 或用户级配置）的启动 hook，其脚本目标当前不可用。不确定性：证据范围未授权检查用户全局配置，无法定位具体 hook 与脚本；后果目前限于每次会话启动携带失败事件，未观测到任务被阻断。",
+      "expectedOutput": [
+        "新会话的启动事件流中不再包含失败的 hook 事件，会话证据不再被启动噪声污染。"
+      ],
+      "expectedArtifact": "Config",
+      "aiFixPrompt": "/better-harness fix this issue\n\n定位并修复会话启动阶段持续失败的 SessionStart hook：先在 Qoder 的 hook 配置界面（用户级/全局层，需用户授权查看）检查已启用的 SessionStart hook 及其脚本目标是否存在，再决定修复脚本路径或停用失效 hook。不得在未确认脚本归属前删除任何配置。\n\n## Validation\n\n- 修复后开启一个新会话，重新运行本 Skill 的会话证据收集，确认 friction 分类中不再出现 SessionStart 相关 failed-event",
+      "dimensionRefs": [
+        "controlled-execution"
+      ]
+    }
+  ]
+}

@@ -22,6 +22,7 @@ from app.services.trading_utils import (
     is_trading_day,
 )
 from app.services.exceptions import BusinessError, NotFoundError
+from app.utils.quantize import quantize_amount
 
 
 def compute_cash_balance(
@@ -389,6 +390,9 @@ def update_cash_position(
     if not is_trading_day(db, target_date):
         raise BusinessError("NON_TRADING_DAY", "非交易日，请等待交易日再提交")
 
+    # 覆盖金额为手动重估值，统一量化到 2 位（issue #94）
+    amount_d = quantize_amount(amount)
+
     # 计算当前隐式值（用于审计）
     computed = compute_cash_balance(db, portfolio_code, platform_code, target_date)
 
@@ -415,7 +419,7 @@ def update_cash_position(
         ManualMarketValue.value_date == target_date,
     ).first()
     if manual:
-        manual.market_value = Decimal(str(amount))
+        manual.market_value = amount_d
         manual.computed_value = computed
     else:
         manual = ManualMarketValue(
@@ -423,7 +427,7 @@ def update_cash_position(
             platform_code=platform_code,
             product_code="CASH",
             value_date=target_date,
-            market_value=Decimal(str(amount)),
+            market_value=amount_d,
             computed_value=computed,
             created_by=created_by,
         )

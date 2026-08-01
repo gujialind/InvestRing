@@ -10,7 +10,7 @@ class ManualMarketValue(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
     platform_code = Column(String(20), ForeignKey("platform.code"), nullable=False)
-    product_code = Column(String(10), nullable=False)
+    product_code = Column(String(20), nullable=False)
     value_date = Column(Date, nullable=False)
     market_value = Column(Numeric(15, 4), nullable=False)
     computed_value = Column(Numeric(15, 4))  # 隐式计算值（审计用）

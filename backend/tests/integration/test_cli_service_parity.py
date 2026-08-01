@@ -207,8 +207,8 @@ class TestPortfolioCloseParity:
         assert payload["error"]["code"] == "PENDING_TRANSACTIONS_EXIST"
 
 
-class TestCashTransferSymmetricParity:
-    """平台间现金转移对称状态：跨天两腿 pending / 当天两腿 confirmed。"""
+class TestCashTransferAsymmetricParity:
+    """平台间现金转移非对称状态：跨天 sell confirmed / buy pending；当天两腿 confirmed。"""
 
     def _seed_cash(self, db, portfolio_code, platform_code, amount=50000.0):
         create_portfolio(db, code=portfolio_code, status="active")
@@ -220,7 +220,7 @@ class TestCashTransferSymmetricParity:
             confirm_date=date(2025, 6, 2), status="confirmed",
         )
 
-    def test_cli_cross_day_both_legs_pending(self, cli_db):
+    def test_cli_cross_day_sell_confirmed_buy_pending(self, cli_db):
         self._seed_cash(cli_db, "PAR_XFER_X", "MYCF")
         create_platform(cli_db, code="HBZQ")
         ensure_trading_day(cli_db, TRADING_DAY, is_open=True)
@@ -235,17 +235,21 @@ class TestCashTransferSymmetricParity:
         assert result.exit_code == 0, result.output
         data = _parse(result.output)["data"]
         assert data["cross_day"] is True
-        assert data["sell_status"] == "pending"
+        assert data["sell_status"] == "confirmed"
         assert data["buy_status"] == "pending"
 
         legs = cli_db.query(Trade).filter(
             Trade.transfer_group == data["transfer_group"]
         ).all()
         assert len(legs) == 2
-        for leg in legs:
-            assert leg.status == "pending"
-            assert leg.confirm_date is not None
-            assert leg.confirm_date > leg.trade_date  # 对称：确认日推到次交易日
+        sell_leg = next(l for l in legs if l.trade_type == "sell")
+        buy_leg = next(l for l in legs if l.trade_type == "buy")
+        # 非对称：转出方当日 confirmed，confirm_date = trade_date
+        assert sell_leg.status == "confirmed"
+        assert sell_leg.confirm_date == TRADING_DAY
+        # 转入方 pending，confirm_date 推到次交易日
+        assert buy_leg.status == "pending"
+        assert buy_leg.confirm_date > buy_leg.trade_date
 
     def test_cli_same_day_both_legs_confirmed(self, cli_db):
         self._seed_cash(cli_db, "PAR_XFER_S", "MYCF")

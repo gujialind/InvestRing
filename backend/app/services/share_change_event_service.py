@@ -20,7 +20,7 @@ from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.services.trading_utils import is_trading_day, get_latest_snapshot_date
 from app.services.exceptions import BusinessError, NotFoundError
-from app.utils.quantize import quantize_shares
+from app.utils.quantize import quantize_amount, quantize_shares
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +36,11 @@ def _compute_event_fields(event: ShareChangeEvent) -> None:
     shares_change 严格自洽：乘除产生新份额的类型（split/merge）先量化
     shares_after 再反算 shares_change；增量型（reinvest/bonus）先量化
     shares_change 再用 es + shares_change 重算 shares_after。
-    cash_change 是金额，不量化。
+    cash_change 是金额，同样量化到 2 位（issue #94）。
     """
     es = event.entitlement_shares or Decimal("0")
     if event.event_type == "cash_dividend":
-        event.cash_change = es * Decimal(str(event.div_cash or 0))
+        event.cash_change = quantize_amount(es * Decimal(str(event.div_cash or 0)))
         event.shares_change = Decimal("0")
         event.shares_after = es
     elif event.event_type == "reinvest_dividend":
@@ -62,9 +62,11 @@ def _compute_event_fields(event: ShareChangeEvent) -> None:
         event.shares_after = es + event.shares_change
         event.cash_change = Decimal("0")
     elif event.event_type == "forced_adjustment":
-        # shares_change / cash_change 由用户直接填写；份额量化，金额不动
+        # shares_change / cash_change 由用户直接填写；份额与金额均量化到 2 位（issue #94）
         if event.shares_change is not None:
             event.shares_change = quantize_shares(Decimal(str(event.shares_change)))
+        if event.cash_change is not None:
+            event.cash_change = quantize_amount(Decimal(str(event.cash_change)))
 
 
 def check_platform_coverage(

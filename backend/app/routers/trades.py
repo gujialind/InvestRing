@@ -23,8 +23,12 @@ from app.services.trade_service import (
     unconfirm_trade as unconfirm_trade_service,
 )
 from app.services.trading_utils import get_next_trading_day
+from app.utils.quantize import quantize_amount
 
 router = APIRouter()
+
+# PUT 直改路径中的金额字段：用户输入统一量化到 2 位（issue #94）
+_AMOUNT_FIELDS = {"amount", "actual_amount", "fee"}
 
 
 @router.get("")
@@ -70,6 +74,7 @@ def create_trade(
         notes=trade.notes,
         allow_duplicate=trade.allow_duplicate,
         cash_platform_code=trade.cash_platform_code,
+        cash_confirm_date=trade.cash_confirm_date,
     )
     db.commit()
     db.refresh(new_trade)
@@ -227,6 +232,9 @@ def update_trade(
     needs_sync = bool(update_data.keys() & sync_fields)
 
     for field, value in update_data.items():
+        # 金额字段量化到 2 位，防止直改路径写入 4 位金额（issue #94）
+        if field in _AMOUNT_FIELDS and value is not None:
+            value = quantize_amount(value)
         setattr(db_trade, field, value)
 
     # trade_date 变更时按产品 confirm_days 联动重算 confirm_date，避免确认日错位

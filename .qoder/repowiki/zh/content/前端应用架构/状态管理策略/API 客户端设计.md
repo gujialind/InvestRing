@@ -30,14 +30,16 @@
 - [backend/app/config.py](file://backend/app/config.py)
 - [frontend/package.json](file://frontend/package.json)
 - [backend/requirements.txt](file://backend/requirements.txt)
+- [frontend/next.config.js](file://frontend/next.config.js)
 </cite>
 
 ## 更新摘要
-**所做更改**
-- 增强 handleApiError 函数支持字符串详细信息，提供更精确的错误信息处理
-- ApiException 类保留详细错误信息，提升错误诊断能力
-- 新增任务执行历史端点 GET /system/tasks/executions，完善任务管理功能
-- 改进错误处理机制，支持更丰富的错误上下文信息
+**所做变更**
+- 新增ModelScope Studio子路径部署支持功能
+- 添加动态基础路径检测机制getBasePath()
+- 更新axios baseURL配置以支持子路径部署
+- 增强401错误处理的路径兼容性
+- 完善环境检测和运行时路径适配
 
 ## 目录
 1. [简介](#简介)
@@ -55,7 +57,7 @@
 
 InvestRing 项目采用前后端分离架构，前端使用 Next.js + TypeScript + React Query 构建，后端使用 FastAPI 提供 RESTful API 服务。本设计文档专注于前端 API 客户端的设计与实现，涵盖 HTTP 客户端封装、请求/响应拦截器、错误处理机制、认证令牌管理、重试策略、超时配置、并发控制以及最佳实践等内容。
 
-**重要变更**：项目已从单一 monolithic API 模块重构为模块化的业务域驱动架构。新的架构将 API 功能按业务领域进行模块化组织，提高了代码的可维护性和可扩展性。**最新更新**：增强了错误处理机制，handleApiError 函数现在支持字符串详细信息，ApiException 类能够保留详细的错误信息；新增了任务执行历史端点 GET /system/tasks/executions，完善了任务管理系统。
+**重要变更**：项目已从单一 monolithic API 模块重构为模块化的业务域驱动架构。新的架构将 API 功能按业务领域进行模块化组织，提高了代码的可维护性和可扩展性。**最新增强**：新增ModelScope Studio子路径部署支持，通过动态路径检测确保在 `/studios/{owner}/{repo}/` 路径下正确工作。
 
 ## 项目结构
 
@@ -118,14 +120,14 @@ IndexAPI --> TaskAPI
 ```
 
 **图表来源**
-- [frontend/src/lib/api/index.ts:1-100](file://frontend/src/lib/api/index.ts#L1-L100)
-- [frontend/src/lib/api/client.ts:1-200](file://frontend/src/lib/api/client.ts#L1-L200)
-- [frontend/src/lib/api/auth.ts:1-150](file://frontend/src/lib/api/auth.ts#L1-L150)
+- [frontend/src/lib/api/index.ts:1-44](file://frontend/src/lib/api/index.ts#L1-L44)
+- [frontend/src/lib/api/client.ts:1-106](file://frontend/src/lib/api/client.ts#L1-L106)
+- [frontend/src/lib/api/auth.ts:1-19](file://frontend/src/lib/api/auth.ts#L1-L19)
 - [backend/app/main.py:1-53](file://backend/app/main.py#L1-L53)
 
 **章节来源**
-- [frontend/src/lib/api/index.ts:1-100](file://frontend/src/lib/api/index.ts#L1-L100)
-- [frontend/src/lib/api/client.ts:1-200](file://frontend/src/lib/api/client.ts#L1-L200)
+- [frontend/src/lib/api/index.ts:1-44](file://frontend/src/lib/api/index.ts#L1-L44)
+- [frontend/src/lib/api/client.ts:1-106](file://frontend/src/lib/api/client.ts#L1-L106)
 - [backend/app/main.py:1-53](file://backend/app/main.py#L1-L53)
 
 ## 核心组件
@@ -134,10 +136,28 @@ IndexAPI --> TaskAPI
 
 项目基于 Axios 创建了统一的 HTTP 客户端实例，配置了基础 URL、请求头和超时时间：
 
-- **基础 URL**：从环境变量 `NEXT_PUBLIC_API_URL` 获取，默认为 `/api`
-- **Content-Type**：固定为 `application/json`
-- **超时时间**：30000ms（30秒）
-- **支持请求/响应拦截器链式处理**
+- **动态基础 URL**：优先使用环境变量 `NEXT_PUBLIC_API_URL`，否则自动检测运行时基础路径
+- **ModelScope Studio 支持**：通过 `getBasePath()` 函数动态检测 `/studios/{owner}/{repo}/` 路径
+- Content-Type：固定为 `application/json`
+- 超时时间：30000ms（30秒）
+- 支持请求/响应拦截器链式处理
+
+### 动态路径检测机制
+
+新增的 `getBasePath()` 函数提供了智能的路径检测能力：
+
+```typescript
+export function getBasePath(): string {
+  if (typeof window === "undefined") return "";
+  const match = window.location.pathname.match(/^(\/studios\/[^/]+\/[^/]+)/);
+  return match ? match[1] : "";
+}
+```
+
+该函数能够：
+- 在非浏览器环境中返回空字符串
+- 自动识别 ModelScope Studio 的子路径部署模式
+- 提取完整的基础路径前缀用于 API 请求和页面跳转
 
 ### 模块化 API 设计
 
@@ -160,29 +180,17 @@ IndexAPI --> TaskAPI
 
 ### 统一导出接口
 
-通过 `index.ts` 提供统一的 API 访问接口：
+通过 `index.ts` 提供统一的 API 访问接口，包括新增的 `getBasePath` 函数：
 
 ```typescript
-export * from './client';
-export * from './auth';
-export * from './investor';
-export * from './portfolio';
-export * from './product';
-export * from './platform';
-export * from './trade';
-export * from './position';
-export * from './subscription';
-export * from './snapshot';
-export * from './share-change-event';
-export * from './notification';
-export * from './log';
-export * from './system';
-export * from './task';
+export { default } from "./client";
+export { ApiException, handleApiError, getErrorMessage, getBasePath } from "./client";
+// ... 其他模块导出
 ```
 
 **章节来源**
-- [frontend/src/lib/api/client.ts:1-200](file://frontend/src/lib/api/client.ts#L1-L200)
-- [frontend/src/lib/api/index.ts:1-100](file://frontend/src/lib/api/index.ts#L1-L100)
+- [frontend/src/lib/api/client.ts:1-106](file://frontend/src/lib/api/client.ts#L1-L106)
+- [frontend/src/lib/api/index.ts:1-44](file://frontend/src/lib/api/index.ts#L1-L44)
 
 ## 架构概览
 
@@ -190,40 +198,62 @@ export * from './task';
 sequenceDiagram
 participant Client as "客户端应用"
 participant API as "模块化 API 客户端"
+participant PathDetector as "路径检测器"
 participant Module as "业务模块"
 participant Interceptor as "拦截器"
 participant Backend as "后端服务"
 Client->>API : 导入模块化 API
+API->>PathDetector : 检测运行环境路径
+PathDetector-->>API : 返回基础路径
 API->>Module : 加载特定业务模块
 Module->>Interceptor : 进入请求拦截器
 Interceptor->>Interceptor : 读取本地 token
 Interceptor->>Module : 添加 Authorization 头
-Module->>Backend : 发送 HTTP 请求
+Module->>Backend : 发送带基础路径的 HTTP 请求
 Backend-->>Module : 返回响应
 Module->>API : 处理响应数据
 API-->>Client : 返回模块化数据
-Note over Client,Backend : 模块化架构流程
+Note over Client,Backend : 支持子路径部署的架构流程
 ```
 
 **图表来源**
-- [frontend/src/lib/api/index.ts:1-100](file://frontend/src/lib/api/index.ts#L1-L100)
-- [frontend/src/lib/api/client.ts:1-200](file://frontend/src/lib/api/client.ts#L1-L200)
+- [frontend/src/lib/api/index.ts:1-44](file://frontend/src/lib/api/index.ts#L1-L44)
+- [frontend/src/lib/api/client.ts:1-106](file://frontend/src/lib/api/client.ts#L1-L106)
 
 ## 详细组件分析
 
-### 模块化架构优势
+### 动态路径检测优势
 
-新的模块化设计带来了以下优势：
+新增的动态路径检测机制带来了以下优势：
 
-1. **职责分离**：每个业务模块负责特定领域的功能
-2. **可维护性**：代码结构清晰，易于理解和维护
-3. **可扩展性**：新增业务功能只需创建新模块
-4. **可测试性**：模块间解耦，便于单元测试
-5. **性能优化**：按需加载，减少初始包体积
+1. **多环境兼容**：支持本地开发、Docker 部署、ModelScope Studio 等多种部署场景
+2. **零配置部署**：无需手动配置基础路径，自动适应运行环境
+3. **向后兼容**：保持与现有配置的完全兼容
+4. **智能降级**：在不支持子路径的环境中自动回退到根路径
 
-### 认证令牌管理
+### ModelScope Studio 子路径部署支持
 
-#### 令牌存储策略
+#### 路径检测逻辑
+
+```mermaid
+flowchart TD
+Start["应用启动"] --> CheckEnv{"检查运行环境"}
+CheckEnv --> |Node.js| ReturnEmpty["返回空字符串"]
+CheckEnv --> |Browser| ReadPath["读取 window.location.pathname"]
+ReadPath --> MatchPattern{"匹配 /studios/{owner}/{repo}/ 模式"}
+MatchPattern --> |匹配成功| ExtractPath["提取基础路径"]
+MatchPattern --> |未匹配| ReturnRoot["返回空字符串"]
+ExtractPath --> UsePath["使用基础路径"]
+ReturnEmpty --> UseRoot["使用根路径"]
+ReturnRoot --> UseRoot
+UsePath --> ConfigBaseURL["配置 axios baseURL"]
+UseRoot --> ConfigBaseURL
+```
+
+**图表来源**
+- [frontend/src/lib/api/client.ts:10-14](file://frontend/src/lib/api/client.ts#L10-L14)
+
+#### 认证令牌管理
 
 项目实现了多层令牌存储机制：
 
@@ -239,11 +269,12 @@ Request --> CheckToken{"令牌有效？"}
 CheckToken --> |是| SendRequest["发送带令牌的请求"]
 CheckToken --> |否| Redirect["跳转登录页"]
 Redirect --> ClearStorage["清理本地存储"]
+ClearStorage --> Login["重新登录"]
 ```
 
 **图表来源**
 - [frontend/src/stores/authStore.ts:37-51](file://frontend/src/stores/authStore.ts#L37-L51)
-- [frontend/src/lib/api/client.ts:150-180](file://frontend/src/lib/api/client.ts#L150-L180)
+- [frontend/src/lib/api/client.ts:25-40](file://frontend/src/lib/api/client.ts#L25-L40)
 
 #### 认证状态管理
 
@@ -278,14 +309,14 @@ Continue --> End["请求发送"]
 ```
 
 **图表来源**
-- [frontend/src/lib/api/client.ts:150-180](file://frontend/src/lib/api/client.ts#L150-L180)
+- [frontend/src/lib/api/client.ts:25-40](file://frontend/src/lib/api/client.ts#L25-L40)
 
 **章节来源**
-- [frontend/src/lib/api/client.ts:150-180](file://frontend/src/lib/api/client.ts#L150-L180)
+- [frontend/src/lib/api/client.ts:25-40](file://frontend/src/lib/api/client.ts#L25-L40)
 
 ### 响应拦截器与错误处理
 
-响应拦截器实现了统一的错误处理策略：
+响应拦截器实现了统一的错误处理策略，特别增强了 401 错误的处理：
 
 ```mermaid
 flowchart TD
@@ -294,7 +325,8 @@ StatusCheck --> |2xx| Success["正常响应"]
 StatusCheck --> |401| Unauthorized["401 未授权"]
 StatusCheck --> |其他错误| ErrorHandler["统一错误处理"]
 Unauthorized --> ClearToken["清理本地 token"]
-ClearToken --> Redirect["跳转登录页"]
+ClearToken --> DetectPath["检测基础路径"]
+DetectPath --> Redirect["跳转到对应路径的登录页"]
 ErrorHandler --> ThrowError["抛出 ApiException"]
 Success --> ReturnData["返回数据"]
 ThrowError --> End["错误传播"]
@@ -303,7 +335,7 @@ ReturnData --> End
 ```
 
 **图表来源**
-- [frontend/src/lib/api/client.ts:180-200](file://frontend/src/lib/api/client.ts#L180-L200)
+- [frontend/src/lib/api/client.ts:42-54](file://frontend/src/lib/api/client.ts#L42-L54)
 
 #### 异常类设计
 
@@ -312,13 +344,10 @@ ReturnData --> End
 - `code`：错误码，来源于后端 API 错误详情
 - `status`：HTTP 状态码
 - `message`：错误描述信息
-- **更新**：现在支持保留详细的错误信息，包括字符串类型的详细信息字段
 - 继承自 Error，保持与 JavaScript 标准异常兼容
 
-**更新**：handleApiError 函数现在支持字符串详细信息参数，能够捕获和传递更丰富的错误上下文信息，提升了错误诊断和调试能力。
-
 **章节来源**
-- [frontend/src/lib/api/client.ts:80-120](file://frontend/src/lib/api/client.ts#L80-L120)
+- [frontend/src/lib/api/client.ts:56-82](file://frontend/src/lib/api/client.ts#L56-L82)
 
 ### React Query 集成
 
@@ -342,6 +371,7 @@ class APIWrapper {
 +request()
 +handleApiError()
 +ApiException
++getBasePath()
 }
 QueryClient --> AuthHook : "管理查询状态"
 AuthHook --> APIWrapper : "调用 API"
@@ -385,43 +415,12 @@ Note over Client,AuthRouter : 令牌有效期由配置决定
 ```
 
 **图表来源**
-- [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-95)
-- [backend/app/config.py:14-16](file://backend/app/config.py#L14-16)
-
-**章节来源**
-- [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-95)
+- [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-L95)
 - [backend/app/config.py:14-16](file://backend/app/config.py#L14-L16)
 
-### 任务执行历史端点
-
-**新增功能**：系统新增了任务执行历史端点 GET /system/tasks/executions，用于获取后台任务的执行历史记录。
-
-#### 任务执行历史管理
-
-```mermaid
-flowchart TD
-TaskExecution["任务执行"] --> RecordHistory["记录执行历史"]
-RecordHistory --> StoreHistory["存储到数据库"]
-StoreHistory --> QueryEndpoint["GET /system/tasks/executions"]
-QueryEndpoint --> FilterHistory["过滤和排序"]
-FilterHistory --> ReturnResults["返回执行历史"]
-```
-
-**图表来源**
-- [backend/app/routers/tasks.py:1-100](file://backend/app/routers/tasks.py#L1-L100)
-
-#### 执行历史数据结构
-
-任务执行历史包含以下关键信息：
-- 任务 ID 和执行 ID
-- 执行状态（成功、失败、运行中）
-- 开始时间和结束时间
-- 执行时长
-- 错误信息（如果执行失败）
-- 执行结果摘要
-
 **章节来源**
-- [backend/app/routers/tasks.py:1-100](file://backend/app/routers/tasks.py#L1-L100)
+- [backend/app/routers/auth.py:29-95](file://backend/app/routers/auth.py#L29-L95)
+- [backend/app/config.py:14-16](file://backend/app/config.py#L14-L16)
 
 ## 依赖分析
 
@@ -492,6 +491,7 @@ Next --> FastAPI
 - **超时控制**：30 秒全局超时设置
 - **错误重试**：默认重试 1 次
 - **连接复用**：Axios 实例复用 HTTP 连接
+- **路径优化**：动态路径检测减少配置开销
 
 ## 故障排除指南
 
@@ -501,8 +501,20 @@ Next --> FastAPI
 
 当出现 401 错误时，系统会自动：
 1. 清理本地存储的 token
-2. 跳转到登录页面
+2. 根据当前路径跳转到对应的登录页面
 3. 阻止后续请求
+
+#### ModelScope Studio 部署问题
+
+可能的原因包括：
+- 路径检测失败，无法识别子路径
+- 环境变量配置不正确
+- 反向代理配置问题
+
+解决方案：
+- 检查浏览器控制台的路径检测结果
+- 验证 `NEXT_PUBLIC_API_URL` 环境变量
+- 确认 ModelScope Studio 的路由配置
 
 #### 网络连接问题
 
@@ -520,18 +532,8 @@ Next --> FastAPI
 - 确认后端 JWT 密钥配置正确
 - 检查用户角色权限
 
-#### 任务执行历史查询问题
-
-如果遇到任务执行历史查询问题：
-- 检查 GET /system/tasks/executions 端点是否正常响应
-- 验证任务执行记录是否正确存储
-- 确认查询参数格式是否正确
-- 检查数据库连接和表结构
-
-**更新**：增强了错误处理机制，handleApiError 函数现在支持字符串详细信息，能够更好地捕获和报告错误上下文。
-
 **章节来源**
-- [frontend/src/lib/api/client.ts:180-200](file://frontend/src/lib/api/client.ts#L180-L200)
+- [frontend/src/lib/api/client.ts:42-54](file://frontend/src/lib/api/client.ts#L42-L54)
 - [frontend/src/stores/authStore.ts:45-51](file://frontend/src/stores/authStore.ts#L45-L51)
 
 ### 调试技巧
@@ -540,7 +542,7 @@ Next --> FastAPI
 2. **检查网络面板**：观察请求和响应详情
 3. **验证令牌**：使用 JWT 解码工具检查 token 内容
 4. **监控查询状态**：使用 React DevTools 检查查询状态
-5. **错误信息分析**：利用增强的错误详细信息进行问题定位
+5. **路径检测调试**：在浏览器控制台检查 `getBasePath()` 返回值
 
 ## 结论
 
@@ -552,10 +554,9 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 4. **状态管理集成**：与 React Query 和 Zustand 的无缝集成
 5. **可扩展的模块化设计**：支持新业务功能的快速添加
 6. **健壮的错误处理**：结构化的异常管理和用户体验
-7. **增强的错误诊断**：支持详细错误信息的捕获和传递
-8. **完整的任务管理**：新增任务执行历史端点，完善后台任务监控
+7. **动态路径检测**：支持多种部署环境的智能路径适配
 
-**重大架构升级**：从单一 monolithic API 模块迁移到模块化的业务域驱动架构，显著提升了代码的可维护性、可扩展性和团队协作效率。**最新增强**：增强了错误处理机制，handleApiError 函数支持字符串详细信息，ApiException 类能够保留详细的错误信息；新增了任务执行历史端点 GET /system/tasks/executions，完善了任务管理系统，为系统的稳定性和可维护性奠定了良好的基础。
+**重大架构升级**：从单一 monolithic API 模块迁移到模块化的业务域驱动架构，显著提升了代码的可维护性、可扩展性和团队协作效率。**最新增强**：新增 ModelScope Studio 子路径部署支持，通过动态路径检测确保在 `/studios/{owner}/{repo}/` 路径下正确工作，为云原生部署提供了更好的支持。新的架构为后续的功能扩展和维护奠定了良好的基础，同时保证了系统的稳定性和可维护性。
 
 ## 附录
 
@@ -563,11 +564,11 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 
 1. **使用模块化的 API 客户端**：按业务领域导入相应的 API 模块
 2. **合理设置缓存策略**：根据数据变化频率选择合适的缓存时间
-3. **错误处理标准化**：统一使用 ApiException 进行错误处理，利用增强的错误信息
+3. **错误处理标准化**：统一使用 ApiException 进行错误处理
 4. **令牌管理自动化**：利用拦截器自动处理认证头
 5. **查询键值规范化**：确保查询参数的顺序和格式一致
 6. **模块间解耦**：通过统一的导出接口访问各业务模块
-7. **任务执行监控**：使用新的任务执行历史端点进行任务状态监控
+7. **路径检测利用**：在需要自定义路径时使用 `getBasePath()` 函数
 
 ### 错误恢复策略
 
@@ -575,8 +576,7 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 2. **降级处理**：在网络异常时提供基本功能
 3. **用户反馈**：及时向用户展示错误信息和恢复选项
 4. **日志记录**：记录详细的错误信息用于调试
-5. **令牌自动刷新**：在 401 错误时自动清理并重定向到登录页
-6. **详细错误追踪**：利用增强的错误信息机制进行问题诊断
+5. **路径自适应**：自动适应不同的部署环境和路径配置
 
 ### 离线支持方案
 
@@ -585,28 +585,26 @@ InvestRing 项目的 API 客户端设计体现了现代前端开发的最佳实�
 2. **IndexedDB**：持久化存储关键数据
 3. **同步队列**：离线操作排队，网络恢复后同步
 4. **冲突解决**：处理离线期间的数据冲突
+5. **路径缓存**：缓存检测到的基础路径以提高性能
 
-### 任务执行历史查询示例
+### ModelScope Studio 部署配置
 
-使用新的任务执行历史端点：
+#### 环境变量配置
 
-```typescript
-// 获取任务执行历史
-const getTaskExecutions = async () => {
-  try {
-    const response = await systemApi.getTaskExecutions();
-    return response.data;
-  } catch (error) {
-    // 利用增强的错误信息进行诊断
-    if (error instanceof ApiException) {
-      console.error('任务执行历史查询失败:', error.message);
-      console.error('详细错误信息:', error.details);
-    }
-    throw error;
-  }
-};
+```bash
+# 开发环境
+NEXT_PUBLIC_API_URL=http://localhost:8000/api
+
+# Docker 部署
+NEXT_PUBLIC_API_URL=/api
+
+# ModelScope Studio 部署（自动检测）
+# 无需配置，系统会自动检测 /studios/{owner}/{repo}/ 路径
 ```
 
-**章节来源**
-- [frontend/src/lib/api/system.ts:1-100](file://frontend/src/lib/api/system.ts#L1-L100)
-- [frontend/src/lib/api/client.ts:80-120](file://frontend/src/lib/api/client.ts#L80-L120)
+#### 部署注意事项
+
+1. **反向代理配置**：确保 Nginx 或其他反向代理正确转发 `/api/*` 请求
+2. **CORS 设置**：允许来自不同源域的请求
+3. **路径重写**：在子路径部署模式下正确重写 API 路径
+4. **静态资源**：确保静态资源也能在子路径下正确访问

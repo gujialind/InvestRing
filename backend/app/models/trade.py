@@ -8,7 +8,7 @@ class Trade(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     portfolio_code = Column(String(20), ForeignKey("portfolio.code"), nullable=False)
     platform_code = Column(String(20), ForeignKey("platform.code"))
-    product_code = Column(String(10), nullable=False)
+    product_code = Column(String(20), nullable=False)
     market = Column(String(20))
     trade_type = Column(String(10), nullable=False)
     # 现金流水配对标识：关联同一业务操作产生的多条 trade（基金腿 + CASH 腿），
