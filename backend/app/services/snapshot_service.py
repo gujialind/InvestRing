@@ -178,6 +178,13 @@ def generate_daily_snapshots(
         if v["status"] == "failed"
     ]:
         error_messages = "; ".join([v["message"] for v in failed_checks])
+        # issue #96：纯净值缺失失败抛领域错误码 MISSING_NAV（与 trade 确认侧一致）；
+        # 混合失败（如 pending 交易 + 缺净值）保持 ValueError -> VALIDATION_FAILED 不变
+        if all(v["check_type"] == "price_data" for v in failed_checks):
+            raise BusinessError(
+                code="MISSING_NAV",
+                message=f"依赖数据校验失败: {error_messages}",
+            )
         raise ValueError(f"依赖数据校验失败: {error_messages}")
     
     # 2. 删除已有快照（如果存在）
@@ -978,6 +985,8 @@ def _generate_portfolio_position(
 
     # 构建最终的持仓快照对象
     result_positions = []
+    # issue #96：严格净值匹配，缺失产品收集后统一抛 MISSING_NAV
+    missing_nav: List[str] = []
     for (product_code, market, platform_code), pos_data in positions.items():
         # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
         is_cash = pos_data.get("asset_type") == "cash"
@@ -999,26 +1008,26 @@ def _generate_portfolio_position(
             # 现金资产
             market_value = pos_data["cash_amount"]
         elif product:
-            # 根据产品类型获取净值
+            # issue #96 严格净值匹配：普通基金=target_date 当日，QDII=T-1 交易日，禁止向前回退
             if product.is_qdii:
-                # QDII：取前一交易日净值
-                prev_date = _prev_trading_day(db, target_date, 1)
-                price_record = db.query(PriceRecord).filter(
-                    PriceRecord.product_code == product_code,
-                    PriceRecord.market == market,
-                    PriceRecord.price_date <= prev_date
-                ).order_by(PriceRecord.price_date.desc()).first()
+                # QDII：严格取前一交易日净值
+                nav_date = _prev_trading_day(db, target_date, 1)
+                nav_rule = "T-1(QDII)"
             else:
-                # 普通基金：取当日净值
-                price_record = db.query(PriceRecord).filter(
-                    PriceRecord.product_code == product_code,
-                    PriceRecord.market == market,
-                    PriceRecord.price_date <= target_date
-                ).order_by(PriceRecord.price_date.desc()).first()
-            
+                # 普通基金：严格取当日净值
+                nav_date = target_date
+                nav_rule = "T"
+            price_record = db.query(PriceRecord).filter(
+                PriceRecord.product_code == product_code,
+                PriceRecord.market == market,
+                PriceRecord.price_date == nav_date
+            ).first()
+
             if price_record:
                 unit_price = Decimal(str(price_record.unit_price))
                 market_value = pos_data["shares"] * unit_price
+            else:
+                missing_nav.append(f"{product_code}({market}) [{nav_rule}={nav_date}]")
         
         # 计算冻结份额（pending卖出）
         if is_in_transit:
@@ -1050,6 +1059,19 @@ def _generate_portfolio_position(
         )
         result_positions.append(position)
     
+    # issue #96：任一持仓缺少所需净值即拒绝生成（抛出点在 db.add_all 之前，
+    # REST/CLI/重算路径均由调用方整体回滚，不产生半截快照）
+    if missing_nav:
+        raise BusinessError(
+            code="MISSING_NAV",
+            message=f"快照生成失败，以下持仓缺少所需净值: {'; '.join(missing_nav)}",
+            details={
+                "portfolio_code": portfolio_code,
+                "target_date": target_date.isoformat(),
+                "missing": missing_nav,
+            },
+        )
+
     # issue #71：检测负现金 CASH 条目，产出 warning（不阻断生成）
     warnings: List[Dict[str, Any]] = []
     for pos in result_positions:
@@ -1556,7 +1578,7 @@ def _check_price_data_completeness(
     portfolio_code: str,
     target_date: date
 ) -> Dict[str, Any]:
-    """检查净值数据完整性"""
+    """检查净值数据完整性（#96 严格匹配：普通基金=当日净值、QDII=T-1 交易日净值，禁止回退）"""
     # 获取该组合的最新持仓产品
     latest_position_date = db.query(func.max(PortfolioPosition.snapshot_date)).filter(
         PortfolioPosition.portfolio_code == portfolio_code
@@ -1601,15 +1623,15 @@ def _check_price_data_completeness(
             if not price:
                 qdii_missing.append(f"{product_code}({market}) [T-1={prev_date}]")
         else:
-            # 普通基金：检查target_date当日净值
+            # 普通基金：严格检查target_date当日净值（#96 禁止回退）
             price = db.query(PriceRecord).filter(
                 PriceRecord.product_code == product_code,
                 PriceRecord.market == market,
-                PriceRecord.price_date <= target_date
-            ).order_by(PriceRecord.price_date.desc()).first()
+                PriceRecord.price_date == target_date
+            ).first()
             
             if not price:
-                missing_prices.append(f"{product_code}({market})")
+                missing_prices.append(f"{product_code}({market}) [T={target_date}]")
     
     all_missing = []
     if missing_prices:
