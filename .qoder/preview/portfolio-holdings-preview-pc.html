@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>持仓详情预览 · PC</title>
+<style>
+  /* ===== 设计基元：与 frontend/globals.css（shadcn 主题）对齐，与移动端预览稿同源 =====
+     文字主色 slate-900 / 次要 slate-500 / 弱提示 slate-400；边框 slate-200；圆角 8px
+     涨 red-600 / 跌 green-600；净值曲线 blue-500
+     分类色板：股票 blue-500 / 债券 violet-500 / 黄金 amber-500 / 现金 slate-400
+  */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: #f8fafc; color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 1080px; margin: 0 auto; padding: 0 24px 32px; }
+  .panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; }
+  .section { margin-top: 16px; }
+  .section-title { font-size: 15px; font-weight: 600; padding: 16px 20px 6px; }
+
+  /* 页头：标题左 + 操作按钮右（高频 primary、低频 outline） */
+  .pagehead {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 24px; background: #ffffff; border-bottom: 1px solid #e2e8f0;
+  }
+  .pagehead .left { display: flex; align-items: center; gap: 12px; }
+  .pagehead .back { font-size: 20px; color: #0f172a; }
+  .pagehead h1 { font-size: 20px; font-weight: 700; }
+  .pagehead .code { font-size: 13px; color: #64748b; margin-top: 2px; }
+  .actions { display: flex; gap: 8px; }
+  .btn { font-size: 13px; font-weight: 600; border-radius: 8px; padding: 8px 16px; }
+  .btn-primary { background: #0f172a; color: #ffffff; }
+  .btn-outline { background: #ffffff; border: 1px solid #e2e8f0; color: #0f172a; }
+  .btn-sm { font-size: 12px; padding: 5px 12px; }
+
+  /* 顶部四项指标：4 列独立卡片 */
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+  .stat-card { padding: 16px 18px; }
+  .stat-card .label { font-size: 13px; color: #64748b; }
+  .stat-card .value { font-size: 24px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .stat-card .value.small { font-size: 20px; }
+  .snap-date { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+
+  /* 资产分布：环形图 + 图例 */
+  .allocation { display: flex; align-items: center; gap: 40px; padding: 12px 24px 20px; }
+  .donut {
+    width: 180px; height: 180px; border-radius: 50%;
+    background: conic-gradient(
+      #3b82f6 0deg 224.82deg,
+      #8b5cf6 224.82deg 297.94deg,
+      #f59e0b 297.94deg 316.37deg,
+      #94a3b8 316.37deg 360deg
+    );
+    position: relative; flex-shrink: 0;
+  }
+  .donut::after { content: ""; position: absolute; inset: 36px; border-radius: 50%; background: #fff; }
+  .legend { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+  .legend .item { display: flex; align-items: center; font-size: 14px; color: #334155; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; flex-shrink: 0; }
+  .legend .pct { margin-left: auto; font-weight: 600; color: #0f172a; font-variant-numeric: tabular-nums; }
+
+  /* 持仓明细区头：标题 + 管理持仓入口 */
+  .holdings-head { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 4px; }
+  .holdings-head .t { font-size: 15px; font-weight: 600; }
+
+  /* 大类分区头：色点 + 分类名（左），合计金额 + 占比（右） */
+  .cat-head { padding: 16px 4px 8px; display: flex; justify-content: space-between; align-items: baseline; }
+  .cat-name { font-size: 15px; font-weight: 600; display: flex; align-items: center; }
+  .cat-name .dot { width: 8px; height: 8px; border-radius: 2px; margin-right: 7px; }
+  .cat-total { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .cat-total .unit { font-size: 12px; font-weight: 400; color: #64748b; margin-left: 2px; }
+  .cat-total .cat-pct { font-size: 13px; font-weight: 400; color: #64748b; margin-left: 6px; }
+
+  /* 持仓卡片：单列，与移动端同构 */
+  .cards { display: flex; flex-direction: column; gap: 10px; }
+  .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px 12px; }
+  .card .row1 { display: flex; justify-content: space-between; align-items: baseline; }
+  .card .pname { font-size: 15px; font-weight: 600; }
+  .card .total-amt { font-size: 13px; color: #0f172a; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .total-amt .share-pct { color: #64748b; font-weight: 400; margin-left: 6px; }
+  .card .row2 { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+  .card .fullname { font-size: 12px; color: #64748b; }
+  .card .code { font-size: 12px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+  .card .platform {
+    font-size: 11px; color: #64748b; background: #f1f5f9; border-radius: 4px;
+    padding: 1px 6px; margin-left: auto; flex-shrink: 0;
+  }
+  .card .metrics { display: flex; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f1f5f9; }
+  .card .metric { flex: 1; }
+  .card .m-label { font-size: 12px; color: #64748b; }
+  .card .m-value { font-size: 16px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+  .up { color: #dc2626; }
+  .down { color: #16a34a; }
+  .neutral { color: #0f172a; }
+
+  /* 净值曲线区 */
+  .chart-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 0; }
+  .range-chips { display: flex; gap: 8px; }
+  .chip { font-size: 13px; color: #64748b; background: #f1f5f9; border-radius: 999px; padding: 5px 14px; }
+  .chip.active { color: #fff; background: #3b82f6; font-weight: 600; }
+  .chart-box { padding: 8px 16px 16px; }
+
+  /* 绩效指标：6 列一行 */
+  .perf-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 8px 20px 20px; }
+  .perf-cell { background: #f8fafc; border-radius: 6px; padding: 12px; }
+  .perf-cell .p-label { font-size: 12px; color: #64748b; }
+  .perf-cell .p-value { font-size: 17px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="pagehead">
+  <div class="left">
+    <span class="back">‹</span>
+    <div>
+      <h1>长赢计划</h1>
+      <div class="code">PORT004</div>
+    </div>
+  </div>
+  <div class="actions">
+    <span class="btn btn-primary">申购赎回</span>
+    <span class="btn btn-outline">调仓交易</span>
+    <span class="btn btn-outline">份额变动</span>
+    <span class="btn btn-outline">快照管理</span>
+  </div>
+</div>
+
+<div class="container">
+  <!-- 顶部四项指标（4 列卡片）+ 最新快照日期 -->
+  <div class="stat-row">
+    <div class="panel stat-card"><div class="label">总资产（元）</div><div class="value">200,000.00</div></div>
+    <div class="panel stat-card"><div class="label">净值</div><div class="value">1.1524</div></div>
+    <div class="panel stat-card"><div class="label">累计收益（元）</div><div class="value small up">+26,449.15</div></div>
+    <div class="panel stat-card"><div class="label">运行天数</div><div class="value small">365 天</div></div>
+  </div>
+  <div class="snap-date">最新快照日期：2026-08-04</div>
+
+  <!-- 资产分布 -->
+  <div class="section panel">
+    <div class="section-title">资产分布</div>
+    <div class="allocation">
+      <div class="donut"></div>
+      <div class="legend">
+        <div class="item"><span class="dot" style="background:#3b82f6"></span>股票<span class="pct">62.45%</span></div>
+        <div class="item"><span class="dot" style="background:#8b5cf6"></span>债券<span class="pct">20.31%</span></div>
+        <div class="item"><span class="dot" style="background:#f59e0b"></span>黄金<span class="pct">5.12%</span></div>
+        <div class="item"><span class="dot" style="background:#94a3b8"></span>现金<span class="pct">12.12%</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 持仓明细：区头含「管理持仓」入口 -->
+  <div class="holdings-head">
+    <span class="t">持仓明细</span>
+    <span class="btn btn-outline btn-sm">管理持仓</span>
+  </div>
+
+  <div class="cat-head">
+    <div class="cat-name"><span class="dot" style="background:#3b82f6"></span>股票</div>
+    <div class="cat-total">124,900.00<span class="unit">元</span><span class="cat-pct">62.45%</span></div>
+  </div>
+  <div class="cards">
+    <div class="card">
+      <div class="row1"><span class="pname">沪深300</span><span class="total-amt">53,310.86 元<span class="share-pct">26.66%</span></span></div>
+      <div class="row2"><span class="fullname">易方达沪深300ETF联接A</span><span class="code">110020</span><span class="platform">蚂蚁财富</span></div>
+      <div class="metrics">
+        <div class="metric"><div class="m-label">持仓金额</div><div class="m-value neutral">53,310.86</div></div>
+        <div class="metric"><div class="m-label">累计收益</div><div class="m-value down">-1,289.14</div></div>
+        <div class="metric"><div class="m-label">最新收益 (08-04)</div><div class="m-value up">+117.49</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row1"><span class="pname">中证500</span><span class="total-amt">41,105.50 元<span class="share-pct">20.55%</span></span></div>
+      <div class="row2"><span class="fullname">天弘中证500ETF联接C</span><span class="code">001557</span><span class="platform">天天基金</span></div>
+      <div class="metrics">
+        <div class="metric"><div class="m-label">持仓金额</div><div class="m-value neutral">41,105.50</div></div>
+        <div class="metric"><div class="m-label">累计收益</div><div class="m-value up">+2,005.50</div></div>
+        <div class="metric"><div class="m-label">最新收益 (08-04)</div><div class="m-value up">+111.32</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row1"><span class="pname">中证红利</span><span class="total-amt">30,483.64 元<span class="share-pct">15.24%</span></span></div>
+      <div class="row2"><span class="fullname">招商中证红利ETF联接A</span><span class="code">012643</span><span class="platform">蚂蚁财富</span></div>
+      <div class="metrics">
+        <div class="metric"><div class="m-label">持仓金额</div><div class="m-value neutral">30,483.64</div></div>
+        <div class="metric"><div class="m-label">累计收益</div><div class="m-value up">+850.20</div></div>
+        <div class="metric"><div class="m-label">最新收益 (08-04)</div><div class="m-value up">+63.11</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cat-head">
+    <div class="cat-name"><span class="dot" style="background:#8b5cf6"></span>债券</div>
+    <div class="cat-total">40,620.00<span class="unit">元</span><span class="cat-pct">20.31%</span></div>
+  </div>
+  <div class="cards">
+    <div class="card">
+      <div class="row1"><span class="pname">短债</span><span class="total-amt">40,620.00 元<span class="share-pct">20.31%</span></span></div>
+      <div class="row2"><span class="fullname">嘉实超短债债券A</span><span class="code">070009</span><span class="platform">蚂蚁财富</span></div>
+      <div class="metrics">
+        <div class="metric"><div class="m-label">持仓金额</div><div class="m-value neutral">40,620.00</div></div>
+        <div class="metric"><div class="m-label">累计收益</div><div class="m-value up">+620.00</div></div>
+        <div class="metric"><div class="m-label">最新收益 (08-04)</div><div class="m-value up">+12.35</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cat-head">
+    <div class="cat-name"><span class="dot" style="background:#f59e0b"></span>黄金</div>
+    <div class="cat-total">10,240.00<span class="unit">元</span><span class="cat-pct">5.12%</span></div>
+  </div>
+  <div class="cards">
+    <div class="card">
+      <div class="row1"><span class="pname">黄金</span><span class="total-amt">10,240.00 元<span class="share-pct">5.12%</span></span></div>
+      <div class="row2"><span class="fullname">华安黄金ETF联接A</span><span class="code">000216</span><span class="platform">天天基金</span></div>
+      <div class="metrics">
+        <div class="metric"><div class="m-label">持仓金额</div><div class="m-value neutral">10,240.00</div></div>
+        <div class="metric"><div class="m-label">累计收益</div><div class="m-value up">+1,240.00</div></div>
+        <div class="metric"><div class="m-label">最新收益 (08-04)</div><div class="m-value up">+35.60</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cat-head">
+    <div class="cat-name"><span class="dot" style="background:#94a3b8"></span>现金</div>
+    <div class="cat-total">24,240.00<span class="unit">元</span><span class="cat-pct">12.12%</span></div>
+  </div>
+  <div class="cards">
+    <div class="card">
+      <div class="row1"><span class="pname">活期现金</span><span class="total-amt">24,240.00 元<span class="share-pct">12.12%</span></span></div>
+      <div class="row2"><span class="fullname">现金余额</span><span class="code">CASH</span><span class="platform">蚂蚁财富</span></div>
+      <div class="metrics">
+        <div class="metric"><div class="m-label">持仓金额</div><div class="m-value neutral">24,240.00</div></div>
+        <div class="metric"><div class="m-label">累计收益</div><div class="m-value up">+186.52</div></div>
+        <div class="metric"><div class="m-label">最新收益 (08-04)</div><div class="m-value up">+1.35</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 净值走势：标题 + 区间筛选同行 -->
+  <div class="section panel">
+    <div class="chart-head">
+      <span class="section-title" style="padding:0">净值走势</span>
+      <div class="range-chips">
+        <span class="chip">近6个月</span>
+        <span class="chip active">近1年</span>
+        <span class="chip">近3年</span>
+        <span class="chip">成立以来</span>
+      </div>
+    </div>
+    <div class="chart-box">
+      <svg viewBox="0 0 1000 280" width="100%" height="280">
+        <line x1="20" y1="50" x2="980" y2="50" stroke="#f1f5f9" stroke-width="1"/>
+        <line x1="20" y1="110" x2="980" y2="110" stroke="#f1f5f9" stroke-width="1"/>
+        <line x1="20" y1="170" x2="980" y2="170" stroke="#f1f5f9" stroke-width="1"/>
+        <line x1="20" y1="230" x2="980" y2="230" stroke="#e2e8f0" stroke-width="1"/>
+        <text x="20" y="42" font-size="11" fill="#94a3b8">1.16</text>
+        <text x="20" y="102" font-size="11" fill="#94a3b8">1.08</text>
+        <text x="20" y="162" font-size="11" fill="#94a3b8">1.00</text>
+        <defs>
+          <linearGradient id="navfill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.22"/>
+            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="M60,200 L160,188 L260,196 L360,158 L460,170 L560,132 L660,142 L760,102 L860,88 L960,62 L960,230 L60,230 Z" fill="url(#navfill)"/>
+        <polyline points="60,200 160,188 260,196 360,158 460,170 560,132 660,142 760,102 860,88 960,62" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="960" cy="62" r="4" fill="#3b82f6"/>
+        <text x="60" y="258" font-size="11" fill="#94a3b8">2025-08</text>
+        <text x="480" y="258" font-size="11" fill="#94a3b8">2026-02</text>
+        <text x="920" y="258" font-size="11" fill="#94a3b8">2026-08</text>
+        <text x="890" y="56" font-size="12" fill="#3b82f6" font-weight="bold">1.1524</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- 绩效指标：6 列一行 -->
+  <div class="section panel">
+    <div class="section-title">绩效指标</div>
+    <div class="perf-grid">
+      <div class="perf-cell"><div class="p-label">近6个月</div><div class="p-value up">+8.62%</div></div>
+      <div class="perf-cell"><div class="p-label">近1年</div><div class="p-value up">+15.24%</div></div>
+      <div class="perf-cell"><div class="p-label">近3年</div><div class="p-value up">+38.90%</div></div>
+      <div class="perf-cell"><div class="p-label">MWR 年化</div><div class="p-value up">+12.35%</div></div>
+      <div class="perf-cell"><div class="p-label">最大回撤</div><div class="p-value down">-6.83%</div></div>
+      <div class="perf-cell"><div class="p-label">年化波动率</div><div class="p-value neutral">9.42%</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
