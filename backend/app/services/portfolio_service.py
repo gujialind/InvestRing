@@ -100,6 +100,45 @@ def list_portfolios(
     }
 
 
+def _derive_portfolio_totals(db: Session, code: str) -> dict:
+    """组合概要派生字段（issue #99）：total_value / total_profit。
+
+    total_profit = 最新快照 total_value − 净投入；净投入 = Σ confirmed 申购金额
+    − Σ confirmed 赎回金额。无快照时两者均为 None。
+    """
+    latest = (
+        db.query(PortfolioValueSnapshot)
+        .filter(PortfolioValueSnapshot.portfolio_code == code)
+        .order_by(PortfolioValueSnapshot.snapshot_date.desc())
+        .first()
+    )
+    if not latest or latest.total_value is None:
+        return {"total_value": None, "total_profit": None}
+
+    subs = (
+        db.query(Subscription.sub_type, Subscription.amount)
+        .filter(
+            Subscription.portfolio_code == code,
+            Subscription.status == "confirmed",
+        )
+        .all()
+    )
+    net_invested = 0.0
+    for sub_type, amount in subs:
+        if amount is None:
+            continue
+        if sub_type == "subscribe":
+            net_invested += float(amount)
+        elif sub_type == "redeem":
+            net_invested -= float(amount)
+
+    total_value = float(latest.total_value)
+    return {
+        "total_value": total_value,
+        "total_profit": round(total_value - net_invested, 2),
+    }
+
+
 def get_latest_value_snapshot(db: Session, code: str) -> PortfolioValueSnapshot:
     """获取组合最新一条市值快照，无快照抛 NOT_FOUND。"""
     _get_portfolio_or_404(db, code)

@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import date
 from decimal import Decimal
 from app.database import get_db
+from app.models.asset_classification import AssetClassification
 from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.product import Product
@@ -13,6 +14,9 @@ from app.services.position_service import (
     calculate_available_cash,
     calculate_available_shares,
     calculate_investor_available_shares,
+    compute_cash_cumulative_profits,
+    compute_daily_profits,
+    compute_event_cash_addbacks,
 )
 from app.dependencies import get_current_user, get_current_admin
 
@@ -53,22 +57,52 @@ def get_positions(
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
 
-    # 读侧派生字段：批量取产品名称，计算盈亏/收益率（仅净值型资产；现金行为 None）
+    # 读侧派生字段（全部批量查询，防 N+1）：
+    # 产品名称/分类、asset_name、盈亏/收益率、daily_profit（issue #99）
     codes = {p.product_code for p in items}
     name_map = {}
+    asset_class_by_product = {}
+    qdii_map = {}
+    class_codes = set()
     if codes:
-        for prod in db.query(Product.code, Product.market, Product.name).filter(Product.code.in_(codes)).all():
+        for prod in db.query(Product.code, Product.market, Product.name, Product.asset_class_code, Product.is_qdii).filter(Product.code.in_(codes)).all():
             name_map[(prod.code, prod.market)] = prod.name
+            asset_class_by_product[(prod.code, prod.market)] = prod.asset_class_code
+            qdii_map[(prod.code, prod.market)] = prod.is_qdii
+            if prod.asset_class_code:
+                class_codes.add(prod.asset_class_code)
+
+    # asset_name：分类编码 → 聚合展示短名目（issue #98）
+    asset_name_by_class = {}
+    if class_codes:
+        for ac_code, ac_name in db.query(
+            AssetClassification.code, AssetClassification.asset_name
+        ).filter(AssetClassification.code.in_(class_codes)).all():
+            asset_name_by_class[ac_code] = ac_name
+
+    # daily_profit / 现金累计收益 / 分红加回（position_service 批量派生）
+    daily_profits = compute_daily_profits(db, items)
+    cash_profits = compute_cash_cumulative_profits(db, items)
+    event_addbacks = compute_event_cash_addbacks(db, items)
 
     enriched = []
     for p in items:
         row = PositionResponse.model_validate(p).model_dump()
+        key = (p.portfolio_code, p.product_code, p.market, p.platform_code)
         row["product_name"] = name_map.get((p.product_code, p.market))
+        row["is_qdii"] = qdii_map.get((p.product_code, p.market))
+        class_code = asset_class_by_product.get((p.product_code, p.market))
+        row["asset_name"] = asset_name_by_class.get(class_code) if class_code else None
+        row["daily_profit"] = daily_profits.get(key)
         if p.shares is not None and p.cost_price is not None and p.market_value is not None:
+            # 非现金行：市值 − 成本 + 累计分红加回（复权口径，路线 C）
             cost = float(p.shares) * float(p.cost_price)
-            profit_loss = float(p.market_value) - cost
+            profit_loss = float(p.market_value) - cost + event_addbacks.get(key, 0.0)
             row["profit_loss"] = round(profit_loss, 4)
             row["profit_loss_percent"] = round(profit_loss / cost * 100, 4) if cost else None
+        elif p.product_code == "CASH" and p.shares is None:
+            # CASH 行：现金累计收益（§3.3 现金基数口径，≈0）
+            row["profit_loss"] = cash_profits.get(key)
         enriched.append(row)
 
     return {
