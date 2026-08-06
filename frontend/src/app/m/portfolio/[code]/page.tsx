@@ -65,7 +65,6 @@ export default function MobilePortfolioDetailPage() {
   const totalValue = snapshot?.total_value || 0;
   const totalShares = snapshot?.total_shares || 0;
   const unitPrice = snapshot?.unit_price || 0;
-
   const isDraft = portfolio.status === "draft";
 
   const handleClose = () => {
@@ -106,10 +105,10 @@ export default function MobilePortfolioDetailPage() {
       {/* Stats Cards - Simplified for mobile */}
       {!isDraft && (
         <PortfolioStatsCards
-          totalValue={totalValue}
-          unitPrice={unitPrice}
-          totalShares={totalShares}
-          cumulativeReturn={portfolio.cumulative_return || 0}
+          totalValue={snapshot?.total_value ?? null}
+          unitPrice={snapshot?.unit_price ?? null}
+          totalProfit={portfolio.total_profit ?? null}
+          holdingDays={performance?.holding_days ?? null}
           variant="mobile"
         />
       )}
@@ -121,9 +120,7 @@ export default function MobilePortfolioDetailPage() {
           status={portfolio.status as "draft" | "active" | "closed"}
           basePath="/m/portfolio"
           variant="mobile"
-          onCloseClick={() => setShowCloseDialog(true)}
           onActivateClick={handleActivate}
-          isClosePending={closePortfolio.isPending}
           isActivatePending={activatePortfolio.isPending}
         />
       )}
