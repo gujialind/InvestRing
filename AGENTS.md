@@ -281,7 +281,7 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 | `main` | 生产交付线 | 合入即触发 CI → CD 自动部署上线 |
 
 * **合 `main` 永远走 PR**（CI 全量门禁：SQLite pytest + MySQL 8.4 方言/迁移链 + ir-cli 契约 + 前端 lint/build）。
-* **分支命名**：`feature/<issue号>-<简述>`、`hotfix/<issue号>-<简述>`、`release/<版本>`；AI 代理干活可用 `trae/xxx`、`codex/xxx` 前缀。**合完即删**，不堆积。改动前先 `git fetch` 确认基线：hotfix 可能先合 main 再合 dev，**dev 可能落后于 main**，以 main 为最新事实源。
+* **分支命名**：`feature/<issue号>-<简述>`、`hotfix/<issue号>-<简述>`、`release/<版本>`；AI 代理干活可用 `trae/xxx`、`codex/xxx` 前缀。**合完即删**，不堆积。改动前先 `git fetch` 确认基线：dev 是开发草稿线，**常态领先于 main**；仅 hotfix 场景（先合 main 再合 dev）下 main 会暂时含有 dev 尚未合入的提交。
 
 ### 8.2 Issue 约定
 
