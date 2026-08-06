@@ -186,6 +186,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 * `share_change_event` 双日期分级：`ex_date`（除息日，应用日）+ `entitlement_date`（权益登记日，基数日），要求 `ex_date > entitlement_date` 且均为交易日；`parent_event_id` 为基金级拆分子记录自引用。
 * 外键删除行为均为 **RESTRICT**，通过业务流程（关闭/停用）管理生命周期，保留历史数据。
 * **虚拟产品**（#93）：除 `CASH`（`scripts/init_data.py` 种子）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向，`asset_type="cash"` 使下游现金处理代码无需改动即自动纳入（语义见 §2.2）。
+* `asset_classification.asset_name`（#98）语义分工：`asset_name`=聚合展示短名目（UI 分区/图例用），`description`=说明性文本；code→asset_name 映射单一事实来源为 `app/constants/asset_names.py::ASSET_NAME_MAP`（迁移 0007 与 init_data.py 种子共用），IN\_TRANSIT 虚拟产品 `asset_class_code` 为 NULL、无分类行。
 
 ### 4.5 配置与运行
 
