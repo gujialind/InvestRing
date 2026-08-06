@@ -7,9 +7,7 @@
 - [backend/app/routers/sync_jobs.py](file://backend/app/routers/sync_jobs.py)
 - [backend/app/routers/products.py](file://backend/app/routers/products.py)
 - [backend/app/routers/trades.py](file://backend/app/routers/trades.py)
-- [backend/app/routers/tasks.py](file://backend/app/routers/tasks.py)
 - [backend/app/services/market_data_service.py](file://backend/app/services/market_data_service.py)
-- [backend/app/services/task_runner.py](file://backend/app/services/task_runner.py)
 - [backend/app/schemas/market_data.py](file://backend/app/schemas/market_data.py)
 - [backend/app/schemas/sync_job.py](file://backend/app/schemas/sync_job.py)
 - [backend/app/schemas/product.py](file://backend/app/schemas/product.py)
@@ -22,6 +20,7 @@
 - [backend/app/services/trading_calendar_service.py](file://backend/app/services/trading_calendar_service.py)
 - [backend/app/schemas/trading_calendar.py](file://backend/app/schemas/trading_calendar.py)
 - [backend/app/models/trading_calendar.py](file://backend/app/models/trading_calendar.py)
+- [backend/app/routers/tasks.py](file://backend/app/routers/tasks.py)
 - [backend/app/models/task_execution_log.py](file://backend/app/models/task_execution_log.py)
 - [backend/app/services/tushare_client.py](file://backend/app/services/tushare_client.py)
 - [backend/app/dependencies.py](file://backend/app/dependencies.py)
@@ -30,14 +29,10 @@
 
 ## 更新摘要
 **变更内容**
-- **移除组合净值同步端点**：完全删除 `POST /api/market-data/portfolios/{portfolio_code}/sync-nav` 端点和 `sync_portfolio_nav` 函数，因存在严重缺陷包括缺失 snapshot_date 过滤和违反快照不可变性原则
-- **净值同步功能迁移**：净值同步功能已迁移到任务系统中，通过 `POST /api/system/tasks/nav_sync/run` 接口调用
-- **增强错误追踪机制**：详细的任务执行日志和失败原因记录
-- **改进进度监控**：实时跟踪批量同步任务的执行进度和成功率
-- **新增并发控制**：单运行锁机制防止重复任务提交
-- **完善数据模型**：新增sync_job表和nav_sync_detail表的job_id关联
-- **产品管理API增强**：GET /api/products 端点新增 market、data_source、data_source_status 过滤参数
-- **交易验证增强**：POST /api/trades 端点对 CN_EXCHANGE 市场交易强制正数价格验证
+- **移除组合净值同步API**：POST /api/market-data/portfolios/{code}/sync-nav 端点已完全移除，因数据完整性问题
+- **更新净值计算方式**：引导用户使用 ir snapshot generate 进行正确的净值计算
+- **简化市场数据同步流程**：移除可能导致数据不一致的组合净值同步功能
+- **增强文档准确性**：移除对已弃用功能的引用，提供替代方案指导
 
 ## 目录
 1. [简介](#简介)
@@ -56,14 +51,13 @@
 - **市场数据同步**：支持手动触发、历史回补、批量导入策略
 - **同步作业管理**：新增批量价格同步任务管理、状态查询和进度监控
 - **交易日历同步**：按年份同步与查询
-- **组合净值同步**：通过任务系统实现，基于持仓与最新价格计算
 - **数据质量检查**：通过返回统计与状态字段进行质量核验
 - **同步状态与历史**：通过任务日志、明细表与作业系统追踪
 - **并发控制与错误恢复**：基于数据库事务、幂等、重试策略与单运行锁
 - **产品筛选增强**：支持按市场类型、数据源和数据源状态过滤产品
 - **交易验证增强**：场内交易强制正数价格验证，确保数据完整性
 
-**重要变更**：原 `POST /api/market-data/portfolios/{portfolio_code}/sync-nav` 端点已完全移除，净值同步功能现已迁移到任务系统中，通过 `POST /api/system/tasks/nav_sync/run` 接口调用。
+**重要更新**：组合净值同步API（POST /api/market-data/portfolios/{code}/sync-nav）已完全移除。用户应使用 `ir snapshot generate` 命令进行正确的净值计算，以确保数据完整性。
 
 本 API 基于 FastAPI 提供，采用 Bearer Token 认证，部分管理类接口要求管理员权限。
 
@@ -85,11 +79,10 @@ R5["/api/products<br/>产品管理路由"]
 R6["/api/trades<br/>交易管理路由"]
 end
 subgraph "服务层"
-S1["市场数据服务<br/>sync_price_data / sync_product_prices"]
+S1["市场数据服务<br/>sync_price_data"]
 S2["交易日历服务<br/>sync_trading_calendar / get_calendar_query"]
-S3["Tushare 客户端<br/>get_fund_daily / get_fund_nav / get_trade_calendar"]
+S3["Tushare 客户端<br/>get_fund_daily / get_trade_calendar"]
 S4["同步作业服务<br/>submit_price_sync_job / recover_orphan_jobs"]
-S5["任务执行器<br/>run_nav_sync / run_calendar_sync"]
 end
 subgraph "模型层"
 M1["PriceRecord<br/>价格记录"]
@@ -102,14 +95,14 @@ M7["Trade<br/>交易记录"]
 end
 R1 --> S1
 R2 --> S2
-R3 --> S5
+R3 --> S1
+R3 --> S2
 R4 --> S4
 R5 --> M2
 R6 --> M7
 S1 --> S3
 S2 --> S3
 S4 --> S1
-S5 --> S1
 S1 --> M1
 S1 --> M2
 S2 --> M3
@@ -121,14 +114,13 @@ R4 --> M5
 
 **图表来源**
 - [backend/app/main.py:42-70](file://backend/app/main.py#L42-L70)
-- [backend/app/routers/market_data.py:1-111](file://backend/app/routers/market_data.py#L1-L111)
+- [backend/app/routers/market_data.py:1-112](file://backend/app/routers/market_data.py#L1-L112)
 - [backend/app/routers/sync_jobs.py:1-60](file://backend/app/routers/sync_jobs.py#L1-L60)
 - [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-L54)
 - [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-L397)
 - [backend/app/routers/trading_calendar.py:1-81](file://backend/app/routers/trading_calendar.py#L1-L81)
-- [backend/app/routers/tasks.py:1-154](file://backend/app/routers/tasks.py#L1-L154)
-- [backend/app/services/market_data_service.py:1-511](file://backend/app/services/market_data_service.py#L1-L511)
-- [backend/app/services/task_runner.py:1-320](file://backend/app/services/task_runner.py#L1-L320)
+- [backend/app/routers/tasks.py:1-323](file://backend/app/routers/tasks.py#L1-L323)
+- [backend/app/services/market_data_service.py:1-545](file://backend/app/services/market_data_service.py#L1-L545)
 - [backend/app/services/trading_calendar_service.py:1-125](file://backend/app/services/trading_calendar_service.py#L1-L125)
 - [backend/app/services/tushare_client.py:1-222](file://backend/app/services/tushare_client.py#L1-L222)
 - [backend/app/models/price_record.py:1-28](file://backend/app/models/price_record.py#L1-L28)
@@ -144,13 +136,14 @@ R4 --> M5
 
 ## 核心组件
 - 市场数据路由与服务
-  - 提供价格数据查询、手动同步、历史回补、净值覆盖率检查
+  - 提供价格数据查询、手动同步、历史回补
+  - **已移除**：组合净值同步功能（POST /api/market-data/portfolios/{code}/sync-nav）
 - **同步作业管理路由与服务**（新增）
   - 提供批量价格同步任务提交、状态查询、进度监控和错误追踪
-- **任务管理路由**（增强）
-  - 提供净值同步、交易日历同步、日志清理等任务执行
 - 交易日历路由与服务
   - 提供交易日历查询与按年同步
+- 任务管理路由
+  - 提供手动触发任务、查看任务日志、启用/禁用任务
 - 产品管理路由（增强）
   - 提供产品CRUD操作，支持多维度过滤查询
 - 交易管理路由（增强）
@@ -159,19 +152,18 @@ R4 --> M5
   - 封装 Tushare API 的调用、重试与错误处理
 
 **章节来源**
-- [backend/app/routers/market_data.py:17-111](file://backend/app/routers/market_data.py#L17-L111)
-- [backend/app/routers/sync_jobs.py:14-60](file://backend/app/routers/sync_jobs.py#L14-60)
-- [backend/app/routers/tasks.py:33-98](file://backend/app/routers/tasks.py#L33-98)
-- [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-54)
-- [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-397)
-- [backend/app/routers/trading_calendar.py:24-81](file://backend/app/routers/trading_calendar.py#L24-81)
-- [backend/app/services/market_data_service.py:88-511](file://backend/app/services/market_data_service.py#L88-511)
-- [backend/app/services/task_runner.py:74-163](file://backend/app/services/task_runner.py#L74-163)
-- [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-125)
-- [backend/app/services/tushare_client.py:123-222](file://backend/app/services/tushare_client.py#L123-222)
+- [backend/app/routers/market_data.py:17-112](file://backend/app/routers/market_data.py#L17-L112)
+- [backend/app/routers/sync_jobs.py:14-60](file://backend/app/routers/sync_jobs.py#L14-L60)
+- [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-L54)
+- [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-L397)
+- [backend/app/services/market_data_service.py:88-545](file://backend/app/services/market_data_service.py#L88-L545)
+- [backend/app/routers/trading_calendar.py:24-81](file://backend/app/routers/trading_calendar.py#L24-L81)
+- [backend/app/services/trading_calendar_service.py:15-125](file://backend/app/services/trading_calendar_service.py#L15-L125)
+- [backend/app/routers/tasks.py:88-323](file://backend/app/routers/tasks.py#L88-L323)
+- [backend/app/services/tushare_client.py:123-222](file://backend/app/services/tushare_client.py#L123-L222)
 
 ## 架构总览
-下图展示数据同步的关键交互流程：路由接收请求 → 权限校验 → 服务层调用第三方数据源 → 写入数据库 → 返回结果。**净值同步功能已迁移到任务系统中，不再提供直接的HTTP端点**。
+下图展示数据同步的关键交互流程：路由接收请求 → 权限校验 → 服务层调用第三方数据源 → 写入数据库 → 返回结果。**新增同步作业管理系统支持批量任务处理和进度监控**。
 
 ```mermaid
 sequenceDiagram
@@ -181,7 +173,7 @@ participant SVC as "服务层"
 participant TS as "Tushare 客户端"
 participant DB as "数据库"
 participant JOB as "同步作业系统"
-Note over C,JOB : 传统价格同步流程
+Note over C,JOB : 传统同步流程
 C->>API : "POST /api/market-data/products/{code}/{market}/sync-price-data"
 API->>API : "权限校验Bearer Token"
 API->>SVC : "sync_price_data(code, market, start_date, end_date)"
@@ -190,23 +182,26 @@ TS-->>SVC : "原始数据"
 SVC->>DB : "去重/更新/插入 PriceRecord"
 SVC-->>API : "同步结果success, message, synced_count"
 API-->>C : "200 OK / 4xx / 5xx"
-Note over C,JOB : 净值同步任务流程
-C->>API : "POST /api/system/tasks/nav_sync/run"
-API->>API : "权限校验管理员"
-API->>SVC : "run_nav_sync(db, log_id)"
-SVC->>SVC : "遍历产品并调用 sync_product_prices"
-SVC->>DB : "写入 NavSyncDetail 明细"
-SVC->>SVC : "生成组合快照"
-SVC-->>API : "返回汇总结果"
-API-->>C : "200 OK {message, synced_count, failed_products}"
+Note over C,JOB : 新增批量同步流程
+C->>API : "POST /api/sync-jobs/price"
+API->>API : "权限校验管理员 + 单运行锁检查"
+API->>JOB : "submit_price_sync_job(params)"
+JOB->>DB : "创建SyncJob记录(pending)"
+JOB->>DB : "启动后台线程执行"
+JOB-->>API : "返回job_id"
+API-->>C : "200 OK {job_id, status : pending}"
+Note over C,JOB : 进度查询流程
+C->>API : "GET /api/sync-jobs/{job_id}"
+API->>DB : "查询SyncJob状态"
+DB-->>API : "返回任务状态和进度"
+API-->>C : "200 OK {status, total, done, success_count, failed_count}"
 ```
 
 **图表来源**
-- [backend/app/routers/market_data.py:55-84](file://backend/app/routers/market_data.py#L55-84)
-- [backend/app/routers/tasks.py:33-98](file://backend/app/routers/tasks.py#L33-98)
-- [backend/app/services/market_data_service.py:219-227](file://backend/app/services/market_data_service.py#L219-227)
-- [backend/app/services/task_runner.py:74-163](file://backend/app/services/task_runner.py#L74-163)
-- [backend/app/services/tushare_client.py:123-222](file://backend/app/services/tushare_client.py#L123-222)
+- [backend/app/routers/market_data.py:43-68](file://backend/app/routers/market_data.py#L43-L68)
+- [backend/app/routers/sync_jobs.py:14-31](file://backend/app/routers/sync_jobs.py#L14-L31)
+- [backend/app/services/market_data_service.py:384-416](file://backend/app/services/market_data_service.py#L384-L416)
+- [backend/app/services/tushare_client.py:123-222](file://backend/app/services/tushare_client.py#L123-L222)
 - [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-L28)
 - [backend/app/models/sync_job.py:5-23](file://backend/app/models/sync_job.py#L5-L23)
 
@@ -264,14 +259,14 @@ Done --> End
 ```
 
 **图表来源**
-- [backend/app/routers/sync_jobs.py:14-31](file://backend/app/routers/sync_jobs.py#L14-31)
-- [backend/app/services/market_data_service.py:347-379](file://backend/app/services/market_data_service.py#L347-379)
+- [backend/app/routers/sync_jobs.py:14-31](file://backend/app/routers/sync_jobs.py#L14-L31)
+- [backend/app/services/market_data_service.py:384-416](file://backend/app/services/market_data_service.py#L384-L416)
 
 **章节来源**
-- [backend/app/routers/sync_jobs.py:14-60](file://backend/app/routers/sync_jobs.py#L14-60)
-- [backend/app/schemas/sync_job.py:6-48](file://backend/app/schemas/sync_job.py#L6-48)
-- [backend/app/services/market_data_service.py:347-511](file://backend/app/services/market_data_service.py#L347-511)
-- [backend/app/models/sync_job.py:5-23](file://backend/app/models/sync_job.py#L5-23)
+- [backend/app/routers/sync_jobs.py:14-60](file://backend/app/routers/sync_jobs.py#L14-L60)
+- [backend/app/schemas/sync_job.py:6-48](file://backend/app/schemas/sync_job.py#L6-L48)
+- [backend/app/services/market_data_service.py:384-545](file://backend/app/services/market_data_service.py#L384-L545)
+- [backend/app/models/sync_job.py:5-23](file://backend/app/models/sync_job.py#L5-L23)
 
 ### 产品管理 API（增强）
 - **获取产品列表（增强）**
@@ -340,12 +335,12 @@ Paginate --> ReturnResult["返回结果"]
 ```
 
 **图表来源**
-- [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-54)
+- [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-L54)
 
 **章节来源**
-- [backend/app/routers/products.py:27-151](file://backend/app/routers/products.py#L27-151)
-- [backend/app/schemas/product.py:6-37](file://backend/app/schemas/product.py#L6-37)
-- [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-22)
+- [backend/app/routers/products.py:27-151](file://backend/app/routers/products.py#L27-L151)
+- [backend/app/schemas/product.py:6-37](file://backend/app/schemas/product.py#L6-L37)
+- [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-L22)
 
 ### 交易管理 API（增强）
 - **创建交易（增强）**
@@ -444,11 +439,11 @@ Commit --> Done(["返回交易对象"])
 ```
 
 **图表来源**
-- [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-397)
+- [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-L397)
 
 **章节来源**
-- [backend/app/routers/trades.py:229-614](file://backend/app/routers/trades.py#L229-614)
-- [backend/app/schemas/trade.py:6-46](file://backend/app/schemas/trade.py#L6-46)
+- [backend/app/routers/trades.py:229-614](file://backend/app/routers/trades.py#L229-L614)
+- [backend/app/schemas/trade.py:6-46](file://backend/app/schemas/trade.py#L6-L46)
 
 ### 市场数据同步 API
 - 价格数据查询
@@ -457,21 +452,10 @@ Commit --> Done(["返回交易对象"])
   - 查询参数：
     - start_date：开始日期（可选）
     - end_date：结束日期（可选）
-    - limit：返回条数上限（默认30，范围1-1000）
-  - 响应：价格记录数组（包含 product_code、market、price_date、unit_price）
+    - limit：返回条数上限（默认30，范围1-365）
+  - 响应：价格记录数组（包含 product_code、market、date、unit_price）
   - 错误：500 时返回内部错误详情
   - 示例请求：GET /api/market-data/products/123456/CN_EXCHANGE/price-data?start_date=2025-01-01&end_date=2025-01-31&limit=30
-  - 示例响应：见"附录-请求/响应示例"
-
-- 净值覆盖率检查
-  - 方法与路径：GET /api/market-data/products/{code}/{market}/nav-coverage
-  - 权限：需登录（Bearer Token）
-  - 查询参数：
-    - start_date：开始日期（必填）
-    - end_date：结束日期（可选，默认为今天）
-  - 响应：覆盖率统计信息（包含 total_trading_days、synced_days、coverage、missing_dates）
-  - 错误：404 产品不存在；422 日期范围非法
-  - 示例请求：GET /api/market-data/products/510300/CN_EXCHANGE/nav-coverage?start_date=2025-01-01&end_date=2025-01-31
   - 示例响应：见"附录-请求/响应示例"
 
 - 手动触发价格数据同步
@@ -492,7 +476,10 @@ Commit --> Done(["返回交易对象"])
   - 示例请求：POST /api/market-data/products/123456/CN_EXCHANGE/sync-history
   - 示例响应：见"附录-请求/响应示例"
 
-**重要变更**：组合净值同步端点 `POST /api/market-data/portfolios/{portfolio_code}/sync-nav` 已完全移除，净值同步功能现已迁移到任务系统中。
+**已移除**：组合净值同步API（POST /api/market-data/portfolios/{code}/sync-nav）
+- **移除原因**：数据完整性问题
+- **替代方案**：使用 `ir snapshot generate` 命令进行净值计算
+- **影响**：所有相关文档和示例需要更新
 
 ```mermaid
 flowchart TD
@@ -510,16 +497,16 @@ Validate --> |失败| Err["抛出 404/400/500"]
 ```
 
 **图表来源**
-- [backend/app/routers/market_data.py:55-84](file://backend/app/routers/market_data.py#L55-84)
-- [backend/app/services/market_data_service.py:144-216](file://backend/app/services/market_data_service.py#L144-216)
-- [backend/app/services/tushare_client.py:123-222](file://backend/app/services/tushare_client.py#L123-222)
+- [backend/app/routers/market_data.py:43-92](file://backend/app/routers/market_data.py#L43-L92)
+- [backend/app/services/market_data_service.py:88-226](file://backend/app/services/market_data_service.py#L88-L226)
+- [backend/app/services/tushare_client.py:123-222](file://backend/app/services/tushare_client.py#L123-L222)
 
 **章节来源**
-- [backend/app/routers/market_data.py:17-111](file://backend/app/routers/market_data.py#L17-111)
-- [backend/app/schemas/market_data.py:6-19](file://backend/app/schemas/market_data.py#L6-19)
-- [backend/app/services/market_data_service.py:13-227](file://backend/app/services/market_data_service.py#L13-227)
-- [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-28)
-- [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-22)
+- [backend/app/routers/market_data.py:17-112](file://backend/app/routers/market_data.py#L17-L112)
+- [backend/app/schemas/market_data.py:6-19](file://backend/app/schemas/market_data.py#L6-L19)
+- [backend/app/services/market_data_service.py:15-323](file://backend/app/services/market_data_service.py#L15-L323)
+- [backend/app/models/price_record.py:5-28](file://backend/app/models/price_record.py#L5-L28)
+- [backend/app/models/product.py:5-22](file://backend/app/models/product.py#L5-L22)
 
 ### 交易日历同步 API
 - 交易日历查询
@@ -561,16 +548,16 @@ API-->>C : "200 OK / 503 / 500"
 ```
 
 **图表来源**
-- [backend/app/routers/trading_calendar.py:48-81](file://backend/app/routers/trading_calendar.py#L48-81)
+- [backend/app/routers/trading_calendar.py:48-81](file://backend/app/routers/trading_calendar.py#L48-L81)
 - [backend/app/services/trading_calendar_service.py:15-66](file://backend/app/services/trading_calendar_service.py#L15-66)
 - [backend/app/services/tushare_client.py:48-102](file://backend/app/services/tushare_client.py#L48-102)
 - [backend/app/models/trading_calendar.py:5-13](file://backend/app/models/trading_calendar.py#L5-13)
 
 **章节来源**
-- [backend/app/routers/trading_calendar.py:24-81](file://backend/app/routers/trading_calendar.py#L24-81)
-- [backend/app/schemas/trading_calendar.py:6-38](file://backend/app/schemas/trading_calendar.py#L6-38)
-- [backend/app/services/trading_calendar_service.py:69-125](file://backend/app/services/trading_calendar_service.py#L69-125)
-- [backend/app/models/trading_calendar.py:5-13](file://backend/app/models/trading_calendar.py#L5-13)
+- [backend/app/routers/trading_calendar.py:24-81](file://backend/app/routers/trading_calendar.py#L24-L81)
+- [backend/app/schemas/trading_calendar.py:6-38](file://backend/app/schemas/trading_calendar.py#L6-L38)
+- [backend/app/services/trading_calendar_service.py:69-125](file://backend/app/services/trading_calendar_service.py#L69-L125)
+- [backend/app/models/trading_calendar.py:5-13](file://backend/app/models/trading_calendar.py#L5-L13)
 
 ### 任务管理与同步历史 API
 - 查看任务列表
@@ -583,7 +570,7 @@ API-->>C : "200 OK / 503 / 500"
   - 权限：管理员（Bearer Token + role=admin）
   - 支持任务：
     - trading_calendar_sync：同步当前年份交易日历
-    - nav_sync：**净值同步任务（替代原 portfolios/sync-nav 端点）**
+    - nav_sync：批量同步产品净值（默认最近7天）
     - log_cleanup：清理过期日志
   - 响应：包含 message、synced_count、products_count、failed_products、snapshots_generated 等（视任务而定）
 
@@ -597,36 +584,30 @@ API-->>C : "200 OK / 503 / 500"
   - 权限：管理员（Bearer Token + role=admin）
   - 响应：分页的日志列表（items、total、page、page_size）
 
-**重要变更**：净值同步功能已从 `POST /api/market-data/portfolios/{portfolio_code}/sync-nav` 迁移到 `POST /api/system/tasks/nav_sync/run`。
-
 ```mermaid
 sequenceDiagram
 participant C as "客户端"
 participant API as "任务路由"
-participant SVC as "任务执行器"
+participant SVC as "市场数据服务"
 participant DB as "数据库"
 C->>API : "POST /api/system/tasks/nav_sync/run"
 API->>API : "权限校验管理员"
-API->>SVC : "run_nav_sync(db, log.id)"
-SVC->>SVC : "遍历产品并调用 sync_product_prices"
-SVC->>DB : "写入 NavSyncDetail 明细"
-SVC->>SVC : "生成组合快照"
-SVC-->>API : "返回汇总结果含失败产品列表"
-API-->>C : "200 OK {message, synced_count, failed_products}"
+API->>SVC : "遍历产品并调用 sync_price_data"
+SVC-->>API : "每个产品的同步结果"
+API->>DB : "写入 NavSyncDetail 明细"
+API-->>C : "返回汇总结果含失败产品列表"
 ```
 
 **图表来源**
-- [backend/app/routers/tasks.py:33-98](file://backend/app/routers/tasks.py#L33-98)
-- [backend/app/services/task_runner.py:74-163](file://backend/app/services/task_runner.py#L74-163)
-- [backend/app/services/market_data_service.py:144-216](file://backend/app/services/market_data_service.py#L144-216)
-- [backend/app/models/nav_sync_detail.py:5-18](file://backend/app/models/nav_sync_detail.py#L5-18)
-- [backend/app/models/task_execution_log.py:5-21](file://backend/app/models/task_execution_log.py#L5-21)
+- [backend/app/routers/tasks.py:88-268](file://backend/app/routers/tasks.py#L88-L268)
+- [backend/app/services/market_data_service.py:88-226](file://backend/app/services/market_data_service.py#L88-L226)
+- [backend/app/models/nav_sync_detail.py:5-18](file://backend/app/models/nav_sync_detail.py#L5-L18)
+- [backend/app/models/task_execution_log.py:5-21](file://backend/app/models/task_execution_log.py#L5-L21)
 
 **章节来源**
-- [backend/app/routers/tasks.py:33-154](file://backend/app/routers/tasks.py#L33-154)
-- [backend/app/services/task_runner.py:74-320](file://backend/app/services/task_runner.py#L74-320)
-- [backend/app/models/nav_sync_detail.py:5-18](file://backend/app/models/nav_sync_detail.py#L5-18)
-- [backend/app/models/task_execution_log.py:5-21](file://backend/app/models/task_execution_log.py#L5-21)
+- [backend/app/routers/tasks.py:70-323](file://backend/app/routers/tasks.py#L70-L323)
+- [backend/app/models/nav_sync_detail.py:5-18](file://backend/app/models/nav_sync_detail.py#L5-L18)
+- [backend/app/models/task_execution_log.py:5-21](file://backend/app/models/task_execution_log.py#L5-L21)
 
 ## 依赖分析
 - 路由与服务耦合
@@ -634,9 +615,6 @@ API-->>C : "200 OK {message, synced_count, failed_products}"
 - **新增同步作业依赖**
   - 同步作业路由依赖市场数据服务的批量同步功能
   - SyncJob模型与NavSyncDetail建立外键关联关系
-- **任务执行器依赖**
-  - 任务执行器依赖市场数据服务和快照服务
-  - 净值同步任务通过任务系统统一管理
 - 第三方依赖
   - Tushare 客户端封装了 API 调用、重试与错误类型化处理
 - 数据模型
@@ -656,25 +634,22 @@ R4["同步作业路由"] --> S4["同步作业服务"]
 S4 --> S1["市场数据服务"]
 S4 --> M6["SyncJob模型"]
 S4 --> M5["NavSyncDetail模型"]
-R3["任务路由"] --> S5["任务执行器"]
-S5 --> S1
-S5 --> S6["快照服务"]
 R5["产品路由"] --> M2["Product模型"]
 R6["交易路由"] --> M7["Trade模型"]
 M2 --> DS["data_source_status字段"]
 ```
 
 **图表来源**
-- [backend/app/dependencies.py:49-146](file://backend/app/dependencies.py#L49-146)
-- [backend/app/routers/market_data.py:1-111](file://backend/app/routers/market_data.py#L1-111)
-- [backend/app/routers/sync_jobs.py:1-60](file://backend/app/routers/sync_jobs.py#L1-60)
-- [backend/app/routers/tasks.py:1-154](file://backend/app/routers/tasks.py#L1-154)
-- [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-54)
-- [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-397)
-- [backend/app/routers/trading_calendar.py:1-81](file://backend/app/routers/trading_calendar.py#L1-81)
+- [backend/app/dependencies.py:49-146](file://backend/app/dependencies.py#L49-L146)
+- [backend/app/routers/market_data.py:1-112](file://backend/app/routers/market_data.py#L1-L112)
+- [backend/app/routers/sync_jobs.py:1-60](file://backend/app/routers/sync_jobs.py#L1-L60)
+- [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-L54)
+- [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-L397)
+- [backend/app/routers/trading_calendar.py:1-81](file://backend/app/routers/trading_calendar.py#L1-L81)
+- [backend/app/routers/tasks.py:1-323](file://backend/app/routers/tasks.py#L1-L323)
 
 **章节来源**
-- [backend/app/dependencies.py:49-146](file://backend/app/dependencies.py#L49-146)
+- [backend/app/dependencies.py:49-146](file://backend/app/dependencies.py#L49-L146)
 
 ## 性能考虑
 - 批量写入
@@ -715,6 +690,10 @@ M2 --> DS["data_source_status字段"]
   - **NON_TRADING_DAY：非交易日交易**
   - **PORTFOLIO_NOT_ACTIVE：组合未激活**
   - **DATE_BEFORE_SNAPSHOT：交易日早于最新快照日**
+- **已移除功能说明**
+  - **组合净值同步API（POST /api/market-data/portfolios/{code}/sync-nav）已完全移除**
+  - **数据完整性问题导致该功能被移除**
+  - **用户应使用 `ir snapshot generate` 命令进行净值计算**
 - 错误恢复机制
   - 服务层捕获异常并回滚事务，必要时更新产品状态为 failed
   - 任务执行日志记录错误堆栈与消息，便于定位问题
@@ -726,27 +705,26 @@ M2 --> DS["data_source_status字段"]
   - 查看任务执行日志与净值同步明细表
   - **使用GET /api/sync-jobs/{job_id}/details获取详细的执行明细**
   - **验证场内交易是否提供了有效的正数价格**
+  - **对于净值计算需求，使用 `ir snapshot generate` 命令**
   - 确认 .env 中 TUSHARE_TOKEN 已正确配置
-  - **注意：原 portfolios/sync-nav 端点已移除，请使用 tasks/nav_sync/run 替代**
 
 **章节来源**
-- [backend/app/routers/market_data.py:37-84](file://backend/app/routers/market_data.py#L37-84)
-- [backend/app/routers/sync_jobs.py:30-31](file://backend/app/routers/sync_jobs.py#L30-31)
-- [backend/app/routers/trading_calendar.py:66-80](file://backend/app/routers/trading_calendar.py#L66-80)
-- [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-54)
-- [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-397)
-- [backend/app/routers/tasks.py:33-98](file://backend/app/routers/tasks.py#L33-98)
-- [backend/app/services/market_data_service.py:210-215](file://backend/app/services/market_data_service.py#L210-215)
-- [backend/app/services/market_data_service.py:496-511](file://backend/app/services/market_data_service.py#L496-511)
-- [backend/app/services/tushare_client.py:38-46](file://backend/app/services/tushare_client.py#L38-46)
-- [backend/app/models/task_execution_log.py:5-21](file://backend/app/models/task_execution_log.py#L5-21)
-- [backend/app/models/nav_sync_detail.py:5-18](file://backend/app/models/nav_sync_detail.py#L5-18)
-- [backend/app/models/sync_job.py:5-23](file://backend/app/models/sync_job.py#L5-23)
+- [backend/app/routers/market_data.py:37-67](file://backend/app/routers/market_data.py#L37-L67)
+- [backend/app/routers/sync_jobs.py:30-31](file://backend/app/routers/sync_jobs.py#L30-L31)
+- [backend/app/routers/trading_calendar.py:66-80](file://backend/app/routers/trading_calendar.py#L66-L80)
+- [backend/app/routers/products.py:27-54](file://backend/app/routers/products.py#L27-L54)
+- [backend/app/routers/trades.py:229-397](file://backend/app/routers/trades.py#L229-L397)
+- [backend/app/services/market_data_service.py:210-215](file://backend/app/services/market_data_service.py#L210-L215)
+- [backend/app/services/market_data_service.py:518-527](file://backend/app/services/market_data_service.py#L518-L527)
+- [backend/app/services/tushare_client.py:38-46](file://backend/app/services/tushare_client.py#L38-L46)
+- [backend/app/models/task_execution_log.py:5-21](file://backend/app/models/task_execution_log.py#L5-L21)
+- [backend/app/models/nav_sync_detail.py:5-18](file://backend/app/models/nav_sync_detail.py#L5-L18)
+- [backend/app/models/sync_job.py:5-23](file://backend/app/models/sync_job.py#L5-L23)
 
 ## 结论
-本数据同步 API 提供了从交易日历、价格数据到组合净值的全链路同步能力，具备完善的权限控制、错误处理与可观测性。**净值同步功能已从直接HTTP端点迁移到任务系统中，大幅增强了批量数据处理能力，支持任务提交、进度监控、错误追踪和并发控制**。通过任务调度、作业系统和明细记录，可实现对批量同步过程的可视化、审计和故障诊断。**产品管理API的多维度过滤功能和交易管理的严格价格验证进一步提升了系统的灵活性和数据完整性**。
+本数据同步 API 提供了从交易日历、价格数据到组合净值的全链路同步能力，具备完善的权限控制、错误处理与可观测性。**新增的同步作业管理系统大幅增强了批量数据处理能力，支持任务提交、进度监控、错误追踪和并发控制**。通过任务调度、作业系统和明细记录，可实现对批量同步过程的可视化、审计和故障诊断。**产品管理API的多维度过滤功能和交易管理的严格价格验证进一步提升了系统的灵活性和数据完整性**。
 
-**重要说明**：原 `POST /api/market-data/portfolios/{portfolio_code}/sync-nav` 端点已完全移除，净值同步功能现已通过 `POST /api/system/tasks/nav_sync/run` 接口提供，具有更好的错误处理和进度监控能力。
+**重要更新**：组合净值同步API已完全移除，用户应使用 `ir snapshot generate` 命令进行净值计算，以确保数据完整性。这一变更解决了数据一致性问题，提高了系统的可靠性。
 
 ## 附录
 
@@ -785,11 +763,7 @@ M2 --> DS["data_source_status字段"]
 
 - 价格数据查询
   - 请求：GET /api/market-data/products/123456/CN_EXCHANGE/price-data?start_date=2025-01-01&end_date=2025-01-31&limit=30
-  - 响应：包含若干条记录，每条包含 product_code、market、price_date、unit_price
-
-- 净值覆盖率检查
-  - 请求：GET /api/market-data/products/510300/CN_EXCHANGE/nav-coverage?start_date=2025-01-01&end_date=2025-01-31
-  - 响应：{"product_code": "510300", "market": "CN_EXCHANGE", "start_date": "2025-01-01", "end_date": "2025-01-31", "total_trading_days": 22, "synced_days": 20, "coverage": 0.9091, "missing_dates": ["2025-01-06", "2025-01-07"]}
+  - 响应：包含若干条记录，每条包含 product_code、market、date、unit_price
 
 - 手动触发价格数据同步
   - 请求：POST /api/market-data/products/123456/CN_EXCHANGE/sync-price-data
@@ -800,9 +774,10 @@ M2 --> DS["data_source_status字段"]
   - 请求：POST /api/market-data/products/123456/CN_EXCHANGE/sync-history
   - 响应：{"success":true,"message":"无新数据需要同步...","synced_count":0}
 
-- **净值同步任务（替代原 portfolios/sync-nav 端点）**
-  - 请求：POST /api/system/tasks/nav_sync/run
-  - 响应：{"message": "任务 nav_sync 执行完成", "synced_count": 150, "products_count": 150, "failed_products": [], "dividends_detected": 3, "snapshots_generated": 10, "target_date": "2025-01-15"}
+**已移除**：组合净值同步API
+- 原请求：POST /api/market-data/portfolios/P001/sync-nav
+- 原响应：{"success":true,"message":"组合净值已更新","total_value":XXX,"total_shares":XXX,"unit_price":XXX}
+- **替代方案**：使用 `ir snapshot generate` 命令进行净值计算
 
 - **新增：提交批量同步任务**
   - 请求：POST /api/sync-jobs/price
@@ -831,9 +806,10 @@ M2 --> DS["data_source_status字段"]
   - 响应：包含 message、synced_count、failed_products、snapshots_generated 等
 
 **章节来源**
-- [backend/app/routers/products.py:27-151](file://backend/app/routers/products.py#L27-151)
-- [backend/app/routers/trades.py:229-614](file://backend/app/routers/trades.py#L229-614)
-- [backend/app/routers/market_data.py:17-111](file://backend/app/routers/market_data.py#L17-111)
-- [backend/app/routers/sync_jobs.py:14-60](file://backend/app/routers/sync_jobs.py#L14-60)
-- [backend/app/routers/trading_calendar.py:24-81](file://backend/app/routers/trading_calendar.py#L24-81)
-- [backend/app/routers/tasks.py:33-154](file://backend/app/routers/tasks.py#L33-154)
+- [backend/app/routers/products.py:27-151](file://backend/app/routers/products.py#L27-L151)
+- [backend/app/routers/trades.py:229-614](file://backend/app/routers/trades.py#L229-L614)
+- [backend/app/routers/market_data.py:17-112](file://backend/app/routers/market_data.py#L17-L112)
+- [backend/app/routers/sync_jobs.py:14-60](file://backend/app/routers/sync_jobs.py#L14-L60)
+- [backend/app/routers/trading_calendar.py:24-81](file://backend/app/routers/trading_calendar.py#L24-L81)
+- [backend/app/routers/tasks.py:88-268](file://backend/app/routers/tasks.py#L88-L268)
+- [backend/tests/integration/test_sync_jobs_api.py:21-156](file://backend/tests/integration/test_sync_jobs_api.py#L21-L156)
