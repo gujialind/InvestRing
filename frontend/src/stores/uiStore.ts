@@ -10,10 +10,6 @@ interface UIState {
   setSidebarOpen: (open: boolean) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
 
-  // 移动端底部导航
-  mobileNavVisible: boolean;
-  setMobileNavVisible: (visible: boolean) => void;
-
   // 全局加载状态
   globalLoading: boolean;
   setGlobalLoading: (loading: boolean) => void;
@@ -49,10 +45,6 @@ export const useUIStore = create<UIState>()(
         set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-
-      // 移动端底部导航默认显示
-      mobileNavVisible: true,
-      setMobileNavVisible: (visible) => set({ mobileNavVisible: visible }),
 
       // 全局加载
       globalLoading: false,
