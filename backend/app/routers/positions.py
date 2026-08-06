@@ -14,9 +14,7 @@ from app.services.position_service import (
     calculate_available_cash,
     calculate_available_shares,
     calculate_investor_available_shares,
-    compute_cash_cumulative_profits,
-    compute_daily_profits,
-    compute_event_cash_addbacks,
+    compute_derived_fields,
 )
 from app.dependencies import get_current_user, get_current_admin
 
@@ -80,10 +78,11 @@ def get_positions(
         ).filter(AssetClassification.code.in_(class_codes)).all():
             asset_name_by_class[ac_code] = ac_name
 
-    # daily_profit / 现金累计收益 / 分红加回（position_service 批量派生）
-    daily_profits = compute_daily_profits(db, items)
-    cash_profits = compute_cash_cumulative_profits(db, items)
-    event_addbacks = compute_event_cash_addbacks(db, items)
+    # daily_profit / 现金累计收益 / 分红加回：共享一次流水聚合（issue #103，防三函数重复查询）
+    derived = compute_derived_fields(db, items)
+    daily_profits = derived["daily_profits"]
+    cash_profits = derived["cash_profits"]
+    event_addbacks = derived["event_addbacks"]
 
     enriched = []
     for p in items:
