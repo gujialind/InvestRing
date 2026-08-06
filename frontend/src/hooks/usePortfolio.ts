@@ -196,15 +196,16 @@ export function usePortfolioPerformance(code: string, enabled = true) {
 
 // ==================== 持仓相关 Hooks ====================
 
-// 持仓列表 Hook
+// 持仓列表 Hook（options.enabled 惰性查询：弹窗等场景仅在需要时请求）
 export function usePositionList(
   portfolioCode: string,
-  params?: { page?: number; page_size?: number; snapshot_date?: string }
+  params?: { page?: number; page_size?: number; snapshot_date?: string },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
     queryKey: [POSITION_QUERY_KEY, portfolioCode, "list", params],
     queryFn: () => positionApi.list(portfolioCode, params),
-    enabled: !!portfolioCode,
+    enabled: !!portfolioCode && (options?.enabled ?? true),
     staleTime: 30 * 1000,
   });
 }
