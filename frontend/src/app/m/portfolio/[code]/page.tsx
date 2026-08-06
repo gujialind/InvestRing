@@ -1,49 +1,70 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ArrowLeft, Wallet, Plus, ArrowRightLeft } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { usePortfolio, useLatestSnapshot, useClosePortfolio, useActivatePortfolio, useNavHistory, usePortfolioPerformance } from "@/hooks/usePortfolio";
+import {
+  usePortfolio,
+  useLatestSnapshot,
+  usePositionList,
+  usePortfolioInvestors,
+  useActivatePortfolio,
+  useNavHistory,
+  usePortfolioPerformance,
+} from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
-import NavCurveSimple from "@/components/charts/NavCurveSimple";
+import NavCurve from "@/components/charts/NavCurve";
+import AssetAllocationPie from "@/components/charts/AssetAllocationPie";
 import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
 import PerformanceMetrics from "@/components/shared/PerformanceMetrics";
 import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
-import ClosePortfolioDialog from "@/components/shared/dialogs/ClosePortfolioDialog";
+import PortfolioInvestorsList from "@/components/shared/PortfolioInvestorsList";
+import PositionSections from "@/components/shared/PositionSections";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
+import { buildAllocation } from "@/lib/allocation";
 
-export default function MobilePortfolioDetailPage() {
+function MobilePortfolioDetailInner() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const code = params.code as string;
+  const showInvestors = searchParams.get("tab") === "investors";
 
   const { data: portfolio, isLoading: portfolioLoading } = usePortfolio(code);
   const { data: snapshot, isLoading: snapshotLoading } = useLatestSnapshot(code);
-  const closePortfolio = useClosePortfolio();
+  const { data: positionsData, isLoading: positionsLoading } = usePositionList(code, {
+    page_size: 100,
+  });
+  // 投资人列表仅 ?tab=investors 视图惰性查询（draft 也允许查看）
+  const { data: investors, isLoading: investorsLoading } = usePortfolioInvestors(code, {
+    enabled: showInvestors,
+  });
   const activatePortfolio = useActivatePortfolio();
   const { isAdmin } = useRoleCheck();
 
-  // 净值走势用历史序列（不再只画最新快照单点）
+  // 净值走势用历史序列（与桌面统一 NavCurve，移动端高度 200）
   const { data: navHistoryData } = useNavHistory(code);
   const navHistory = (navHistoryData || [])
     .filter((r) => r.unit_price !== null)
     .map((r) => ({ date: r.snapshot_date, nav: r.unit_price as number }));
 
   // 绩效指标：draft 组合无快照，不请求
-  const { data: performance } = usePortfolioPerformance(code, portfolio?.status !== "draft");
+  const isDraftStatus = portfolio?.status === "draft";
+  const { data: performance } = usePortfolioPerformance(code, !isDraftStatus);
 
-  const isLoading = portfolioLoading || snapshotLoading;
-
-  const [showCloseDialog, setShowCloseDialog] = useState(false);
+  const positions = positionsData?.items || [];
+  const isLoading =
+    portfolioLoading ||
+    snapshotLoading ||
+    positionsLoading ||
+    (showInvestors && investorsLoading);
 
   if (isLoading) {
-    return (
-      <LoadingState />
-    );
+    return <LoadingState />;
   }
 
   if (!portfolio) {
@@ -62,23 +83,18 @@ export default function MobilePortfolioDetailPage() {
     );
   }
 
-  const totalValue = snapshot?.total_value || 0;
-  const totalShares = snapshot?.total_shares || 0;
-  const unitPrice = snapshot?.unit_price || 0;
   const isDraft = portfolio.status === "draft";
+  const allocation = buildAllocation(positions);
 
-  const handleClose = () => {
-    closePortfolio.mutate(code, {
-      onSuccess: () => setShowCloseDialog(false),
-    });
-  };
-
-  const handleActivate = () => {
-    activatePortfolio.mutate(code);
-  };
+  /* 页尾「管理」列表项（低频入口，替换旧 Quick Links）；
+     份额变动/快照管理暂无移动端路由，不在列表展示（桌面详情页有入口） */
+  const manageLinks = [
+    { label: "持仓管理", href: `/m/portfolio/${code}/positions` },
+    { label: "申购赎回记录", href: `/m/portfolio/${code}/subscriptions` },
+    { label: "调仓交易记录", href: `/m/portfolio/${code}/trades` },
+  ];
 
   return (
-    <>
     <div className="space-y-4 p-4">
       {/* Header */}
       <div className="flex items-center gap-3">
@@ -89,7 +105,15 @@ export default function MobilePortfolioDetailPage() {
         </Link>
         <div className="flex-1">
           <h1 className="text-xl font-bold">{portfolio.name}</h1>
-          <p className="text-xs text-muted-foreground">{portfolio.code}</p>
+          <p className="text-xs text-muted-foreground">
+            {portfolio.code}
+            {portfolio.started_at && (
+              <span> · 成立于 {portfolio.started_at.split("T")[0]}</span>
+            )}
+            <span>
+              {" "}· {portfolio.status === "active" ? "活跃" : isDraft ? "草稿" : "已关闭"}
+            </span>
+          </p>
         </div>
       </div>
 
@@ -102,76 +126,106 @@ export default function MobilePortfolioDetailPage() {
         </Alert>
       )}
 
-      {/* Stats Cards - Simplified for mobile */}
-      {!isDraft && (
-        <PortfolioStatsCards
-          totalValue={snapshot?.total_value ?? null}
-          unitPrice={snapshot?.unit_price ?? null}
-          totalProfit={portfolio.total_profit ?? null}
-          holdingDays={performance?.holding_days ?? null}
-          variant="mobile"
+      {showInvestors ? (
+        /* ?tab=investors 投资人视图（draft 也允许） */
+        <PortfolioInvestorsList
+          investors={investors}
+          totalShares={snapshot?.total_shares || 0}
         />
-      )}
+      ) : (
+        <>
+          {/* Stats Cards */}
+          {!isDraft && (
+            <div>
+              <PortfolioStatsCards
+                totalValue={portfolio.total_value ?? snapshot?.total_value ?? null}
+                unitPrice={snapshot?.unit_price ?? null}
+                totalProfit={portfolio.total_profit ?? null}
+                holdingDays={performance?.holding_days ?? null}
+                variant="mobile"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                最新快照日期：{snapshot?.snapshot_date || "--"}
+              </p>
+            </div>
+          )}
 
-      {/* Action Buttons */}
-      {isAdmin && (
-        <PortfolioActionButtons
-          portfolioCode={code}
-          status={portfolio.status as "draft" | "active" | "closed"}
-          basePath="/m/portfolio"
-          variant="mobile"
-          onActivateClick={handleActivate}
-          isActivatePending={activatePortfolio.isPending}
-        />
-      )}
+          {/* 高频操作：申购赎回 / 调仓（2 列网格；draft/closed 由 ActionButtons 内部处理） */}
+          {isAdmin && (
+            <div className="grid grid-cols-2 gap-2">
+              <PortfolioActionButtons
+                portfolioCode={code}
+                status={portfolio.status as "draft" | "active" | "closed"}
+                basePath="/m/portfolio"
+                variant="mobile"
+                onActivateClick={() => activatePortfolio.mutate(code)}
+                isActivatePending={activatePortfolio.isPending}
+              />
+            </div>
+          )}
 
-      {/* NAV Chart - Simplified for mobile */}
-      {!isDraft && navHistory.length > 0 && (
-        <Card>
-          <CardContent className="p-4">
-            <h3 className="text-sm font-medium mb-3">净值走势</h3>
-            <NavCurveSimple data={navHistory} height={200} />
-          </CardContent>
-        </Card>
-      )}
+          {!isDraft && (
+            <>
+              {/* 资产分布 */}
+              <Card>
+                <CardContent className="p-4">
+                  <h3 className="mb-3 text-sm font-medium">资产分布</h3>
+                  <AssetAllocationPie items={allocation} height={150} />
+                </CardContent>
+              </Card>
 
-      {/* 绩效指标（紧凑两列） */}
-      {!isDraft && <PerformanceMetrics data={performance} variant="mobile" />}
+              {/* 分类持仓分区（含在途资金独立卡片） */}
+              <PositionSections positions={positions} />
 
-      {/* Quick Links */}
-      {!isDraft && (
-        <Card>
-          <CardContent className="p-4 space-y-2">
-            <Link href={`/m/portfolio/${code}/positions`}>
-              <Button variant="ghost" className="w-full justify-start">
-                <Wallet className="mr-2 h-4 w-4" />
-                持仓管理
-              </Button>
-            </Link>
-            <Link href={`/m/portfolio/${code}/subscriptions`}>
-              <Button variant="ghost" className="w-full justify-start">
-                <Plus className="mr-2 h-4 w-4" />
-                申购赎回记录
-              </Button>
-            </Link>
-            <Link href={`/m/portfolio/${code}/trades`}>
-              <Button variant="ghost" className="w-full justify-start">
-                <ArrowRightLeft className="mr-2 h-4 w-4" />
-                调仓交易记录
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
+              {/* NAV Chart */}
+              {navHistory.length > 0 && (
+                <Card>
+                  <CardContent className="p-4">
+                    <h3 className="mb-3 text-sm font-medium">净值走势</h3>
+                    <NavCurve data={navHistory} height={200} initialNav={1.0} />
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* 绩效指标（紧凑两列） */}
+              <PerformanceMetrics data={performance} variant="mobile" />
+            </>
+          )}
+
+          {/* 页尾「管理」列表（替换旧 Quick Links） */}
+          <Card>
+            <CardContent className="p-0">
+              <h3 className="px-4 pb-1 pt-4 text-sm font-medium text-muted-foreground">
+                管理
+              </h3>
+              <div className="divide-y">
+                {manageLinks.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className="flex items-center justify-between px-4 py-3 text-sm"
+                  >
+                    {link.label}
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
+  );
+}
 
-    <ClosePortfolioDialog
-      open={showCloseDialog}
-      onOpenChange={setShowCloseDialog}
-      onConfirm={handleClose}
-      isPending={closePortfolio.isPending}
-      positions={[]}
-    />
-    </>
+/**
+ * 移动端组合详情页（issue #99）：与桌面同构单列 + 页尾管理列表。
+ * useSearchParams 需包 Suspense 边界（Next 15 静态预渲染要求）。
+ */
+export default function MobilePortfolioDetailPage() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <MobilePortfolioDetailInner />
+    </Suspense>
   );
 }

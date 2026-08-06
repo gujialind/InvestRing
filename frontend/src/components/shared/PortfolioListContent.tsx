@@ -34,6 +34,7 @@ import {
 import { useRoleCheck } from "@/hooks/useAuth";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
+import ClosePortfolioDialog from "@/components/shared/dialogs/ClosePortfolioDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,12 +53,11 @@ interface PortfolioListContentProps {
   variant?: "desktop" | "mobile";
 }
 
-type ConfirmAction = "close" | "activate" | null;
-
 /**
  * 组合列表页内容（桌面/移动共用）。
  * 抽离自原 app/portfolio/page.tsx，两端仅 basePath 与 variant 不同。
- * 用 AlertDialog 替换原生 confirm()，统一两端交互。
+ * 关闭组合用 ClosePortfolioDialog（惰性查询持仓/投资人，issue #99），
+ * 重新激活仍用原生 AlertDialog 确认。
  */
 export default function PortfolioListContent({ basePath, variant = "desktop" }: PortfolioListContentProps) {
   const router = useRouter();
@@ -72,7 +72,9 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
   const [filter, setFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState({ code: "", name: "", description: "" });
-  const [confirmTarget, setConfirmTarget] = useState<{ code: string; action: ConfirmAction } | null>(null);
+  // 关闭组合：ClosePortfolioDialog 目标；重新激活：AlertDialog 目标
+  const [closeTarget, setCloseTarget] = useState<string | null>(null);
+  const [activateTarget, setActivateTarget] = useState<string | null>(null);
 
   const filteredPortfolios = portfolios.filter((p) => filter === "all" || p.status === filter);
 
@@ -87,12 +89,10 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
     });
   };
 
-  const handleConfirm = () => {
-    if (!confirmTarget) return;
-    const { code, action } = confirmTarget;
-    if (action === "close") closePortfolio.mutate(code);
-    else if (action === "activate") activatePortfolio.mutate(code);
-    setConfirmTarget(null);
+  const handleActivate = () => {
+    if (!activateTarget) return;
+    activatePortfolio.mutate(activateTarget);
+    setActivateTarget(null);
   };
 
   if (isLoading) return <LoadingState />;
@@ -233,11 +233,20 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
                       详情
                     </Button>
                   </Link>
+                  {/* 投资人入口：详情页 ?tab=investors 视图（issue #99） */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => router.push(`${basePath}/${portfolio.code}?tab=investors`)}
+                    title="投资人"
+                  >
+                    <Users className="h-4 w-4" />
+                  </Button>
                   {isAdmin && portfolio.status === "active" && (
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={() => setConfirmTarget({ code: portfolio.code, action: "close" })}
+                      onClick={() => setCloseTarget(portfolio.code)}
                       disabled={closePortfolio.isPending}
                       title="关闭组合"
                     >
@@ -248,7 +257,7 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={() => setConfirmTarget({ code: portfolio.code, action: "activate" })}
+                      onClick={() => setActivateTarget(portfolio.code)}
                       disabled={activatePortfolio.isPending}
                       title="重新激活"
                     >
@@ -264,24 +273,33 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
 
       {filteredPortfolios.length === 0 && <EmptyState message="暂无符合条件的组合" />}
 
-      <AlertDialog open={!!confirmTarget} onOpenChange={(open) => !open && setConfirmTarget(null)}>
+      {/* 关闭组合：惰性查询弹窗（issue #99） */}
+      <ClosePortfolioDialog
+        open={!!closeTarget}
+        onOpenChange={(open) => !open && setCloseTarget(null)}
+        portfolioCode={closeTarget ?? ""}
+        isPending={closePortfolio.isPending}
+        onConfirm={() => {
+          if (!closeTarget) return;
+          closePortfolio.mutate(closeTarget, {
+            onSettled: () => setCloseTarget(null),
+          });
+        }}
+      />
+
+      {/* 重新激活确认 */}
+      <AlertDialog open={!!activateTarget} onOpenChange={(open) => !open && setActivateTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmTarget?.action === "close" && "关闭组合"}
-              {confirmTarget?.action === "activate" && "重新激活组合"}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmTarget?.action === "close" && "关闭后无法再进行申购/赎回/调仓操作。"}
-              {confirmTarget?.action === "activate" && "确定要重新激活该组合吗？"}
-            </AlertDialogDescription>
+            <AlertDialogTitle>重新激活组合</AlertDialogTitle>
+            <AlertDialogDescription>确定要重新激活该组合吗？</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
-                handleConfirm();
+                handleActivate();
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
