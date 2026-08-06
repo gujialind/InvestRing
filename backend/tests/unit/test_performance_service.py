@@ -214,6 +214,15 @@ class TestPeriodReturn:
     def test_insufficient_snapshots(self):
         assert _period_return([_FakeSnapshot(date(2025, 1, 1), 1.0)], date(2025, 1, 1)) is None
 
+    def test_history_not_covering_start_returns_none(self):
+        """历史不足窗口期（首个快照日晚于 start）→ None（issue #99 口径统一）"""
+        snapshots = [
+            _FakeSnapshot(date(2025, 6, 1), 1.0),
+            _FakeSnapshot(date(2025, 12, 1), 1.2),
+        ]
+        # 近 1 年窗口 start=2024-12-01，早于首个快照日 → None（不退化为成立以来）
+        assert _period_return(snapshots, date(2024, 12, 1)) is None
+
 
 class TestAnnualize:
     def test_one_year_unchanged(self):
@@ -248,6 +257,10 @@ class TestGetPerformanceIntegration:
         assert result["mwr"] is None
         assert result["max_drawdown"] is None
         assert result["cash_flow_count"] == 0
+        # empty 兑底含新增区间字段（issue #99）
+        assert result["return_6m"] is None
+        assert result["return_1y"] is None
+        assert result["return_3y"] is None
 
     def test_portfolio_with_snapshots(self, test_db):
         from app.models.investor import Investor
@@ -295,3 +308,79 @@ class TestGetPerformanceIntegration:
         assert result["holding_days"] == 120
         assert result["cash_flow_count"] == 1
         assert result["mwr"] is not None
+        # 成立仅 120 天：6m/1y/3y 历史不足窗口期 → None（issue #99 口径统一）
+        assert result["return_6m"] is None
+        assert result["return_1y"] is None
+        assert result["return_3y"] is None
+
+    def test_new_period_returns_with_sufficient_history(self, test_db):
+        """快照历史充足时 return_6m/1y/3y 数值正确（issue #99）"""
+        from app.models.portfolio import Portfolio
+        from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+        from app.services.performance_service import get_performance
+
+        test_db.add(Portfolio(code="PERF_LONG", name="长历史组合", status="active"))
+        # 稀疏快照：覆盖 3 年以上；latest = 2026-08-04
+        points = [
+            (date(2023, 1, 2), 1.0),
+            (date(2025, 8, 4), 1.1),
+            (date(2026, 2, 4), 1.2),
+            (date(2026, 7, 10), 1.25),
+            (date(2026, 8, 4), 1.3),
+        ]
+        for snap_date, nav in points:
+            test_db.add(
+                PortfolioValueSnapshot(
+                    portfolio_code="PERF_LONG",
+                    snapshot_date=snap_date,
+                    total_value=1000 * nav,
+                    total_shares=1000,
+                    unit_price=nav,
+                )
+            )
+        test_db.commit()
+
+        result = get_performance(test_db, "PERF_LONG")
+        # 6m：start=2026-02-04（relativedelta 月份锚点），基准 1.2 → 1.3
+        assert abs(result["return_6m"] - (1.3 / 1.2 - 1) * 100) < 1e-3
+        # 1y：start=2025-08-04，基准 1.1 → 1.3
+        assert abs(result["return_1y"] - (1.3 / 1.1 - 1) * 100) < 1e-3
+        # 3y：start=2023-08-04，首个 ≥ start 的快照为 2025-08-04（1.1）
+        assert abs(result["return_3y"] - (1.3 / 1.1 - 1) * 100) < 1e-3
+        # 存量字段不受影响：1m 基准 2026-07-10（1.25）
+        assert abs(result["return_1m"] - (1.3 / 1.25 - 1) * 100) < 1e-3
+        # ytd：start=2026-01-01，首个 ≥ start 的快照为 2026-02-04（1.2）
+        assert abs(result["return_ytd"] - (1.3 / 1.2 - 1) * 100) < 1e-3
+
+    def test_ytd_none_when_founded_after_new_year(self, test_db):
+        """成立晚于当年元旦 → return_ytd 为 None（语义自洽，issue #99）"""
+        from app.models.portfolio import Portfolio
+        from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
+        from app.services.performance_service import get_performance
+
+        test_db.add(Portfolio(code="PERF_YTD", name="年内新组合", status="active"))
+        for snap_date, nav in [
+            (date(2026, 7, 1), 1.0),
+            (date(2026, 7, 20), 1.05),
+            (date(2026, 8, 4), 1.1),
+        ]:
+            test_db.add(
+                PortfolioValueSnapshot(
+                    portfolio_code="PERF_YTD",
+                    snapshot_date=snap_date,
+                    total_value=1000 * nav,
+                    total_shares=1000,
+                    unit_price=nav,
+                )
+            )
+        test_db.commit()
+
+        result = get_performance(test_db, "PERF_YTD")
+        # 首个快照日 2026-07-01 晚于 2026-01-01 → ytd None
+        assert result["return_ytd"] is None
+        # 1m：start=2026-07-05，首个快照日 07-01 ≤ start → 基准 07-20（1.05）有值
+        assert abs(result["return_1m"] - (1.1 / 1.05 - 1) * 100) < 1e-3
+        # 6m/1y/3y 历史不足 → None
+        assert result["return_6m"] is None
+        assert result["return_1y"] is None
+        assert result["return_3y"] is None

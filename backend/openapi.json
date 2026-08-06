@@ -5771,7 +5771,7 @@
           "现金转移"
         ],
         "summary": "Create Cash Transfer",
-        "description": "创建平台间现金转移（对称状态：当天两腿立即 confirm；跨天两腿 pending 至次日同时 confirm）。",
+        "description": "创建平台间现金转移（当天两腿立即 confirm；跨天时转出方当日 confirm，转入方 pending 至下一交易日确认）。",
         "operationId": "create_cash_transfer_api_portfolios__portfolio_code__cash_transfer_post",
         "security": [
           {
@@ -5829,7 +5829,7 @@
           "现金转移"
         ],
         "summary": "Confirm Cash Transfer",
-        "description": "确认跨天转移的两条 pending Trade（对称状态，同时确认）。",
+        "description": "确认跨天转移中所有仍为 pending 的 CASH legs（新模型下通常仅转入腿）。",
         "operationId": "confirm_cash_transfer_api_portfolios__portfolio_code__cash_transfer__transfer_group__confirm_post",
         "security": [
           {
@@ -6908,6 +6908,17 @@
             ],
             "title": "Total Value"
           },
+          "total_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Profit"
+          },
           "cumulative_return": {
             "anyOf": [
               {
@@ -7038,6 +7049,17 @@
             ],
             "title": "Return 3M"
           },
+          "return_6m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 6M"
+          },
           "return_ytd": {
             "anyOf": [
               {
@@ -7048,6 +7070,28 @@
               }
             ],
             "title": "Return Ytd"
+          },
+          "return_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 1Y"
+          },
+          "return_3y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 3Y"
           },
           "max_drawdown": {
             "anyOf": [
@@ -7195,6 +7239,28 @@
               }
             ],
             "title": "Updated At"
+          },
+          "total_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Value"
+          },
+          "total_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Profit"
           }
         },
         "type": "object",
@@ -7590,6 +7656,39 @@
               }
             ],
             "title": "Profit Loss Percent"
+          },
+          "asset_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Name"
+          },
+          "daily_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Profit"
+          },
+          "is_qdii": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Qdii"
           }
         },
         "type": "object",
@@ -9894,6 +9993,18 @@
               }
             ],
             "title": "Cash Platform Code"
+          },
+          "cash_confirm_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Confirm Date"
           }
         },
         "type": "object",
