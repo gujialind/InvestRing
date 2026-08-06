@@ -1,13 +1,11 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 import MainLayout from "@/components/layout/MainLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { formatCurrency, formatNumber } from "@/lib/utils";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import {
@@ -15,44 +13,79 @@ import {
   useLatestSnapshot,
   usePortfolioInvestors,
   usePositionList,
-  useClosePortfolio,
   useActivatePortfolio,
   useNavHistory,
   usePortfolioPerformance,
 } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
 import NavCurve from "@/components/charts/NavCurve";
+import AssetAllocationPie from "@/components/charts/AssetAllocationPie";
 import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
 import PerformanceMetrics from "@/components/shared/PerformanceMetrics";
 import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
-import ClosePortfolioDialog from "@/components/shared/dialogs/ClosePortfolioDialog";
+import PortfolioInvestorsList from "@/components/shared/PortfolioInvestorsList";
+import PositionSections from "@/components/shared/PositionSections";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
+import { buildAllocation } from "@/lib/allocation";
+import { toDateOnly } from "@/lib/utils";
 
-export default function PortfolioDetailPage() {
+/** 净值走势区间：近6月 / 近1年 / 近3年 / 成立以来 */
+type NavRange = "6m" | "1y" | "3y" | "all";
+
+const NAV_RANGES: { key: NavRange; label: string }[] = [
+  { key: "6m", label: "近6个月" },
+  { key: "1y", label: "近1年" },
+  { key: "3y", label: "近3年" },
+  { key: "all", label: "成立以来" },
+];
+
+/** 区间起点（原生 Date 计算，不引入日期库）；all → undefined（全量） */
+function rangeStartDate(range: NavRange): string | undefined {
+  if (range === "all") return undefined;
+  const d = new Date();
+  if (range === "6m") d.setMonth(d.getMonth() - 6);
+  else if (range === "1y") d.setFullYear(d.getFullYear() - 1);
+  else d.setFullYear(d.getFullYear() - 3);
+  return toDateOnly(d);
+}
+
+function PortfolioDetailInner() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const code = params.code as string;
+  const showInvestors = searchParams.get("tab") === "investors";
 
   const { data: portfolio, isLoading: portfolioLoading } = usePortfolio(code);
   const { data: snapshot, isLoading: snapshotLoading } = useLatestSnapshot(code);
-  const { data: investors, isLoading: investorsLoading } = usePortfolioInvestors(code);
-  const { data: positionsData, isLoading: positionsLoading } = usePositionList(code, { page_size: 100 });
-  const closePortfolio = useClosePortfolio();
+  // 投资人列表仅 ?tab=investors 视图惰性查询（draft 也允许查看）
+  const { data: investors, isLoading: investorsLoading } = usePortfolioInvestors(code, {
+    enabled: showInvestors,
+  });
+  const { data: positionsData, isLoading: positionsLoading } = usePositionList(code, {
+    page_size: 100,
+  });
   const activatePortfolio = useActivatePortfolio();
   const { isAdmin } = useRoleCheck();
 
-  const positions = positionsData?.items || [];
-  const isLoading = portfolioLoading || snapshotLoading || investorsLoading || positionsLoading;
+  // 净值走势区间切换（issue #99）：start_date 按选中区间计算，「成立以来」全量
+  const [navRange, setNavRange] = useState<NavRange>("all");
+  const navParams = useMemo(() => {
+    const start = rangeStartDate(navRange);
+    return start ? { start_date: start } : undefined;
+  }, [navRange]);
+  const { data: navHistoryData } = useNavHistory(code, navParams);
 
-  const [showCloseDialog, setShowCloseDialog] = useState(false);
-
-  // 净值历史与绩效指标（后端计算）：draft 组合无快照，不请求绩效
+  // 绩效指标（后端计算）：draft 组合无快照，不请求
   const isDraftStatus = portfolio?.status === "draft";
-  const { data: navHistoryData } = useNavHistory(code, undefined);
   const { data: performance } = usePortfolioPerformance(code, !isDraftStatus);
-  const navHistory = (navHistoryData || [])
-    .filter((r) => r.unit_price !== null)
-    .map((r) => ({ date: r.snapshot_date, nav: r.unit_price as number }));
+
+  const positions = positionsData?.items || [];
+  const isLoading =
+    portfolioLoading ||
+    snapshotLoading ||
+    positionsLoading ||
+    (showInvestors && investorsLoading);
 
   if (isLoading) {
     return (
@@ -80,25 +113,16 @@ export default function PortfolioDetailPage() {
     );
   }
 
-  const totalValue = snapshot?.total_value || 0;
-  const totalShares = snapshot?.total_shares || 0;
-  const unitPrice = snapshot?.unit_price || 0;
-
   const isDraft = portfolio.status === "draft";
-
-  const handleClose = () => {
-    closePortfolio.mutate(code, {
-      onSuccess: () => setShowCloseDialog(false),
-    });
-  };
-
-  const handleActivate = () => {
-    activatePortfolio.mutate(code);
-  };
+  const allocation = buildAllocation(positions);
+  const navHistory = (navHistoryData || [])
+    .filter((r) => r.unit_price !== null)
+    .map((r) => ({ date: r.snapshot_date, nav: r.unit_price as number }));
 
   return (
     <MainLayout>
       <div className="space-y-6">
+        {/* 页头：返回 / 名称+code+成立日期·状态小字 / 操作区 */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link href="/portfolio">
@@ -108,20 +132,33 @@ export default function PortfolioDetailPage() {
             </Link>
             <div>
               <h1 className="text-3xl font-bold tracking-tight">{portfolio.name}</h1>
-              <p className="text-muted-foreground">{portfolio.code}</p>
+              <p className="text-muted-foreground">
+                {portfolio.code}
+                {portfolio.started_at && (
+                  <span> · 成立于 {portfolio.started_at.split("T")[0]}</span>
+                )}
+                <span>
+                  {" "}· {portfolio.status === "active" ? "活跃" : isDraft ? "草稿" : "已关闭"}
+                </span>
+              </p>
             </div>
           </div>
           {isAdmin && (
-            <PortfolioActionButtons
-              portfolioCode={code}
-              status={portfolio.status as "draft" | "active" | "closed"}
-              basePath="/portfolio"
-              variant="desktop"
-              onCloseClick={() => setShowCloseDialog(true)}
-              onActivateClick={handleActivate}
-              isClosePending={closePortfolio.isPending}
-              isActivatePending={activatePortfolio.isPending}
-            />
+            <div className="flex gap-2">
+              <PortfolioActionButtons
+                portfolioCode={code}
+                status={portfolio.status as "draft" | "active" | "closed"}
+                basePath="/portfolio"
+                variant="desktop"
+                onActivateClick={() => activatePortfolio.mutate(code)}
+                isActivatePending={activatePortfolio.isPending}
+              />
+              {!isDraft && (
+                <Link href={`/portfolio/${code}/snapshots`}>
+                  <Button variant="outline">快照管理</Button>
+                </Link>
+              )}
+            </div>
           )}
         </div>
 
@@ -133,181 +170,110 @@ export default function PortfolioDetailPage() {
           </Alert>
         )}
 
-        {!isDraft && (
+        {showInvestors ? (
+          /* ?tab=investors 投资人视图（draft 也允许） */
+          <PortfolioInvestorsList
+            investors={investors}
+            totalShares={snapshot?.total_shares || 0}
+          />
+        ) : (
+          /* 单列五段（draft 时仅第 1 段，其余不渲染） */
           <div className="space-y-4">
-            {/* Stats Cards */}
-            <PortfolioStatsCards
-              totalValue={totalValue}
-              unitPrice={unitPrice}
-              totalShares={totalShares}
-              cumulativeReturn={portfolio.cumulative_return || 0}
-              variant="desktop"
-            />
+            {/* 1. 四项统计 + 最新快照日期小字 */}
+            <div>
+              <PortfolioStatsCards
+                totalValue={!isDraft ? portfolio.total_value ?? snapshot?.total_value ?? null : null}
+                unitPrice={!isDraft ? snapshot?.unit_price ?? null : null}
+                totalProfit={!isDraft ? portfolio.total_profit ?? null : null}
+                holdingDays={!isDraft ? performance?.holding_days ?? null : null}
+                variant="desktop"
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                最新快照日期：{!isDraft ? snapshot?.snapshot_date || "--" : "--"}
+              </p>
+            </div>
 
-            {/* 绩效指标（数据来自 GET /portfolios/{code}/performance） */}
-            <PerformanceMetrics data={performance} variant="desktop" />
-          </div>
-        )}
+            {!isDraft && (
+              <>
+                {/* 2. 资产分布（环形图 + 图例） */}
+                <Card>
+                  <CardContent className="pt-6">
+                    <h3 className="mb-4 text-[15px] font-semibold">资产分布</h3>
+                    <AssetAllocationPie items={allocation} />
+                  </CardContent>
+                </Card>
 
-        <Tabs defaultValue="overview" className="space-y-4">
-          <div className="flex items-center gap-2">
-            <TabsList>
-              <TabsTrigger value="overview">概览</TabsTrigger>
-              {!isDraft && <TabsTrigger value="positions">持仓</TabsTrigger>}
-              {!isDraft && <TabsTrigger value="investors">投资人</TabsTrigger>}
-              {!isDraft && <TabsTrigger value="nav">净值历史</TabsTrigger>}
-            </TabsList>
-            {/* 快照管理是独立页面而非 Tab：不能用 Link 包 TabsTrigger，
-                首次点击会被 Tabs 激活逻辑拦截导致需点两次才能进入 */}
-            {isAdmin && !isDraft && (
-              <Link href={`/portfolio/${code}/snapshots`}>
-                <Button variant="outline" size="sm">快照管理</Button>
-              </Link>
+                {/* 3. 分类持仓分区（含在途资金独立卡片） */}
+                <PositionSections
+                  positions={positions}
+                  action={
+                    isAdmin ? (
+                      <Link href={`/portfolio/${code}/positions`}>
+                        <Button variant="outline" size="sm">
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          管理持仓
+                        </Button>
+                      </Link>
+                    ) : undefined
+                  }
+                />
+
+                {/* 4. 净值走势 + 区间 chips */}
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3 className="text-[15px] font-semibold">净值走势</h3>
+                      <div className="flex gap-2">
+                        {NAV_RANGES.map((r) => (
+                          <button
+                            key={r.key}
+                            onClick={() => setNavRange(r.key)}
+                            className={`rounded-full px-3.5 py-1.5 text-[13px] transition-colors ${
+                              navRange === r.key
+                                ? "bg-blue-500 font-semibold text-white"
+                                : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                            }`}
+                          >
+                            {r.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {navHistory.length > 0 ? (
+                      <NavCurve data={navHistory} initialNav={1.0} />
+                    ) : (
+                      <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+                        该区间暂无净值数据
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* 5. 绩效指标（6 项） */}
+                <PerformanceMetrics data={performance} variant="desktop" />
+              </>
             )}
           </div>
-
-          <TabsContent value="overview" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>组合信息</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">状态</span>
-                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    portfolio.status === "active"
-                      ? "bg-green-100 text-green-800"
-                      : portfolio.status === "draft"
-                      ? "bg-yellow-100 text-yellow-800"
-                      : "bg-gray-100 text-gray-800"
-                  }`}>
-                    {portfolio.status === "active" ? "活跃" : portfolio.status === "draft" ? "草稿" : "已关闭"}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">描述</span>
-                  <span>{portfolio.description || "--"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">成立日期</span>
-                  <span>{portfolio.started_at ? portfolio.started_at.split("T")[0] : "--"}</span>
-                </div>
-                {!isDraft && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">最新快照日期</span>
-                    <span>{snapshot?.snapshot_date || "--"}</span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="positions" className="space-y-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>持仓列表</CardTitle>
-                  <CardDescription>当前持仓明细</CardDescription>
-                </div>
-                {isAdmin && !isDraft && (
-                  <Link href={`/portfolio/${code}/positions`}>
-                    <Button variant="outline" size="sm">
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      管理持仓
-                    </Button>
-                  </Link>
-                )}
-              </CardHeader>
-              <CardContent>
-                {positions.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    暂无持仓记录
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {positions.map((position) => (
-                      <div key={position.id} className="flex items-center justify-between p-4 border rounded-lg">
-                        <div>
-                          <p className="font-medium">{position.product_code}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {position.market || "--"} {position.platform_code ? `| ${position.platform_code}` : ""}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-medium">{formatNumber(position.shares || 0, 2)} 份</p>
-                          <p className="text-sm text-muted-foreground">
-                            金额: {formatCurrency(position.cash_amount || 0)}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="investors" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>投资人列表</CardTitle>
-                <CardDescription>组合中的投资人及份额</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!investors || investors.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    暂无投资人
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {investors.map((investor) => (
-                      <div key={investor.investor_code} className="flex items-center justify-between p-4 border rounded-lg">
-                        <div>
-                          <p className="font-medium">{investor.name}</p>
-                          <p className="text-sm text-muted-foreground">{investor.investor_code}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-medium">{formatNumber(investor.shares || 0, 2)} 份</p>
-                          <p className="text-sm text-muted-foreground">
-                            占比: {totalShares > 0 ? ((investor.shares || 0) / totalShares * 100).toFixed(2) : 0}%
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="nav" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>净值历史</CardTitle>
-                <CardDescription>组合净值走势</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {navHistory.length > 0 ? (
-                  <NavCurve data={navHistory} initialNav={1.0000} />
-                ) : (
-                  <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                    暂无净值数据
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+        )}
       </div>
-
-      <ClosePortfolioDialog
-        open={showCloseDialog}
-        onOpenChange={setShowCloseDialog}
-        onConfirm={handleClose}
-        isPending={closePortfolio.isPending}
-        positions={positions}
-        investors={investors}
-      />
     </MainLayout>
+  );
+}
+
+/**
+ * 组合详情页（issue #99）：单列五段 + ?tab=investors 投资人视图。
+ * useSearchParams 需包 Suspense 边界（Next 15 静态预渲染要求）。
+ */
+export default function PortfolioDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <MainLayout>
+          <LoadingState />
+        </MainLayout>
+      }
+    >
+      <PortfolioDetailInner />
+    </Suspense>
   );
 }
