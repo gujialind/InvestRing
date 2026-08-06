@@ -201,8 +201,12 @@ def _aggregate_position_flows(db: Session, items: Sequence[PortfolioPosition]) -
 def compute_daily_profits(
     db: Session,
     items: Sequence[PortfolioPosition],
+    flows: dict,
 ) -> dict:
     """批量计算持仓行当日收益（读侧派生，不落库）。
+
+    ``flows`` 由调用方经 ``compute_derived_fields`` 统一聚合后注入（issue #103，
+    避免三函数各自重复聚合）。
 
     返回 {(portfolio_code, product_code, market, platform_code): float | None}。
     None 场景：组合首个快照日（无前日基准）、IN_TRANSIT 在途行。
@@ -255,7 +259,6 @@ def compute_daily_profits(
                 (row.portfolio_code, row.product_code, row.market, row.platform_code, row.snapshot_date)
             ] = row
 
-    flows = _aggregate_position_flows(db, items)
     trade_daily = flows["trade_daily"]
     cash_flows = flows["cash_flows"]
     event_rows = flows["event_rows"]
@@ -311,8 +314,11 @@ def compute_daily_profits(
 def compute_cash_cumulative_profits(
     db: Session,
     items: Sequence[PortfolioPosition],
+    flows: dict,
 ) -> dict:
     """批量计算 CASH 行累计收益（读侧派生，路线 C 现金基数口径）。
+
+    ``flows`` 由调用方经 ``compute_derived_fields`` 统一聚合后注入（issue #103）。
 
     现金累计收益 = 当前现金 −（累计净存入 − 累计买入 + 累计卖出 + 转移净额 + 事件净额），
     事件净额计入存入基数 → 收益 ≈ 0，仅吸收手动调平/利息等未记账差额。
@@ -327,7 +333,6 @@ def compute_cash_cumulative_profits(
     if not cash_items:
         return result
 
-    flows = _aggregate_position_flows(db, cash_items)
     cash_flows = flows["cash_flows"]
     event_rows = flows["event_rows"]
 
@@ -365,8 +370,11 @@ def compute_cash_cumulative_profits(
 def compute_event_cash_addbacks(
     db: Session,
     items: Sequence[PortfolioPosition],
+    flows: dict,
 ) -> dict:
     """批量计算非现金行累计分红加回（复权口径，读侧派生）。
+
+    ``flows`` 由调用方经 ``compute_derived_fields`` 统一聚合后注入（issue #103）。
 
     返回 {(portfolio_code, product_code, market, platform_code): float}，
     值为 confirmed 事件 cash_change 按 (产品, 平台) 聚合（ex_date <= 行快照日）。
@@ -377,7 +385,6 @@ def compute_event_cash_addbacks(
     if not fund_items:
         return result
 
-    flows = _aggregate_position_flows(db, fund_items)
     event_rows = flows["event_rows"]
 
     for p in fund_items:
@@ -393,6 +400,30 @@ def compute_event_cash_addbacks(
             result[key] = round(total, 4)
 
     return result
+
+
+def compute_derived_fields(
+    db: Session,
+    items: Sequence[PortfolioPosition],
+) -> dict:
+    """一次聚合，批量产出持仓读侧派生字段（issue #103：消除三函数重复聚合）。
+
+    聚合 ``_aggregate_position_flows`` 仅执行 1 次（trade + event 共 2 条查询），
+    结果注入 ``compute_daily_profits`` / ``compute_cash_cumulative_profits`` /
+    ``compute_event_cash_addbacks`` 三个 helper，避免各自独立聚合导致的冗余查询。
+
+    返回 ``{"daily_profits": {...}, "cash_profits": {...}, "event_addbacks": {...}}``；
+    ``items`` 为空时返回三个空 dict。
+    """
+    empty = {"daily_profits": {}, "cash_profits": {}, "event_addbacks": {}}
+    if not items:
+        return empty
+    flows = _aggregate_position_flows(db, items)
+    return {
+        "daily_profits": compute_daily_profits(db, items, flows),
+        "cash_profits": compute_cash_cumulative_profits(db, items, flows),
+        "event_addbacks": compute_event_cash_addbacks(db, items, flows),
+    }
 
 
 def get_cash_value(

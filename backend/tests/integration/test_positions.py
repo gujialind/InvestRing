@@ -257,6 +257,38 @@ class TestPositionDerivedFields:
         assert rows["FUND_DP"]["daily_profit"] == pytest.approx(60.0, abs=1e-4)
         assert rows["CASH"]["daily_profit"] == pytest.approx(0.0, abs=1e-4)
 
+    def test_aggregate_flows_called_once(self, client, admin_headers, test_db):
+        """issue #103：三个 compute 函数共享一次 _aggregate_position_flows 聚合
+
+        复用 PD_DP 两快照日场景（fund + CASH 均有），用 patch(wraps=...) 包装定义处
+        模块属性，断言整个请求只聚合 1 次（原 6 条查询降至 2 条）且响应值不变。
+        """
+        from unittest.mock import patch
+        from app.services import position_service as ps
+
+        create_portfolio(test_db, code="PD_DP", status="active")
+        create_platform(test_db, code="PD_DP_PLAT")
+        create_product(test_db, code="FUND_DP", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        for d, mv in ((date(2025, 11, 3), 1500.0), (date(2025, 11, 4), 1560.0)):
+            create_position_snapshot(
+                test_db, "PD_DP", "FUND_DP", "CN_OTC", snapshot_date=d,
+                shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=mv,
+                platform_code="PD_DP_PLAT",
+            )
+            create_position_snapshot(
+                test_db, "PD_DP", "CASH", "", snapshot_date=d,
+                cash_amount=5000.0, unit_price=None, cost_price=None,
+                market_value=5000.0, platform_code="PD_DP_PLAT",
+            )
+
+        with patch.object(ps, "_aggregate_position_flows", wraps=ps._aggregate_position_flows) as spy:
+            resp = client.get("/api/positions?portfolio_code=PD_DP", headers=admin_headers)
+        assert resp.status_code == 200
+        assert spy.call_count == 1  # 聚合仅 1 次（trade 1 + event 1 = 2 查询，原 6 次）
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        assert rows["FUND_DP"]["daily_profit"] == pytest.approx(60.0, abs=1e-4)
+
     def test_daily_profit_deducts_same_day_buy(self, client, admin_headers, test_db):
         """当日确认买入 → daily_profit 扣除买入额；配对 CASH 腿当日净流入抵消"""
         create_portfolio(test_db, code="PD_DB", status="active")
