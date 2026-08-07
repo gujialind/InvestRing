@@ -15,6 +15,12 @@ export interface Position {
   asset_type?: string;
   profit_loss?: number;
   profit_loss_percent?: number;
+  // 读侧派生（issue #99）：asset_name=资产分类短名目；daily_profit=当日收益
+  // （首个快照日 / IN_TRANSIT 在途行 → null）
+  daily_profit?: number | null;
+  asset_name?: string | null;
+  /** QDII 按 T-1 净值估值，日收益滞后一天（前端 tooltip 提示） */
+  is_qdii?: boolean | null;
   snapshot_date: string;
   created_at?: string;
 }

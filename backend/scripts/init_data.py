@@ -19,6 +19,7 @@ from app.models.scheduled_task import ScheduledTask
 from app.models.portfolio import Portfolio
 from app.models.product import Product
 from app.models.asset_classification import AssetClassification
+from app.constants.asset_names import ASSET_NAME_MAP
 from app.models.platform import Platform
 from app.models.investor import Investor
 
@@ -275,13 +276,20 @@ def init_asset_classification(session):
     ]
     
     for class_data in classifications:
+        # asset_name 单一事实来源为 ASSET_NAME_MAP（与迁移 0007 回填共用）
+        class_data['asset_name'] = ASSET_NAME_MAP[class_data['code']]
         existing = session.query(AssetClassification).filter(AssetClassification.code == class_data['code']).first()
         if not existing:
             classification = AssetClassification(**class_data)
             session.add(classification)
             print(f"添加资产分类: {class_data['code']}")
         else:
-            print(f"资产分类已存在: {class_data['code']}")
+            # 老库脚本级兜底：仅补 NULL，不覆盖迁移回填或人工修改的值
+            if existing.asset_name is None:
+                existing.asset_name = class_data['asset_name']
+                print(f"回填资产分类名目: {class_data['code']}")
+            else:
+                print(f"资产分类已存在: {class_data['code']}")
     
     session.commit()
 

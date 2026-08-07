@@ -1,6 +1,6 @@
 # InvestRing 开发指南 (AGENTS.md)
 
-> 为 AI 编程助手提供项目级快速参考。本文只记录**读代码发现不了**的内容：设计决策、业务不变量、组织约定与易踩坑；路由、枚举、错误码、表结构、版本号等以源码为准（可发现性过滤，见 §8.5）。
+> 为 AI 编程助手提供项目级快速参考。本文只记录**读代码发现不了**的内容：设计决策、业务不变量、组织约定与易踩坑；路由、枚举、错误码、表结构、版本号、确认天数等以源码为准（可发现性过滤，见 §8.5）。
 
 ***
 
@@ -13,11 +13,11 @@
 | 目录                                        | 内容                                                                          |
 | ----------------------------------------- | --------------------------------------------------------------------------- |
 | `backend/`                                | FastAPI + SQLAlchemy 后端；含 `app/`（应用）、`cli/`（管理 CLI）、`alembic/`（迁移）、`tests/` |
-| `frontend/`                               | Next.js 15 + React 19 前端（App Router，双端路由）                                   |
+| `frontend/`                               | Next.js 前端（App Router，双端路由，技术栈见 §5）                                   |
 | `ir-cli/`                                 | 独立轻量 HTTP 客户端 CLI（typer + httpx）                                            |
 | `nginx/`、`scripts/`、`docker-compose*.yml` | 部署与运维                                                                       |
 
-**运行入口**：后端 `backend/app/main.py`（启动时自动 `alembic upgrade head` + 初始化定时任务 + 启动调度器）；前端 `npm run dev`；两套 `ir` CLI 的区别见 §6。
+**运行入口**：后端 `backend/app/main.py`（启动初始化行为读源码）；前端 `npm run dev`；两套 `ir` CLI 的区别见 §6。
 
 ***
 
@@ -150,7 +150,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `app/routers/`                                      | HTTP 薄适配层：解析参数、鉴权（`Depends`）、调 service、`db.commit()`、序列化；业务错误交全局 handler，不写 try/except 业务分支 |
 | `app/services/`                                     | 全部业务规则/不变量/计算/状态机/ORM 读写；**只抛领域异常、不 import fastapi、不 commit（可 flush）**                      |
-| `app/models/`                                       | SQLAlchemy 表模型（23 张表）                                                                       |
+| `app/models/`                                       | SQLAlchemy 表模型                                                                       |
 | `app/schemas/`                                      | Pydantic 请求/响应模型                                                                            |
 | `app/utils/`                                        | 安全（密码/Token/登录锁）等工具                                                                         |
 | `app/config.py` / `database.py` / `dependencies.py` | 配置、DB 会话、鉴权依赖                                                                               |
@@ -162,7 +162,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 ### 4.2 路由与 API 前缀
 
-端点以 `backend/app/main.py` 注册为准（18 个 router）；CLI 机读契约见 §6 `ir schema`。
+端点以 `backend/app/main.py` 注册为准；CLI 机读契约见 §6 `ir schema`。
 
 > 前缀例外（易踩坑）：`snapshots` 挂 `/api/v1`（`/api/v1/snapshots/...`）；`cash_transfers` 挂 `/api`（形如 `/api/portfolios/{code}/cash-transfer`）；日志/任务/通知/数据源均在 `/api/system/*`。
 
@@ -175,29 +175,30 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 * **`trade_service.py`**：调仓创建/确认/取消；配对 CASH 腿与 transfer\_group 同步（§2.2/§3.3）。
 * **`subscription_service.py`**：申赎创建/确认；首次申购净值 1.0000 并激活组合（§2.4/§3.1）。
 
-其余模块：`share_change_event_service.py`（事件全套 + 基金级拆子记录，§7.3）、`cash_transfer_service.py`（§3.3）、`portfolio_service.py`（组合生命周期 + nav/returns/cash-flow）、`product_service.py`（`calculate_confirm_days` 确认天数单一实现）、`investor_service.py`、`market_data_service.py`（价格/净值同步、`get_nav_coverage` 覆盖校验、孤儿 job 恢复）、`snapshot_recalc_job.py`（#89 异步重算：复用 sync\_job 表 + 线程池，同类型单 active 锁，终态经 `GET /api/sync-jobs/{id}` 轮询）、`trading_calendar_service.py` / `trading_utils.py`（交易日推算）、`task_runner.py` / `scheduler_service.py`（APScheduler 任务）、`exceptions.py`（`BusinessError` 基类，§4.1）。
+其余模块中需记住的设计点：`snapshot_recalc_job.py`（#89 异步重算：复用 sync\_job 表 + 线程池，同类型单 active 锁，终态经 `GET /api/sync-jobs/{id}` 轮询）；`product_service.py::calculate_confirm_days` 为确认天数单一实现。其他服务职责读各文件 docstring。
 
 ### 4.4 数据模型与关键约束
 
-表结构与全部唯一约束以 `app/models/` 为准（23 张表）。需记住的设计决策：
+表结构与全部唯一约束以 `app/models/` 为准。需记住的设计决策：
 
 * `trade.transfer_group` **NOT NULL**（每笔 trade 必属一个业务组），唯一约束 `(transfer_group, product_code, trade_type)`：基金腿与 CASH 腿按 `product_code` 区分、现金转移两腿按 `trade_type` 区分、申赎为单腿 `sub_{id}`，故 NOT NULL 下仍无碰撞。
 * `portfolio_position` 有 CHECK 约束：`shares` 与 `cash_amount` 二者恰有其一（净值型 vs 非净值型）。
 * `share_change_event` 双日期分级：`ex_date`（除息日，应用日）+ `entitlement_date`（权益登记日，基数日），要求 `ex_date > entitlement_date` 且均为交易日；`parent_event_id` 为基金级拆分子记录自引用。
 * 外键删除行为均为 **RESTRICT**，通过业务流程（关闭/停用）管理生命周期，保留历史数据。
 * **虚拟产品**（#93）：除 `CASH`（`scripts/init_data.py` 种子）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向，`asset_type="cash"` 使下游现金处理代码无需改动即自动纳入（语义见 §2.2）。
+* `asset_classification.asset_name`（#98）语义分工：`asset_name`=聚合展示短名目（UI 分区/图例用），`description`=说明性文本；code→asset_name 映射单一事实来源为 `app/constants/asset_names.py::ASSET_NAME_MAP`（迁移 0007 与 init_data.py 种子共用），IN\_TRANSIT 虚拟产品 `asset_class_code` 为 NULL、无分类行。
 
 ### 4.5 配置与运行
 
 * 配置项以 `app/config.py` + `.env` 覆盖为准；迁移在 `alembic/`，启动时自动 `upgrade head`。**注意 0006（#93）不可逆**：扩展 8 处 code 列至 String(20)、新增 `in_transit_total`、种子 IN\_TRANSIT 产品（幂等设计）。
 * 调度：`scheduler_enabled`；`init_tasks.py` 确保任务记录存在并同步文案，但不覆盖已有 cron\_expr。
-* 数据源：Tushare（`TUSHARE_TOKEN`）/ AkShare（`AKSHARE_ENABLED`），`data_sources` 路由读写 `.env`；安全：`token_expire_days=7`、登录失败锁定、Token 黑名单、改密后强制重登。
+* 数据源：Tushare / AkShare，`data_sources` 路由读写 `.env`；安全：登录失败锁定、Token 过期/黑名单、改密后强制重登（参数明细见 `config.py`）。
 
 ***
 
 ## 5. 前端架构
 
-技术栈版本以 `frontend/package.json` 为准（Next.js 15 + React 19 + Tailwind 4 + shadcn/ui + Zustand + react-query；E2E 用 Playwright）。
+技术栈版本以 `frontend/package.json` 为准（Next.js + React + Tailwind + shadcn/ui + Zustand + react-query；E2E 用 Playwright）。
 
 ### 5.1 双端路由与 Middleware（约定）
 
@@ -222,7 +223,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 | 输出     | 结构化 JSON                    | HTTP 响应                 |
 | 入口     | `backend/cli/main.py`（`ir`） | `ir_cli.main:app`（`ir`） |
 
-两者命令组一致（16 组）：`auth`、`investor`、`portfolio`、`position`、`sub`、`trade`、`share-event`、`market`、`product`、`platform`、`system`、`log`、`task`、`snapshot`、`cash-transfer`、`sync-job`。
+两者命令组基本一致，清单以 `ir --help` / `ir schema` 为准。
 
 > 详见 `backend/CLI_MANUAL.md`。
 
@@ -238,7 +239,7 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 * 申购输入**金额**（份额 = 金额 / 申请日净值）；赎回输入**份额**（金额 = 份额 × 申请日净值）。
 * 申请日必须晚于最新快照日（`DATE_BEFORE_SNAPSHOT`）；份额/金额先量化到 2 位再与可用量**精确比较**（§2.4）。
-* 申赎必填 `platform_code`（现金归属平台）；非首次申购要求申请日存在组合快照（`NAV_NOT_AVAILABLE`）；unconfirm 受快照保护（§3.2）。
+* 申赎必填 `platform_code`（现金归属平台）；非首次申购要求申请日存在组合快照（`NAV_NOT_AVAILABLE`）。
 
 ### 7.2 调仓交易
 
@@ -247,13 +248,12 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 * **确认取价**：`confirm_date` 创建时即按 `product.confirm_days` 设定（`confirm` 可传参覆盖，补录用）；场内用成交价（录入时必填）、场外严格用 T 日净值（含 QDII；未同步则拒绝，禁止向前查找；可传 `sync_nav`/`--sync-nav` 在 MISSING\_NAV 时自动回填净值并重试一次，#90）；QDII 快照/市值用 T-1 净值。场外确认可选传入价格，仅与 T 日净值做一致性校验（不一致 `PRICE_NAV_MISMATCH`），不覆盖净值。
 * 防重：同组合/产品/市场/平台/方向/交易日且金额（买）或份额（卖）相同的 pending/confirmed 交易，未传 `allow_duplicate` 报 `DUPLICATE_TRADE`（cancelled 不算）。
 * 仅给 product\_code 且一码多市场（LOF）须显式指定 market（`MARKET_AMBIGUOUS`，`details.available_markets` 列可选项）；场内 trade 不可 cancel。
-* 基金买卖创建时自动生成配对 CASH 腿（`rebal_` 组），状态/日期同步，CASH 腿可跨平台（§2.2/§3.3）。
 
 ### 7.3 份额变动事件
 
 * **分级**：基金级（`share_split`/`share_merge`/`bonus_share`，`platform_code` 空，确认时按平台自动拆子记录）；平台级（`cash_dividend`/`reinvest_dividend`/`forced_adjustment`，每个有持仓平台各录 1 条）。
 * 日期约束：`ex_date > entitlement_date` 且均为交易日；`ex_date` 须晚于最新快照日。平台级未全覆盖有持仓平台默认阻断（`PLATFORM_NOT_COVERED`），`force_cover=true` 降为 warning。
-* 确认时从 `entitlement_date` 快照回写 `entitlement_shares` 并按类型计算：`cash_dividend` → `cash_change = 份额×div_cash`；`reinvest_dividend` → `shares_change = 份额×div_cash/reinvest_nav`；`share_split` → `×ratio`；`share_merge` → `/ratio`；`bonus_share` → `+份额×ratio`；`forced_adjustment` 由用户直接填写。
+* 确认时从 `entitlement_date` 快照回写 `entitlement_shares`，按事件类型计算变动值（公式读 `share_change_event_service.py`）。
 
 ### 7.4 组合管理
 
@@ -310,21 +310,3 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 5. **仓库文档（README/AGENTS/runbook）随代码同一次提交更新**；设计决策与方案记录进 issue 讨论。
 6. 当你执行一项任务发现有任何执行细节不明确时，你必须向我提问，而不是自做主张，在我回答之后仍有不明确的行细节时，你需要向我追问，直到了解了所有细节。
 7. **AGENTS.md 只写读代码发现不了的内容**（可发现性过滤）：agent 读代码/grep 能拿到的信息（路由、枚举、错误码、表结构、版本号）不写入，只留设计决策、组织约定与易踩坑；新增内容前先自问「这条读源码能拿到吗」。
-
-***
-
-## 9. 参考附录
-
-> 枚举值、确认天数、错误码、表清单等以源码为准（`app/models/`、`product_service.calculate_confirm_days`、`app/services/exceptions.py`）；本附录只留集中速查价值高的内容。
-
-### A. 定时任务（`init_tasks.py`）
-
-| 任务编码                    | Cron          | 说明                  |
-| ----------------------- | ------------- | ------------------- |
-| `nav_sync`              | `0 7 * * 1-5` | 交易日 07:00 增量同步净值    |
-| `trading_calendar_sync` | `0 2 1 1 *`   | 每年 1/1 02:00 同步新年日历 |
-| `log_cleanup`           | `0 4 * * 0`   | 每周日 04:00 清理过期日志    |
-
-### B. 分页规范
-
-请求：`page`（默认 1）、`page_size`（默认 20）。响应：`{ "items": [...], "total", "page", "page_size" }`。

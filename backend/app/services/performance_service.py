@@ -19,6 +19,7 @@
 from datetime import date, timedelta
 from typing import List, Optional, Sequence, Tuple
 
+from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
@@ -163,9 +164,13 @@ def _period_return(
 ) -> Optional[float]:
     """区间收益率（百分数）：以 start 当日或之后首个快照为基准，至最新快照。
 
-    快照不足或基准日无数据时返回 None（如成立不足 1 个月时的近 3 月收益）。
+    历史未覆盖 start（首个快照日晚于 start，即组合成立不足窗口期）或基准与
+    最新同日时返回 None。
     """
     if len(snapshots) < 2:
+        return None
+    # 历史不足窗口期：退化为「成立以来」会虚高/失真，统一返回 None
+    if snapshots[0].snapshot_date > start:
         return None
     base = next((s for s in snapshots if s.snapshot_date >= start), None)
     latest = snapshots[-1]
@@ -240,7 +245,10 @@ def get_performance(db: Session, code: str) -> dict:
         "holding_days": None,
         "return_1m": None,
         "return_3m": None,
+        "return_6m": None,
         "return_ytd": None,
+        "return_1y": None,
+        "return_3y": None,
         "max_drawdown": None,
         "max_drawdown_peak_date": None,
         "max_drawdown_trough_date": None,
@@ -279,7 +287,11 @@ def get_performance(db: Session, code: str) -> dict:
         "holding_days": holding_days,
         "return_1m": _period_return(snapshots, latest_date - timedelta(days=30)),
         "return_3m": _period_return(snapshots, latest_date - timedelta(days=90)),
+        # 6m/1y/3y 用 relativedelta 保证月份/年份锚点语义正确（如 1y 遇闰年）
+        "return_6m": _period_return(snapshots, latest_date - relativedelta(months=6)),
         "return_ytd": _period_return(snapshots, date(latest_date.year, 1, 1)),
+        "return_1y": _period_return(snapshots, latest_date - relativedelta(years=1)),
+        "return_3y": _period_return(snapshots, latest_date - relativedelta(years=3)),
         **drawdown,
         "annualized_volatility": _annualized_volatility(navs),
         "cash_flow_count": mwr_result["cash_flow_count"],

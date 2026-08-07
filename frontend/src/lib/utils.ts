@@ -213,6 +213,33 @@ export function formatReturnRate(
   return `${sign}${n.toFixed(decimals)}%`;
 }
 
+/**
+ * 最大余数法占比（issue #99）：将权重数组转换为加总恒为 100.0% 的百分比。
+ *
+ * 精度 1 位小数（千分位整数分配）：先取 floor，剩余点数按小数余数降序补给前 N 项。
+ * 饼图图例与持仓分区头共用，禁止各处自行 toFixed(1)（会产生 ±0.1%×n 漂移）。
+ *
+ * @param weights 权重数组（Σ=1，允许 Σ≠1 时按 Σ 归一化）
+ * @returns 百分比数组（如 [62.4, 20.3, 5.1, 12.2]，加总 100.0）
+ */
+export function largestRemainderPercents(weights: number[]): number[] {
+  const total = weights.reduce((s, w) => s + w, 0);
+  if (weights.length === 0 || total <= 0) return weights.map(() => 0);
+  const raws = weights.map((w) => (w / total) * 1000);
+  const floors = raws.map((r) => Math.floor(r));
+  let remainder = 1000 - floors.reduce((s, f) => s + f, 0);
+  // 按小数余数降序，前 remainder 项 +1（余数相同按原顺序，保证稳定性）
+  const order = raws
+    .map((r, i) => ({ i, frac: r - Math.floor(r) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (const { i } of order) {
+    if (remainder <= 0) break;
+    floors[i] += 1;
+    remainder -= 1;
+  }
+  return floors.map((f) => f / 10);
+}
+
 // ==================== 收益率颜色判断 ====================
 
 /**

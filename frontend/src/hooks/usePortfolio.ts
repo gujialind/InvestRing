@@ -154,12 +154,12 @@ export function useAvailableCash(code: string) {
   });
 }
 
-// 组合投资人列表 Hook
-export function usePortfolioInvestors(code: string) {
+// 组合投资人列表 Hook（options.enabled 惰性查询：弹窗/Tab 视图仅在需要时请求）
+export function usePortfolioInvestors(code: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [PORTFOLIO_QUERY_KEY, code, "investors"],
     queryFn: () => portfolioApi.getInvestors(code),
-    enabled: !!code,
+    enabled: !!code && (options?.enabled ?? true),
     staleTime: 30 * 1000,
   });
 }
@@ -196,15 +196,16 @@ export function usePortfolioPerformance(code: string, enabled = true) {
 
 // ==================== 持仓相关 Hooks ====================
 
-// 持仓列表 Hook
+// 持仓列表 Hook（options.enabled 惰性查询：弹窗等场景仅在需要时请求）
 export function usePositionList(
   portfolioCode: string,
-  params?: { page?: number; page_size?: number; snapshot_date?: string }
+  params?: { page?: number; page_size?: number; snapshot_date?: string },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
     queryKey: [POSITION_QUERY_KEY, portfolioCode, "list", params],
     queryFn: () => positionApi.list(portfolioCode, params),
-    enabled: !!portfolioCode,
+    enabled: !!portfolioCode && (options?.enabled ?? true),
     staleTime: 30 * 1000,
   });
 }
