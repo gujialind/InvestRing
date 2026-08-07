@@ -99,6 +99,7 @@ def create_asset_classification(
     asset_type: str = "股票",
     asset_category: str = "国内股票",
     asset_subcat: str = "大盘",
+    asset_name: str = None,
 ) -> AssetClassification:
     existing = db.query(AssetClassification).filter(AssetClassification.code == code).first()
     if existing:
@@ -106,6 +107,7 @@ def create_asset_classification(
     ac = AssetClassification(
         code=code, asset_type=asset_type,
         asset_category=asset_category, asset_subcat=asset_subcat,
+        asset_name=asset_name,
     )
     db.add(ac)
     db.commit()

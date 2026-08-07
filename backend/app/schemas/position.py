@@ -43,6 +43,12 @@ class PositionResponse(PositionBase):
     product_name: Optional[str] = None
     profit_loss: Optional[float] = None
     profit_loss_percent: Optional[float] = None
+    # 读侧派生字段（issue #99）：asset_name 来自 asset_classification（聚合展示短名目）；
+    # daily_profit 为当日收益（首个快照日 / IN_TRANSIT 在途行 → None）；
+    # is_qdii 来自 product 表（QDII 按 T-1 净值估值，前端提示日收益滞后一天）
+    asset_name: Optional[str] = None
+    daily_profit: Optional[float] = None
+    is_qdii: Optional[bool] = None
 
     class Config:
         from_attributes = True

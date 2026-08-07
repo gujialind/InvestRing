@@ -24,6 +24,10 @@ class PortfolioResponse(PortfolioBase):
     closed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # 读侧派生（详情接口并入，issue #99）：最新快照总资产 / 累计收益（总资产 − 净投入）
+    # 无快照（draft 等）时为 None
+    total_value: Optional[float] = None
+    total_profit: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -85,10 +89,13 @@ class PortfolioPerformance(BaseModel):
     initial_nav: Optional[float] = None
     current_nav: Optional[float] = None
     holding_days: Optional[int] = None
-    # 区间收益
+    # 区间收益（组合成立不足窗口期时为 None）
     return_1m: Optional[float] = None
     return_3m: Optional[float] = None
+    return_6m: Optional[float] = None
     return_ytd: Optional[float] = None
+    return_1y: Optional[float] = None
+    return_3y: Optional[float] = None
     # 风险指标
     max_drawdown: Optional[float] = None
     max_drawdown_peak_date: Optional[str] = None

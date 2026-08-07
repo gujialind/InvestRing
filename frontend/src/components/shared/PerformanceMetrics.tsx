@@ -60,23 +60,23 @@ function Metric({
 }
 
 /**
- * 组合绩效指标面板。
+ * 组合绩效指标面板（issue #99）：6 项指标一行。
  *
- * 两个收益率口径互补：
- * - TWR 衡量组合本身的投资水平（不受资金进出影响）
- * - MWR 衡量实际投入资金的年化回报（考虑加仓时点）
- * TWR 明显高于 MWR 说明大部分资金买在高位。
+ * 近6月/近1年/近3年（历史不足窗口期时为 null → “--”）、MWR 年化、最大回撤、
+ * 年化波动率。后端仍返回 1m/3m/ytd/twr 等字段，仅 UI 不展示。
  */
 export default function PerformanceMetrics({ data, variant = "desktop" }: PerformanceMetricsProps) {
   const gridCls =
-    variant === "mobile" ? "grid grid-cols-2 gap-2" : "grid grid-cols-2 md:grid-cols-4 gap-3";
+    variant === "mobile"
+      ? "grid grid-cols-2 gap-2"
+      : "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3";
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-lg">绩效指标</CardTitle>
         <CardDescription>
-          TWR 看组合水平，MWR 看实际投入的钱赚了多少
+          区间收益与风险指标，历史不足窗口期的区间收益不展示
           {data?.holding_days ? `；持有 ${data.holding_days} 天` : ""}
         </CardDescription>
       </CardHeader>
@@ -103,19 +103,24 @@ export default function PerformanceMetrics({ data, variant = "desktop" }: Perfor
 
         <div className={gridCls}>
           <Metric
-            label="TWR 累计"
-            value={data?.twr}
-            hint="时间加权收益率：消除资金进出影响，衡量组合本身的投资水平。本系统为净值化记账，该值等于净值增长率。"
+            label="近 6 月"
+            value={data?.return_6m}
+            hint="以 6 个月前当日或之后首个快照净值为基准；组合成立不足 6 个月时不展示"
           />
           <Metric
-            label="TWR 年化"
-            value={data?.annualized_twr}
-            hint="把 TWR 按 365 日历日折算为年化收益率。持有期不足一年时为外推值，仅供参考。"
+            label="近 1 年"
+            value={data?.return_1y}
+            hint="以 1 年前当日或之后首个快照净值为基准；组合成立不足 1 年时不展示"
+          />
+          <Metric
+            label="近 3 年"
+            value={data?.return_3y}
+            hint="以 3 年前当日或之后首个快照净值为基准；组合成立不足 3 年时不展示"
           />
           <Metric
             label="MWR 年化"
             value={data?.mwr}
-            hint="资金加权收益率（XIRR）：把每笔申赎按发生时点计入现金流求解年化回报。低于 TWR 说明大部分资金买在高位；短期大额申购会使其大幅失真。"
+            hint="资金加权收益率（XIRR）：把每笔申赎按发生时点计入现金流求解年化回报，衡量实际投入的钱赚了多少；短期大额申购会使其大幅失真。"
           />
           <Metric
             label="最大回撤"
@@ -126,12 +131,6 @@ export default function PerformanceMetrics({ data, variant = "desktop" }: Perfor
                 : "历史最高净值到之后最低点的最大跌幅"
             }
           />
-        </div>
-
-        <div className={gridCls}>
-          <Metric label="近 1 月" value={data?.return_1m} hint="以 30 天前当日或之后首个快照净值为基准" />
-          <Metric label="近 3 月" value={data?.return_3m} hint="以 90 天前当日或之后首个快照净值为基准" />
-          <Metric label="今年以来" value={data?.return_ytd} hint="以今年首个快照净值为基准" />
           <Metric
             label="年化波动率"
             value={data?.annualized_volatility}

@@ -43,6 +43,7 @@ from app.models import (
     Subscription, Trade, ShareChangeEvent,
     SyncJob, ManualMarketValue, Notification, IdempotencyCache,
 )
+from app.constants.asset_names import ASSET_NAME_MAP
 from app.utils.security import get_password_hash, create_access_token
 
 
@@ -103,7 +104,7 @@ def _seed_base_data(test_engine):
     SessionFactory = sessionmaker(bind=test_engine)
     db = SessionFactory()
     try:
-        # 1. 资产分类
+        # 1. 资产分类（asset_name 与迁移 0007/init_data.py 同源，取自 ASSET_NAME_MAP）
         asset_classes = [
             {"code": "CASH", "asset_type": "现金", "asset_category": "现金", "asset_subcat": "现金", "description": "现金类资产"},
             {"code": "STOCK_CN_LARGE", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "大盘", "description": "国内大盘股票"},
@@ -115,6 +116,8 @@ def _seed_base_data(test_engine):
             {"code": "BOND_LONG", "asset_type": "债券", "asset_category": "国内债券", "asset_subcat": "中长债", "description": "国内中长期债券"},
             {"code": "GOLD", "asset_type": "黄金", "asset_category": "黄金", "asset_subcat": "黄金", "description": "黄金资产"},
         ]
+        for ac in asset_classes:
+            ac["asset_name"] = ASSET_NAME_MAP[ac["code"]]
         for ac in asset_classes:
             if not db.query(AssetClassification).filter(AssetClassification.code == ac["code"]).first():
                 db.add(AssetClassification(**ac))

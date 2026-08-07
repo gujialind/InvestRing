@@ -11,6 +11,9 @@ export interface Portfolio {
   total_value?: number;
   cumulative_return?: number;
   investor_count?: number;
+  // 详情接口派生字段（issue #99）：最新快照总资产 / 累计收益（总资产 − 净投入）
+  // 无快照（draft 等）时为 null
+  total_profit?: number | null;
 }
 
 export interface PortfolioCreate {
@@ -70,7 +73,10 @@ export interface PortfolioPerformance {
   holding_days: number | null;
   return_1m: number | null;
   return_3m: number | null;
+  return_6m: number | null;
   return_ytd: number | null;
+  return_1y: number | null;
+  return_3y: number | null;
   max_drawdown: number | null;
   max_drawdown_peak_date: string | null;
   max_drawdown_trough_date: string | null;

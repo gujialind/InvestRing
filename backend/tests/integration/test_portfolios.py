@@ -9,6 +9,7 @@ from tests.factories import (
     create_portfolio,
     create_investor,
     create_investor_holding,
+    create_subscription,
     create_value_snapshot,
 )
 from app.models.portfolio import Portfolio
@@ -167,6 +168,64 @@ class TestPortfolioListAggregates:
         assert resp.status_code == 200
         items = {item["code"]: item for item in resp.json()["items"]}
         assert items["P_AGG_Z"]["investor_count"] == 1
+
+
+class TestPortfolioDetailDerivedFields:
+    """组合详情派生字段 total_value / total_profit（issue #99）"""
+
+    def test_detail_returns_total_value_and_profit(self, client, admin_headers, test_db):
+        """total_profit = 最新快照总资产 − 净投入（confirmed 申购 − confirmed 赎回）"""
+        create_portfolio(test_db, code="P_DER", status="active")
+        create_investor(test_db, code="INV_DER", name="派生投资人")
+        create_value_snapshot(test_db, "P_DER", date(2025, 1, 6), 10000.0, 10000.0, 1.0)
+        create_value_snapshot(test_db, "P_DER", date(2025, 1, 7), 11500.0, 10000.0, 1.15)
+        create_subscription(
+            test_db, "P_DER", "INV_DER", sub_type="subscribe", amount=10000.0,
+            apply_date=date(2025, 1, 6), confirm_date=date(2025, 1, 6), status="confirmed",
+        )
+        create_subscription(
+            test_db, "P_DER", "INV_DER", sub_type="redeem", amount=3000.0,
+            apply_date=date(2025, 1, 7), confirm_date=date(2025, 1, 7), status="confirmed",
+        )
+        # pending 申赎不计入净投入
+        create_subscription(
+            test_db, "P_DER", "INV_DER", sub_type="subscribe", amount=99999.0,
+            apply_date=date(2025, 1, 7), status="pending",
+        )
+
+        resp = client.get("/api/portfolios/P_DER", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_value"] == 11500.0
+        # 11500 − (10000 − 3000) = 4500
+        assert data["total_profit"] == 4500.0
+
+    def test_detail_draft_returns_none_totals(self, client, admin_headers, test_db):
+        """无快照的 draft 组合 total_value / total_profit 为 None"""
+        create_portfolio(test_db, code="P_DER_DR", status="draft")
+        resp = client.get("/api/portfolios/P_DER_DR", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_value"] is None
+        assert data["total_profit"] is None
+
+
+class TestPortfolioPerformanceNewPeriods:
+    """绩效接口新增区间字段（issue #99）"""
+
+    def test_performance_contains_new_period_keys(self, client, admin_headers, test_db):
+        create_portfolio(test_db, code="P_PERF_K", status="active")
+        create_value_snapshot(test_db, "P_PERF_K", date(2025, 1, 6), 10000.0, 10000.0, 1.0)
+        create_value_snapshot(test_db, "P_PERF_K", date(2025, 1, 7), 10100.0, 10000.0, 1.01)
+        resp = client.get("/api/portfolios/P_PERF_K/performance", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        for key in ("return_6m", "return_1y", "return_3y"):
+            assert key in data
+        # 成立仅 2 天，历史不足窗口期 → None
+        assert data["return_6m"] is None
+        assert data["return_1y"] is None
+        assert data["return_3y"] is None
 
 
 class TestLatestSnapshotEndpoint:
