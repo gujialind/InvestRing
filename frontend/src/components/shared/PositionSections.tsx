@@ -30,7 +30,9 @@ function formatProfit(value: number | null | undefined): string {
   return `${sign}${formatNumber(value)}`;
 }
 
-/** 单个持仓行卡片（白底 + slate-200 边框 + 8px 圆角，对齐预览稿） */
+/** 单个持仓行卡片（白底 + slate-200 边框 + 8px 圆角，对齐预览稿）
+ * row1=资产短名目+金额+占比 row2=产品全称+代码+平台徽标
+ * 收益行三列：持仓金额 | 累计收益 | 最新收益(MM-DD) */
 function PositionCard({
   position,
   percent,
@@ -39,11 +41,15 @@ function PositionCard({
   percent: number;
 }) {
   const amount = positionAmount(position);
+  const mmdd = position.snapshot_date
+    ? position.snapshot_date.slice(5, 10).replace("-", "/")
+    : "";
   return (
     <div className="bg-white border border-slate-200 rounded-lg px-4 py-3">
+      {/* row1: 资产短名目 + 金额 + 占比 */}
       <div className="flex items-baseline justify-between">
         <span className="text-[15px] font-semibold">
-          {position.product_name || position.product_code}
+          {position.asset_name || position.product_name || position.product_code}
         </span>
         <span className="text-sm font-semibold tabular-nums text-slate-900">
           {formatNumber(amount)} 元
@@ -52,20 +58,28 @@ function PositionCard({
           </span>
         </span>
       </div>
+      {/* row2: 产品全称 + 代码 + 平台徽标 */}
       <div className="mt-1 flex items-center gap-2">
-        {position.asset_name && (
-          <span className="text-xs text-slate-500">{position.asset_name}</span>
-        )}
+        <span className="text-xs text-slate-500 truncate">
+          {position.product_name || position.product_code}
+        </span>
         <span className="text-xs text-slate-400 tabular-nums">
           {position.product_code}
         </span>
-        {position.platform_code && (
-          <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">
-            {position.platform_code}
+        {(position.platform_name || position.platform_code) && (
+          <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600 flex-shrink-0">
+            {position.platform_name || position.platform_code}
           </span>
         )}
       </div>
+      {/* 收益行三列：持仓金额 | 累计收益 | 最新收益(MM-DD) */}
       <div className="mt-2.5 flex border-t border-slate-100 pt-2.5">
+        <div className="flex-1">
+          <div className="text-xs text-slate-500">持仓金额</div>
+          <div className="mt-0.5 text-base font-bold tabular-nums text-slate-900">
+            {formatNumber(amount)}
+          </div>
+        </div>
         <div className="flex-1">
           <div className="text-xs text-slate-500">累计收益</div>
           <div
@@ -78,7 +92,7 @@ function PositionCard({
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-1 text-xs text-slate-500">
-            最新收益
+            {mmdd ? `最新收益 (${mmdd})` : "最新收益"}
             {position.is_qdii && (
               <TooltipProvider>
                 <Tooltip>
@@ -228,9 +242,9 @@ export default function PositionSections({ positions, action }: PositionSections
                   <span className="text-xs text-slate-400 tabular-nums">
                     {r.position.product_code}
                   </span>
-                  {r.position.platform_code && (
-                    <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">
-                      {r.position.platform_code}
+                  {(r.position.platform_name || r.position.platform_code) && (
+                    <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600 flex-shrink-0">
+                      {r.position.platform_name || r.position.platform_code}
                     </span>
                   )}
                 </div>

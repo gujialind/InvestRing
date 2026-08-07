@@ -534,3 +534,212 @@ class TestPositionCashCumulativeProfit:
         assert rows["PD_CF_P1"]["profit_loss"] == pytest.approx(50.0, abs=1e-4)
         # P2：800 − 800（转移净额）= 0
         assert rows["PD_CF_P2"]["profit_loss"] == pytest.approx(0.0, abs=1e-4)
+
+
+# ============================================================================
+# 默认查询口径：组合级最新快照日（issue #105）
+# ============================================================================
+
+class TestPositionLatestSnapshot:
+    """默认查询应按组合级最新快照日取行，非产品级各自最新日"""
+
+    def test_cleared_product_excluded_from_default_query(self, client, admin_headers, test_db):
+        """基金清仓后（d2 无该产品行），默认查询不含该产品"""
+        create_portfolio(test_db, code="LS_CLR", status="active")
+        create_platform(test_db, code="LS_CLR_PLAT", name="清仓测试平台")
+        create_product(test_db, code="FUND_CLR", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
+        # d1：基金 + CASH
+        create_position_snapshot(
+            test_db, "LS_CLR", "FUND_CLR", "CN_OTC", snapshot_date=d1,
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="LS_CLR_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "LS_CLR", "CASH", "", snapshot_date=d1,
+            cash_amount=500.0, unit_price=None, cost_price=None,
+            market_value=500.0, platform_code="LS_CLR_PLAT",
+        )
+        # d2：基金清仓（不再落行），仅 CASH
+        create_position_snapshot(
+            test_db, "LS_CLR", "CASH", "", snapshot_date=d2,
+            cash_amount=2000.0, unit_price=None, cost_price=None,
+            market_value=2000.0, platform_code="LS_CLR_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=LS_CLR", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        # 已清仓的基金不应出现
+        assert "FUND_CLR" not in rows
+        # CASH 行应在，且 snapshot_date == d2
+        assert "CASH" in rows
+        assert rows["CASH"]["snapshot_date"] == d2.isoformat()
+
+    def test_in_transit_removed_excluded_from_default_query(self, client, admin_headers, test_db):
+        """在途资金消除后（d2 无 IN_TRANSIT 行），默认查询不含在途行"""
+        create_portfolio(test_db, code="LS_IT", status="active")
+        create_platform(test_db, code="LS_IT_PLAT", name="在途测试平台")
+        d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
+        # d1：IN_TRANSIT_BUY + CASH
+        create_position_snapshot(
+            test_db, "LS_IT", "IN_TRANSIT_BUY", "", snapshot_date=d1,
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="LS_IT_PLAT",
+            asset_type="cash",
+        )
+        create_position_snapshot(
+            test_db, "LS_IT", "CASH", "", snapshot_date=d1,
+            cash_amount=5000.0, unit_price=None, cost_price=None,
+            market_value=5000.0, platform_code="LS_IT_PLAT",
+        )
+        # d2：在途消除，仅 CASH
+        create_position_snapshot(
+            test_db, "LS_IT", "CASH", "", snapshot_date=d2,
+            cash_amount=5000.0, unit_price=None, cost_price=None,
+            market_value=5000.0, platform_code="LS_IT_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=LS_IT", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        assert "IN_TRANSIT_BUY" not in rows
+        assert "CASH" in rows
+        assert rows["CASH"]["snapshot_date"] == d2.isoformat()
+
+    def test_multi_portfolio_different_snapshot_dates(self, client, admin_headers, test_db):
+        """两个组合各自最新快照日不同，全局查询返回各自组合最新日"""
+        create_portfolio(test_db, code="LS_A", status="active")
+        create_portfolio(test_db, code="LS_B", status="active")
+        create_platform(test_db, code="LS_MP_PLAT", name="多组合平台")
+        # 组合 A：最新日 d1
+        create_position_snapshot(
+            test_db, "LS_A", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="LS_MP_PLAT",
+        )
+        # 组合 B：最新日 d2（晚于 A）
+        create_position_snapshot(
+            test_db, "LS_B", "CASH", "", snapshot_date=date(2025, 11, 4),
+            cash_amount=2000.0, unit_price=None, cost_price=None,
+            market_value=2000.0, platform_code="LS_MP_PLAT",
+        )
+
+        resp = client.get("/api/positions", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        for row in items:
+            if row["portfolio_code"] == "LS_A":
+                assert row["snapshot_date"] == "2025-11-03"
+            elif row["portfolio_code"] == "LS_B":
+                assert row["snapshot_date"] == "2025-11-04"
+
+    def test_explicit_snapshot_date_unchanged(self, client, admin_headers, test_db):
+        """显式传 snapshot_date 查询历史快照行为不变"""
+        create_portfolio(test_db, code="LS_HIST", status="active")
+        create_platform(test_db, code="LS_HIST_PLAT", name="历史查询平台")
+        create_product(test_db, code="FUND_HIST", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
+        # d1：基金 + CASH
+        create_position_snapshot(
+            test_db, "LS_HIST", "FUND_HIST", "CN_OTC", snapshot_date=d1,
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="LS_HIST_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "LS_HIST", "CASH", "", snapshot_date=d1,
+            cash_amount=500.0, unit_price=None, cost_price=None,
+            market_value=500.0, platform_code="LS_HIST_PLAT",
+        )
+        # d2：仅 CASH
+        create_position_snapshot(
+            test_db, "LS_HIST", "CASH", "", snapshot_date=d2,
+            cash_amount=2000.0, unit_price=None, cost_price=None,
+            market_value=2000.0, platform_code="LS_HIST_PLAT",
+        )
+
+        # 查历史 d1 → 应含已清仓基金
+        resp = client.get(
+            "/api/positions?portfolio_code=LS_HIST&snapshot_date=2025-11-03",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        assert "FUND_HIST" in rows
+        assert "CASH" in rows
+        assert rows["FUND_HIST"]["snapshot_date"] == "2025-11-03"
+
+
+# ============================================================================
+# platform_name 批量 enrich（issue #106）
+# ============================================================================
+
+class TestPositionPlatformName:
+    """platform_name 派生与防 N+1"""
+
+    def test_platform_name_enriched(self, client, admin_headers, test_db):
+        """持仓行 platform_name 等于 Platform 表对应 name"""
+        create_portfolio(test_db, code="PN_T", status="active")
+        create_platform(test_db, code="PN_PLAT", name="蚂蚁财富")
+        create_position_snapshot(
+            test_db, "PN_T", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="PN_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PN_T", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items[0]["platform_name"] == "蚂蚁财富"
+
+    def test_platform_name_null_when_no_platform(self, client, admin_headers, test_db):
+        """platform_code 为 null 时 platform_name 也为 null"""
+        create_portfolio(test_db, code="PN_N", status="active")
+        create_position_snapshot(
+            test_db, "PN_N", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code=None,
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PN_N", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items[0]["platform_name"] is None
+
+    def test_platform_name_sql_count_constant(self, client, admin_headers, test_db):
+        """platform_name enrich 查询次数恒定，不随持仓行数增长（防 N+1）"""
+        from unittest.mock import patch
+        from app.models import platform as platform_mod
+
+        create_portfolio(test_db, code="PN_S", status="active")
+        create_platform(test_db, code="PN_S1", name="平台一")
+        create_platform(test_db, code="PN_S2", name="平台二")
+        # 两行不同平台
+        create_position_snapshot(
+            test_db, "PN_S", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="PN_S1",
+        )
+        create_position_snapshot(
+            test_db, "PN_S", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=2000.0, unit_price=None, cost_price=None,
+            market_value=2000.0, platform_code="PN_S2",
+        )
+
+        # 用 spy 包装 db.query，统计 Platform 查询次数
+        with patch.object(
+            test_db, "query",
+            wraps=test_db.query,
+        ) as spy_query:
+            resp = client.get("/api/positions?portfolio_code=PN_S", headers=admin_headers)
+        assert resp.status_code == 200
+
+        # Platform 查询应只出现 1 次（批量 IN 查询），验证 platform_name 查询不随行数增长
+        # db.query(Platform.code, Platform.name) 传入的是列属性，其 .class_ 为 Platform
+        platform_queries = [
+            call for call in spy_query.call_args_list
+            if len(call.args) > 0 and getattr(call.args[0], "class_", None) is platform_mod.Platform
+        ]
+        assert len(platform_queries) == 1
