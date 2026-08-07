@@ -36,20 +36,28 @@ function formatProfit(value: number | null | undefined): string {
 function PositionCard({
   position,
   percent,
+  showAssetName = false,
 }: {
   position: Position;
   percent: number;
+  /** 子分组有头时名目由头承载，卡片标题退回产品全称避免组内同文（issue #109） */
+  showAssetName?: boolean;
 }) {
   const amount = positionAmount(position);
   const mmdd = position.snapshot_date
     ? position.snapshot_date.slice(5, 10).replace("-", "/")
     : "";
   return (
-    <div className="bg-white border border-slate-200 rounded-lg px-4 py-3">
+    <div
+      data-testid="position-card"
+      className="bg-white border border-slate-200 rounded-lg px-4 py-3"
+    >
       {/* row1: 资产短名目 + 金额 + 占比 */}
       <div className="flex items-baseline justify-between">
         <span className="text-[15px] font-semibold">
-          {position.asset_name || position.product_name || position.product_code}
+          {(showAssetName && position.asset_name) ||
+            position.product_name ||
+            position.product_code}
         </span>
         <span className="text-sm font-semibold tabular-nums text-slate-900">
           {formatNumber(amount)} 元
@@ -124,7 +132,68 @@ function PositionCard({
  * 按资产大类分组（股票/债券/黄金/现金），IN_TRANSIT 在途行抽出为独立
  * 「在途资金」卡片（仅金额+占比，无收益列）。占比全部来自行级最大余数法，
  * 分区头 = 行占比加总，与饼图图例严格自洽。
+ *
+ * asset_name 二级聚合（issue #109）：分区内按 asset_name 子分组，
+ * 仅当分区含多个子分组且该子分组名下 ≥2 行时渲染子分组头
+ * （名目 + 市值合计 + 占比合计），单产品名目平铺避免视觉噪音。
  */
+
+type Row = { position: Position; percent: number };
+
+interface AssetGroup {
+  name: string;
+  rows: Row[];
+  total: number;
+  percent: number;
+  hasHeader: boolean;
+}
+
+/** 子分组头 chip 配色（跟随大类色系，对齐预览稿 .chip） */
+const CHIP_STYLES: Record<string, string> = {
+  股票: "bg-blue-50 text-blue-700",
+  债券: "bg-violet-50 text-violet-700",
+  黄金: "bg-amber-50 text-amber-700",
+  现金: "bg-slate-100 text-slate-600",
+  其他: "bg-slate-100 text-slate-600",
+};
+
+/**
+ * 分区内按 asset_name 二级分组（issue #109）：
+ * 组间按合计市值降序、未分类恒垫底；组内卡片按市值降序。
+ * 子分组头条件渲染：分区含多个子分组且该组名下 ≥2 行（评审修订：
+ * 单子分组分区如现金平铺不设头，避免与分区头信息重复）。
+ */
+function groupRowsByAssetName(rows: Row[]): AssetGroup[] {
+  const byName = new Map<string, Row[]>();
+  for (const r of rows) {
+    const name = r.position.asset_name ?? "未分类";
+    const arr = byName.get(name) ?? [];
+    arr.push(r);
+    byName.set(name, arr);
+  }
+  const groups: AssetGroup[] = [...byName.entries()].map(([name, rs]) => {
+    const sorted = [...rs].sort(
+      (a, b) => positionAmount(b.position) - positionAmount(a.position)
+    );
+    return {
+      name,
+      rows: sorted,
+      total: sorted.reduce((s, r) => s + positionAmount(r.position), 0),
+      percent: sorted.reduce((s, r) => s + r.percent, 0),
+      hasHeader: false,
+    };
+  });
+  groups.sort((a, b) => {
+    if (a.name === "未分类") return 1;
+    if (b.name === "未分类") return -1;
+    return b.total - a.total;
+  });
+  if (groups.length > 1) {
+    for (const g of groups) g.hasHeader = g.rows.length >= 2;
+  }
+  return groups;
+}
+
 export default function PositionSections({ positions, action }: PositionSectionsProps) {
   if (!positions.length) {
     return (
@@ -190,13 +259,45 @@ export default function PositionSections({ positions, action }: PositionSections
                 </span>
               </span>
             </div>
-            <div className="space-y-2.5">
-              {section.rows.map((r) => (
-                <PositionCard
-                  key={r.position.id}
-                  position={r.position}
-                  percent={r.percent}
-                />
+            <div className="space-y-3">
+              {groupRowsByAssetName(section.rows).map((g) => (
+                <div key={g.name} data-testid="asset-group">
+                  {g.hasHeader && (
+                    <div
+                      data-testid="asset-group-header"
+                      className="mb-2 flex items-center justify-between px-0.5"
+                    >
+                      <span
+                        className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                          CHIP_STYLES[section.name] ?? CHIP_STYLES["其他"]
+                        }`}
+                      >
+                        {g.name}
+                      </span>
+                      <span className="text-sm font-bold tabular-nums">
+                        {formatNumber(g.total)}
+                        <span className="ml-0.5 text-xs font-normal text-slate-500">
+                          元
+                        </span>
+                        <span className="ml-1.5 text-xs font-normal text-slate-500">
+                          {g.percent.toFixed(1)}%
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  <div className="space-y-2.5">
+                    {g.rows.map((r) => (
+                      <PositionCard
+                        key={r.position.id}
+                        position={r.position}
+                        percent={r.percent}
+                        showAssetName={
+                          !g.hasHeader && r.position.asset_name !== section.name
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
