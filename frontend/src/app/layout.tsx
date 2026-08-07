@@ -6,8 +6,8 @@ import Providers from "./providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "InvestRing - 家庭投资组合管理",
-  description: "家庭投资组合管理系统",
+  title: "InvestRing - 资产组合管理",
+  description: "资产组合管理系统",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

@@ -53,7 +53,7 @@ export default function LoginPage() {
             InvestRing
           </CardTitle>
           <CardDescription className="text-gray-600">
-            家庭投资组合管理系统
+            资产组合管理系统
           </CardDescription>
         </CardHeader>
         <CardContent>
