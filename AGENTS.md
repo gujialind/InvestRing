@@ -301,7 +301,7 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 * Conventional Commits 风格：`fix:` / `feat:` / `docs:` / `refactor:` / `chore:`，附简短说明并尽量带 issue 号（如 `fix(snapshot): 快照净值严格匹配 (#96)`）。
 
-### 8.5 AI 代理铁律
+### 8.5 AI Angent理铁律
 
 1. **改完必须验证**：本地测试绿 + 能说明改动影响；验证不了的改动不提交。
 2. **排查/审查中发现的问题只提 issue，不直接改代码**，由任务所有者决定修复方式。
