@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "InvestRing API",
-    "description": "家庭投资组合管理系统 API",
+    "description": "资产组合管理系统 API",
     "version": "1.0.0"
   },
   "paths": {
