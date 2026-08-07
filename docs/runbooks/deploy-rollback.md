@@ -100,6 +100,8 @@ commit）。
    sed -i "s|^BACKEND_IMAGE_REF=.*|BACKEND_IMAGE_REF=$PREV_BACKEND|" .env
    sed -i "s|^FRONTEND_IMAGE_REF=.*|FRONTEND_IMAGE_REF=<旧前端镜像引用>|" .env
    docker compose up -d
+   # 刷新 nginx upstream 解析（容器重建后换新 IP，不重载入口会持续 502，issue #104）
+   docker compose exec -T nginx nginx -s reload || docker compose restart nginx
    curl -sf http://127.0.0.1:8000/health && echo OK
    ```
 
