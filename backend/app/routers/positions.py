@@ -6,6 +6,7 @@ from datetime import date
 from decimal import Decimal
 from app.database import get_db
 from app.models.asset_classification import AssetClassification
+from app.models.platform import Platform
 from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.models.product import Product
@@ -36,20 +37,19 @@ def get_positions(
     if snapshot_date:
         query = query.filter(PortfolioPosition.snapshot_date == snapshot_date)
     else:
-        # 默认查询最新快照：每个组合每个产品的最新日期
+        # 默认查询最新快照：每个组合的最新快照日（组合级，非产品级）
+        # 按组合取 max(snapshot_date)，避免清仓/在途消除后回退到陈旧行（#105）
         subq = (
             db.query(
                 PortfolioPosition.portfolio_code,
-                PortfolioPosition.product_code,
                 func.max(PortfolioPosition.snapshot_date).label("max_date"),
             )
-            .group_by(PortfolioPosition.portfolio_code, PortfolioPosition.product_code)
+            .group_by(PortfolioPosition.portfolio_code)
             .subquery()
         )
         query = query.join(
             subq,
             (PortfolioPosition.portfolio_code == subq.c.portfolio_code)
-            & (PortfolioPosition.product_code == subq.c.product_code)
             & (PortfolioPosition.snapshot_date == subq.c.max_date),
         )
     total = query.count()
@@ -78,6 +78,15 @@ def get_positions(
         ).filter(AssetClassification.code.in_(class_codes)).all():
             asset_name_by_class[ac_code] = ac_name
 
+    # platform_name：平台编码 → 名称（批量 enrich，防 N+1，issue #106）
+    platform_codes = {p.platform_code for p in items if p.platform_code}
+    platform_name_map = {}
+    if platform_codes:
+        for plat in db.query(Platform.code, Platform.name).filter(
+            Platform.code.in_(platform_codes)
+        ).all():
+            platform_name_map[plat.code] = plat.name
+
     # daily_profit / 现金累计收益 / 分红加回：共享一次流水聚合（issue #103，防三函数重复查询）
     derived = compute_derived_fields(db, items)
     daily_profits = derived["daily_profits"]
@@ -92,6 +101,7 @@ def get_positions(
         row["is_qdii"] = qdii_map.get((p.product_code, p.market))
         class_code = asset_class_by_product.get((p.product_code, p.market))
         row["asset_name"] = asset_name_by_class.get(class_code) if class_code else None
+        row["platform_name"] = platform_name_map.get(p.platform_code) if p.platform_code else None
         row["daily_profit"] = daily_profits.get(key)
         if p.shares is not None and p.cost_price is not None and p.market_value is not None:
             # 非现金行：市值 − 成本 + 累计分红加回（复权口径，路线 C）

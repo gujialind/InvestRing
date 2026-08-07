@@ -7689,6 +7689,17 @@
               }
             ],
             "title": "Is Qdii"
+          },
+          "platform_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Name"
           }
         },
         "type": "object",
