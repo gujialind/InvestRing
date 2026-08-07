@@ -49,6 +49,8 @@ class PositionResponse(PositionBase):
     asset_name: Optional[str] = None
     daily_profit: Optional[float] = None
     is_qdii: Optional[bool] = None
+    # platform_name 来自 platform 表（批量 enrich，防 N+1，issue #106）
+    platform_name: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -5,6 +5,7 @@ export interface Position {
   product_name?: string;
   market?: string;
   platform_code?: string;
+  platform_name?: string | null;
   shares?: number;
   frozen_shares?: number;
   cost_price?: number;
