@@ -116,3 +116,6 @@ frontend/e2e/.auth/
 
 # Local dev helper scripts (contain environment-specific info, e.g. SSH tunnels)
 scripts/ssh-tunnel*.sh
+
+# Local design previews (kept local only, not version-controlled; see issue #109)
+docs/previews/
