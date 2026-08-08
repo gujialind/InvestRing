@@ -43,6 +43,7 @@ yarn.lock
 .trae/
 .qoder/tmp/
 .qoder/repowiki/
+.qoder/preview
 
 # AI Coding Assistants (multi-IDE)
 .hermes/
