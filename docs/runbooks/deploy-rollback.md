@@ -117,6 +117,8 @@ commit）。
 | 0003 | trade.transfer_group NOT NULL | 已实现 | 仅放宽约束，无损 |
 | 0004 | 份额精度 15,4 → 15,2 | 已实现 | **有损**：仅恢复列类型，被截断的精度不可恢复 |
 | 0005 | cash_amount / 日期字段重命名 | 已实现 | 纯重命名，无损 |
+| 0006 | product_code 扩展 String(20) + in_transit_total + IN_TRANSIT 种子产品 | **未实现**（`raise NotImplementedError`） | **不可逆**：IN_TRANSIT 数据存在时无法安全回退（FK 约束 + 列收窄容不下长 code）。跨过 0006 的回滚只能走前滚（§4.1）或从 RDS 快照恢复 |
+| 0007 | asset_classification.asset_name 新增 + 回填 | 已实现 | 删列，回填值丢失但可按 `ASSET_NAME_MAP` 重跑迁移恢复；人工改过的 asset_name 不可恢复，低风险 |
 
 > 新增迁移时同步维护本表；`downgrade()` 未实现或有损的迁移，路径 B 前必须先 RDS 快照。
 
@@ -149,9 +151,8 @@ commit）。
 本地环境无 docker，容器级演练待在带 docker 的非生产机器执行一次并回填记录：
 
 1. 用 `docker-compose.dev.yml` 起一套隔离栈（独立 MySQL 库）。
-2. 构建两个后端镜像：tag-old（当前 main）、tag-new（在其上加一条演练迁移 0006，如加一
-   个可空列，`downgrade()` 删列）。
-3. 部署 tag-new → 确认 `alembic current` 为 0006、应用健康。
+2. 构建两个后端镜像：tag-old（当前 main）、tag-new（在其上加一条演练迁移，编号取当时 head + 1，如加一个可空列，`downgrade()` 删列）。
+3. 部署 tag-new → 确认 `alembic current` 为演练 revision、应用健康。
 4. 模拟失败回滚：按 §3 用 tag-old 跑 `alembic current`，**预期**报 `Can't locate revision`。
-5. 按 §4.2 用 tag-new `downgrade 0005`，再切 tag-old `compose up`，**预期**旧后端健康。
+5. 按 §4.2 用 tag-new `downgrade` 到当前 main 的 head，再切 tag-old `compose up`，**预期**旧后端健康。
 6. 将实际输出回填至本节，删除本待办。
