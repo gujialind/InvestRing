@@ -121,10 +121,11 @@ function PositionCard({
  * 「在途资金」卡片（仅金额+占比，无收益列）。占比全部来自行级最大余数法，
  * 分区头 = 行占比加总，与饼图图例严格自洽。
  *
- * asset_name 二级聚合（issue #109，V4 定稿）：分区内按 asset_name 子分组，
- * 名目 chip 始终位于产品名之上（与大类同名如现金/黄金时不渲染 chip、卡片平铺），
- * 仅当名下持仓 ≥2 行时在 chip 行右侧显示市值合计 + 占比合计（单产品仅 chip、
- * 避免与卡片金额重复）；chip 组内卡片缩进渲染并带左侧引导线（空间嵌套）。
+ * asset_name 二级聚合（issue #109，V4 定稿，#114 修正）：分区内按 asset_name
+ * 子分组，名目 chip 始终位于产品名之上（与大类同名如现金/黄金时不渲染 chip、
+ * 卡片平铺），chip 行右侧恒显示市值合计 + 占比合计（无论名下 1 行还是多行，
+ * 保证同分区内各 chip 展示口径一致，#114）；chip 组内卡片缩进渲染并带左侧
+ * 引导线（空间嵌套）。
  */
 
 type Row = { position: Position; percent: number };
@@ -243,17 +244,14 @@ export default function PositionSections({ positions, action }: PositionSections
             </div>
             <div className="space-y-3">
               {groupRowsByAssetName(section.rows).map((g) => {
-                // V4 定稿：名目 chip 始终位于产品名之上，仅名目与大类同名
-                // （现金/黄金）时不渲染 chip、卡片平铺；合计仅名下 ≥2 行时显示
+                // V4 定稿 + #114 修正：名目 chip 始终位于产品名之上，仅名目与
+                // 大类同名（现金/黄金）时不渲染 chip、卡片平铺；chip 行合计恒显示
                 const showChip = g.name !== section.name;
-                const showTotals = g.rows.length >= 2;
                 return (
                   <div key={g.name} data-testid="asset-group">
                     {showChip && (
                       <div
-                        {...(showTotals
-                          ? { "data-testid": "asset-group-header" }
-                          : {})}
+                        data-testid="asset-group-header"
                         className="mb-2 flex items-center justify-between px-0.5"
                       >
                         <span
@@ -263,17 +261,15 @@ export default function PositionSections({ positions, action }: PositionSections
                         >
                           {g.name}
                         </span>
-                        {showTotals && (
-                          <span className="text-sm font-bold tabular-nums">
-                            {formatNumber(g.total)}
-                            <span className="ml-0.5 text-xs font-normal text-slate-500">
-                              元
-                            </span>
-                            <span className="ml-1.5 text-xs font-normal text-slate-500">
-                              {g.percent.toFixed(1)}%
-                            </span>
+                        <span className="text-sm font-bold tabular-nums">
+                          {formatNumber(g.total)}
+                          <span className="ml-0.5 text-xs font-normal text-slate-500">
+                            元
                           </span>
-                        )}
+                          <span className="ml-1.5 text-xs font-normal text-slate-500">
+                            {g.percent.toFixed(1)}%
+                          </span>
+                        </span>
                       </div>
                     )}
                     {/* chip 组内卡片缩进 + 左侧引导线（空间嵌套）；平铺组不缩进 */}
