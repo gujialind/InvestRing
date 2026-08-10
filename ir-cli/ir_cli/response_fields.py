@@ -10,7 +10,7 @@ RESPONSE_FIELDS: dict = {
     "position": {
         "list": {
             "shape": "list",
-            "fields": "*portfolio_code:str,*product_code:str,*market:str?,*platform_code:str?,*shares:num?,frozen_shares:num?,cost_price:num?,*unit_price:num?,*market_value:num?,*cash_amount:num?,frozen_amount:num?,asset_type:str?,*snapshot_date:date,*id:int,created_at:datetime?,product_name:str?,profit_loss:num?,profit_loss_percent:num?",
+            "fields": "*portfolio_code:str,*product_code:str,*market:str?,*platform_code:str?,*shares:num?,frozen_shares:num?,cost_price:num?,*unit_price:num?,*market_value:num?,*cash_amount:num?,frozen_amount:num?,asset_type:str?,*snapshot_date:date,*id:int,created_at:datetime?,product_name:str?,profit_loss:num?,profit_loss_percent:num?,asset_name:str?,daily_profit:num?,is_qdii:bool?,platform_name:str?",
             "notes": {
                 "shares": "净值型资产有值，CASH行为null",
                 "cash_amount": "仅CASH行有值，基金行恒为null（CHECK约束shares/cash_amount二选一），市值请用market_value"
@@ -28,7 +28,7 @@ RESPONSE_FIELDS: dict = {
         },
         "performance": {
             "shape": "object",
-            "fields": "portfolio_code:str,twr:num?,twr_chained:num?,annualized_twr:num?,mwr:num?,initial_nav:num?,current_nav:num?,holding_days:int?,return_1m:num?,return_3m:num?,return_ytd:num?,max_drawdown:num?,max_drawdown_peak_date:str?,max_drawdown_trough_date:str?,annualized_volatility:num?,cash_flow_count:int,nav_series_consistent:bool?,annualization_reliable:bool",
+            "fields": "portfolio_code:str,twr:num?,twr_chained:num?,annualized_twr:num?,mwr:num?,initial_nav:num?,current_nav:num?,holding_days:int?,return_1m:num?,return_3m:num?,return_6m:num?,return_ytd:num?,return_1y:num?,return_3y:num?,max_drawdown:num?,max_drawdown_peak_date:str?,max_drawdown_trough_date:str?,annualized_volatility:num?,cash_flow_count:int,nav_series_consistent:bool?,annualization_reliable:bool",
             "notes": {
                 "_": "百分数口径（1.5表示1.5%）。快照不足时字段为null而非0，draft组合全为null",
                 "twr": "时间加权收益率，消除资金进出影响；净值化记账下与累计净值增长率等价",

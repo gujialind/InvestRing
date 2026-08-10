@@ -5,8 +5,9 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Sequence
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.manual_market_value import ManualMarketValue
@@ -79,6 +80,350 @@ def compute_cash_balance(
         balance += Decimal(str(e.cash_change))
 
     return balance
+
+
+# ---------------------------------------------------------------------------
+# 持仓读侧派生（issue #99）：daily_profit / 现金累计收益 / 分红加回
+#
+# 口径（路线 C：分红加回基金 + 事件计入现金基数，与评审推演一致）：
+# - 非现金行 profit_loss = 市值 − 份额×成本 + Σ 该产品/平台 confirmed 事件 cash_change
+#   （现金分红加回 = 复权口径；拆分/合并事件 cash_change=0 天然无影响）
+# - 非现金行 daily_profit = 当日市值 − 前一快照日市值 − 当日确认净买入额
+#   + 当日事件 cash_change（分红日加回对冲除权，daily=0）
+# - 现金行 profit_loss = 当前现金 − 现金基数（累计净存入 − 累计买入 + 累计卖出
+#   + 转移净额 + 事件净额），≈ 0，仅吸收手动调平/利息等未记账差额
+# - 现金行 daily_profit = 当日现金 − 前日现金 − 当日净流入（同基数五类流水按日过滤）
+# - IN_TRANSIT_BUY/SELL 行、组合首个快照日均无收益概念 → None
+# 全部为批量查询 + 内存映射，禁止 N+1。
+# ---------------------------------------------------------------------------
+
+# 在途资金虚拟产品：无收益概念
+IN_TRANSIT_PRODUCT_CODES = ("IN_TRANSIT_BUY", "IN_TRANSIT_SELL")
+
+
+def _classify_transfer_group(transfer_group: str) -> str:
+    """transfer_group 前缀分类：sub_=申赎外部流；rebal_=调仓内部流；其余=跨平台转移"""
+    if transfer_group.startswith("sub_"):
+        return "sub"
+    if transfer_group.startswith("rebal_"):
+        return "rebal"
+    return "transfer"
+
+
+def _aggregate_position_flows(db: Session, items: Sequence[PortfolioPosition]) -> dict:
+    """批量聚合 items 涉及组合的 trade/事件流水（派生计算共用，防 N+1）。
+
+    返回：
+      trade_daily: {(portfolio, product, market, platform): {confirm_date: 买入额−卖出额}}
+        （基金腿，按确认日分组）
+      cash_flows: {(portfolio, platform): [(confirm_date, 分类, trade_type, 金额), ...]}
+        （CASH 腿，confirm_date <= 行快照日上限）
+      event_rows: {(portfolio, product, platform): [(ex_date, cash_change), ...]}
+        （confirmed 且 cash_change != 0，ex_date <= 行快照日上限）
+    """
+    portfolio_codes = {p.portfolio_code for p in items}
+    max_date = max(p.snapshot_date for p in items)
+
+    trade_daily = {}
+    cash_flows: dict = {}
+    trade_rows = (
+        db.query(
+            Trade.portfolio_code,
+            Trade.product_code,
+            Trade.market,
+            Trade.platform_code,
+            Trade.trade_type,
+            Trade.transfer_group,
+            Trade.confirm_date,
+            func.sum(Trade.amount),
+        )
+        .filter(
+            Trade.portfolio_code.in_(portfolio_codes),
+            Trade.status == "confirmed",
+            Trade.confirm_date <= max_date,
+        )
+        .group_by(
+            Trade.portfolio_code,
+            Trade.product_code,
+            Trade.market,
+            Trade.platform_code,
+            Trade.trade_type,
+            Trade.transfer_group,
+            Trade.confirm_date,
+        )
+        .all()
+    )
+    for pc, prod, market, plat, ttype, tgroup, confirm_date, amount in trade_rows:
+        amt = float(amount or 0)
+        if prod == "CASH":
+            category = _classify_transfer_group(tgroup)
+            cash_flows.setdefault((pc, plat), []).append((confirm_date, category, ttype, amt))
+        else:
+            key = (pc, prod, market, plat)
+            signed = amt if ttype == "buy" else -amt
+            trade_daily.setdefault(key, {})
+            trade_daily[key][confirm_date] = trade_daily[key].get(confirm_date, 0.0) + signed
+
+    event_rows: dict = {}
+    events = (
+        db.query(
+            ShareChangeEvent.portfolio_code,
+            ShareChangeEvent.product_code,
+            ShareChangeEvent.platform_code,
+            ShareChangeEvent.ex_date,
+            func.sum(ShareChangeEvent.cash_change),
+        )
+        .filter(
+            ShareChangeEvent.portfolio_code.in_(portfolio_codes),
+            ShareChangeEvent.status == "confirmed",
+            ShareChangeEvent.cash_change.isnot(None),
+            ShareChangeEvent.cash_change != 0,
+            ShareChangeEvent.ex_date <= max_date,
+        )
+        .group_by(
+            ShareChangeEvent.portfolio_code,
+            ShareChangeEvent.product_code,
+            ShareChangeEvent.platform_code,
+            ShareChangeEvent.ex_date,
+        )
+        .all()
+    )
+    for pc, prod, plat, ex_date, cash_change in events:
+        event_rows.setdefault((pc, prod, plat), []).append((ex_date, float(cash_change)))
+
+    return {
+        "trade_daily": trade_daily,
+        "cash_flows": cash_flows,
+        "event_rows": event_rows,
+    }
+
+
+def compute_daily_profits(
+    db: Session,
+    items: Sequence[PortfolioPosition],
+    flows: dict,
+) -> dict:
+    """批量计算持仓行当日收益（读侧派生，不落库）。
+
+    ``flows`` 由调用方经 ``compute_derived_fields`` 统一聚合后注入（issue #103，
+    避免三函数各自重复聚合）。
+
+    返回 {(portfolio_code, product_code, market, platform_code): float | None}。
+    None 场景：组合首个快照日（无前日基准）、IN_TRANSIT 在途行。
+    快照断层时取最近可得前一快照日为基准。
+    """
+    result = {}
+    if not items:
+        return result
+
+    portfolio_codes = {p.portfolio_code for p in items}
+
+    # 每个组合的快照日期集合：定位首个快照日与前一快照日
+    date_rows = (
+        db.query(PortfolioPosition.portfolio_code, PortfolioPosition.snapshot_date)
+        .filter(PortfolioPosition.portfolio_code.in_(portfolio_codes))
+        .distinct()
+        .all()
+    )
+    dates_by_portfolio: dict = {}
+    for pc, snap_date in date_rows:
+        dates_by_portfolio.setdefault(pc, set()).add(snap_date)
+
+    # 需要前日基准的行 → 批量查前一快照日持仓
+    prev_needed = []  # (row, prev_date)
+    for p in items:
+        key = (p.portfolio_code, p.product_code, p.market, p.platform_code)
+        if p.product_code in IN_TRANSIT_PRODUCT_CODES:
+            result[key] = None
+            continue
+        dates = dates_by_portfolio.get(p.portfolio_code, set())
+        prev_dates = [d for d in dates if d < p.snapshot_date]
+        if not prev_dates:
+            result[key] = None  # 首个快照日，无前日基准
+            continue
+        prev_needed.append((p, max(prev_dates)))
+
+    prev_map = {}
+    if prev_needed:
+        prev_date_set = {d for _, d in prev_needed}
+        prev_rows = (
+            db.query(PortfolioPosition)
+            .filter(
+                PortfolioPosition.portfolio_code.in_(portfolio_codes),
+                PortfolioPosition.snapshot_date.in_(prev_date_set),
+            )
+            .all()
+        )
+        for row in prev_rows:
+            prev_map[
+                (row.portfolio_code, row.product_code, row.market, row.platform_code, row.snapshot_date)
+            ] = row
+
+    trade_daily = flows["trade_daily"]
+    cash_flows = flows["cash_flows"]
+    event_rows = flows["event_rows"]
+
+    for p, prev_date in prev_needed:
+        key = (p.portfolio_code, p.product_code, p.market, p.platform_code)
+        prev_row = prev_map.get(
+            (p.portfolio_code, p.product_code, p.market, p.platform_code, prev_date)
+        )
+        d = p.snapshot_date
+        if p.shares is not None:
+            # 非现金行：市值差 − 当日确认净买入 + 当日事件分红加回（复权口径）
+            mv_now = float(p.market_value or 0)
+            mv_prev = float(prev_row.market_value or 0) if prev_row else 0.0
+            net_buy = trade_daily.get(
+                (p.portfolio_code, p.product_code, p.market, p.platform_code), {}
+            ).get(d, 0.0)
+            event_today = sum(
+                v for ex, v in event_rows.get(
+                    (p.portfolio_code, p.product_code, p.platform_code), []
+                ) if ex == d
+            )
+            result[key] = round(mv_now - mv_prev - net_buy + event_today, 4)
+        else:
+            # 现金行：现金差 − 当日净流入（sub/rebal/转移/事件四类按日过滤）
+            cash_now = float(p.cash_amount or 0)
+            cash_prev = float(prev_row.cash_amount or 0) if prev_row else 0.0
+            inflow = 0.0
+            for confirm_date, category, ttype, amt in cash_flows.get(
+                (p.portfolio_code, p.platform_code), []
+            ):
+                if confirm_date != d:
+                    continue
+                if category == "sub":
+                    inflow += amt if ttype == "buy" else -amt
+                elif category == "rebal":
+                    inflow += amt if ttype == "buy" else -amt
+                else:  # transfer：双腿同组同日分别计入各自平台
+                    inflow += amt if ttype == "buy" else -amt
+            event_today = sum(
+                v
+                for (epc, _prod, eplat), entries in event_rows.items()
+                if epc == p.portfolio_code and eplat == p.platform_code
+                for ex, v in entries
+                if ex == d
+            )
+            inflow += event_today
+            result[key] = round(cash_now - cash_prev - inflow, 4)
+
+    return result
+
+
+def compute_cash_cumulative_profits(
+    db: Session,
+    items: Sequence[PortfolioPosition],
+    flows: dict,
+) -> dict:
+    """批量计算 CASH 行累计收益（读侧派生，路线 C 现金基数口径）。
+
+    ``flows`` 由调用方经 ``compute_derived_fields`` 统一聚合后注入（issue #103）。
+
+    现金累计收益 = 当前现金 −（累计净存入 − 累计买入 + 累计卖出 + 转移净额 + 事件净额），
+    事件净额计入存入基数 → 收益 ≈ 0，仅吸收手动调平/利息等未记账差额。
+    返回 {(portfolio_code, product_code, market, platform_code): float | None}，
+    仅含 CASH 行；其他行不在返回中。
+    """
+    result = {}
+    cash_items = [
+        p for p in items
+        if p.product_code == "CASH" and p.shares is None
+    ]
+    if not cash_items:
+        return result
+
+    cash_flows = flows["cash_flows"]
+    event_rows = flows["event_rows"]
+
+    for p in cash_items:
+        key = (p.portfolio_code, p.product_code, p.market, p.platform_code)
+        d = p.snapshot_date
+        net_deposit = buys = sells = transfer_net = 0.0
+        for confirm_date, category, ttype, amt in cash_flows.get(
+            (p.portfolio_code, p.platform_code), []
+        ):
+            if confirm_date > d:
+                continue
+            if category == "sub":
+                net_deposit += amt if ttype == "buy" else -amt
+            elif category == "rebal":
+                if ttype == "sell":
+                    buys += amt  # 买产品花现金
+                else:
+                    sells += amt  # 卖产品收现金
+            else:
+                transfer_net += amt if ttype == "buy" else -amt
+        event_net = sum(
+            v
+            for (epc, _prod, eplat), entries in event_rows.items()
+            if epc == p.portfolio_code and eplat == p.platform_code
+            for ex, v in entries
+            if ex <= d
+        )
+        basis = net_deposit - buys + sells + transfer_net + event_net
+        result[key] = round(float(p.cash_amount or 0) - basis, 4)
+
+    return result
+
+
+def compute_event_cash_addbacks(
+    db: Session,
+    items: Sequence[PortfolioPosition],
+    flows: dict,
+) -> dict:
+    """批量计算非现金行累计分红加回（复权口径，读侧派生）。
+
+    ``flows`` 由调用方经 ``compute_derived_fields`` 统一聚合后注入（issue #103）。
+
+    返回 {(portfolio_code, product_code, market, platform_code): float}，
+    值为 confirmed 事件 cash_change 按 (产品, 平台) 聚合（ex_date <= 行快照日）。
+    拆分/合并事件 cash_change=0 天然无影响；无事件行不在返回中（调用方按 0 处理）。
+    """
+    result = {}
+    fund_items = [p for p in items if p.shares is not None]
+    if not fund_items:
+        return result
+
+    event_rows = flows["event_rows"]
+
+    for p in fund_items:
+        key = (p.portfolio_code, p.product_code, p.market, p.platform_code)
+        total = sum(
+            v
+            for ex, v in event_rows.get(
+                (p.portfolio_code, p.product_code, p.platform_code), []
+            )
+            if ex <= p.snapshot_date
+        )
+        if total:
+            result[key] = round(total, 4)
+
+    return result
+
+
+def compute_derived_fields(
+    db: Session,
+    items: Sequence[PortfolioPosition],
+) -> dict:
+    """一次聚合，批量产出持仓读侧派生字段（issue #103：消除三函数重复聚合）。
+
+    聚合 ``_aggregate_position_flows`` 仅执行 1 次（trade + event 共 2 条查询），
+    结果注入 ``compute_daily_profits`` / ``compute_cash_cumulative_profits`` /
+    ``compute_event_cash_addbacks`` 三个 helper，避免各自独立聚合导致的冗余查询。
+
+    返回 ``{"daily_profits": {...}, "cash_profits": {...}, "event_addbacks": {...}}``；
+    ``items`` 为空时返回三个空 dict。
+    """
+    empty = {"daily_profits": {}, "cash_profits": {}, "event_addbacks": {}}
+    if not items:
+        return empty
+    flows = _aggregate_position_flows(db, items)
+    return {
+        "daily_profits": compute_daily_profits(db, items, flows),
+        "cash_profits": compute_cash_cumulative_profits(db, items, flows),
+        "event_addbacks": compute_event_cash_addbacks(db, items, flows),
+    }
 
 
 def get_cash_value(

@@ -13,7 +13,8 @@
 services:
   # --------------------------------------------------------------------------
   # 后端服务：FastAPI + Uvicorn（2 workers，nav_sync 定时任务经 MySQL GET_LOCK 互斥）
-  # 启动时应用自动执行 alembic upgrade head
+  # 容器启动时经 docker-entrypoint.sh 一次性执行 alembic upgrade head
+  #（worker 启动前完成，避免多 worker 并发迁移竞态，issue #104）
   # --------------------------------------------------------------------------
   backend:
     image: ${BACKEND_IMAGE_REF:?BACKEND_IMAGE_REF 未设置，请在 .env 中指定后端镜像}

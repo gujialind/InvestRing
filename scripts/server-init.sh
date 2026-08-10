@@ -1,17 +1,20 @@
 #!/bin/bash
 # ============================================================================
-# InvestRing 服务器初始化脚本
+# InvestRing 服务器初始化脚本（一次性）
 # ============================================================================
-# 目标环境：阿里云轻量应用服务器 2核2GB (Ubuntu 22.04)
+# 目标环境：4核4G 云服务器 (Ubuntu 22.04) + RDS MySQL
 # 功能：配置 swap、安装 Docker、创建部署目录、设置防火墙
 # 使用方式：ssh root@your-server-ip 后执行此脚本
+#
+# ⚠️ 本脚本仅用于新服务器一次性初始化，日常发布走 CD
+#    （.github/workflows/deploy.yml），不要重复/手动部署。
 # ============================================================================
 
 set -e
 
 echo "============================================"
 echo "  InvestRing 服务器初始化"
-echo "  目标：2核2GB 轻量服务器 + RDS MySQL"
+echo "  目标：4核4G 云服务器 + RDS MySQL"
 echo "============================================"
 
 # ------------------------------------------------------------------
@@ -23,7 +26,7 @@ apt-get update -qq
 apt-get upgrade -y -qq
 
 # ------------------------------------------------------------------
-# 2. 配置 Swap（2GB 内存必须，防止 OOM）
+# 2. 配置 Swap（防 OOM 兜底，4G 内存仍建议保留）
 # ------------------------------------------------------------------
 echo ""
 echo "[2/6] 配置 Swap..."
@@ -67,11 +70,14 @@ echo ""
 echo "[3/6] 安装 Docker..."
 
 if command -v docker &> /dev/null; then
-    echo "Docker 已安装: $(docker --version)"
+    echo "Docker 已安装，跳过: $(docker --version)"
 else
     # 使用阿里云镜像加速安装（国内服务器速度快）
-    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | apt-key add -
-    add-apt-repository "deb [arch=amd64] https://mirrors.aliyun.com/docker-ce/linux/ubuntu $(lsb_release -cs) stable"
+    # 官方 keyring 方式（apt-key 已废弃，Ubuntu 22.04+ 会告警）
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    add-apt-repository "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/ubuntu $(lsb_release -cs) stable"
     apt-get update -qq
     apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
