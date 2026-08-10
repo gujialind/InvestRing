@@ -33,7 +33,7 @@ function formatProfit(value: number | null | undefined): string {
 /** 单个持仓行卡片（白底 + slate-200 边框 + 8px 圆角，#109 V4 定稿）
  * row1=产品全称（15px/600；名目统一由上方 chip 承载，卡片不再出现 asset_name）
  * row2=平台徽标 + 产品代码
- * row3 三列：持仓金额(占比小字后缀) | 累计收益 | 最新收益(MM-DD) */
+ * row3 三列：持仓金额(占比置于数字行下方) | 累计收益 | 最新收益(日期置于数字行下方) */
 function PositionCard({
   position,
   percent,
@@ -65,15 +65,16 @@ function PositionCard({
           {position.product_code}
         </span>
       </div>
-      {/* row3 三列：持仓金额(占比后缀) | 累计收益 | 最新收益(MM-DD) */}
+      {/* row3 三列：持仓金额/占比(下行) | 累计收益 | 最新收益/日期(下行)；
+          占比与日期从数字后缀/标签后缀移到数字行下方，缓解小屏横向拥挤 */}
       <div className="mt-2.5 flex border-t border-slate-100 pt-2.5">
         <div className="flex-1">
           <div className="text-xs text-slate-500">持仓金额</div>
           <div className="mt-0.5 text-base font-bold tabular-nums text-slate-900">
             {formatNumber(amount)}
-            <span className="ml-1 text-xs font-normal text-slate-500">
-              {percent.toFixed(1)}%
-            </span>
+          </div>
+          <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
+            {percent.toFixed(1)}%
           </div>
         </div>
         <div className="flex-1">
@@ -85,10 +86,12 @@ function PositionCard({
           >
             {formatProfit(position.profit_loss)}
           </div>
+          {/* 占位行：与两侧列的下行小字对齐 */}
+          <div className="mt-0.5 text-xs invisible">0</div>
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-1 text-xs text-slate-500">
-            {mmdd ? `最新收益 (${mmdd})` : "最新收益"}
+            最新收益
             {position.is_qdii && (
               <TooltipProvider>
                 <Tooltip>
@@ -108,6 +111,9 @@ function PositionCard({
             )}`}
           >
             {formatProfit(position.daily_profit)}
+          </div>
+          <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
+            {mmdd ? `(${mmdd})` : "\u00A0"}
           </div>
         </div>
       </div>
@@ -234,11 +240,12 @@ export default function PositionSections({ positions, action }: PositionSections
                 />
                 {section.name}
               </span>
+              {/* 大类分区头占比取整（小屏可读性优先，行级/图例仍保留 1 位小数） */}
               <span className="text-[17px] font-bold tabular-nums">
                 {formatNumber(sectionTotal)}
                 <span className="ml-0.5 text-xs font-normal text-slate-500">元</span>
                 <span className="ml-1.5 text-[13px] font-normal text-slate-500">
-                  {sectionPercent.toFixed(1)}%
+                  {Math.round(sectionPercent)}%
                 </span>
               </span>
             </div>
@@ -261,13 +268,14 @@ export default function PositionSections({ positions, action }: PositionSections
                         >
                           {g.name}
                         </span>
+                        {/* 名目 chip 行占比取整（同大类分区头口径） */}
                         <span className="text-sm font-bold tabular-nums">
                           {formatNumber(g.total)}
                           <span className="ml-0.5 text-xs font-normal text-slate-500">
                             元
                           </span>
                           <span className="ml-1.5 text-xs font-normal text-slate-500">
-                            {g.percent.toFixed(1)}%
+                            {Math.round(g.percent)}%
                           </span>
                         </span>
                       </div>
@@ -310,7 +318,7 @@ export default function PositionSections({ positions, action }: PositionSections
               {formatNumber(inTransitTotal)}
               <span className="ml-0.5 text-xs font-normal text-slate-500">元</span>
               <span className="ml-1.5 text-[13px] font-normal text-slate-500">
-                {inTransitPercent.toFixed(1)}%
+                {Math.round(inTransitPercent)}%
               </span>
             </span>
           </div>
@@ -338,9 +346,10 @@ export default function PositionSections({ positions, action }: PositionSections
                   <div className="text-xs text-slate-500">持仓金额</div>
                   <div className="mt-0.5 text-base font-bold tabular-nums text-slate-900">
                     {formatNumber(positionAmount(r.position))}
-                    <span className="ml-1 text-xs font-normal text-slate-500">
-                      {r.percent.toFixed(1)}%
-                    </span>
+                  </div>
+                  {/* 占比与普通卡片一致置于数字行下方 */}
+                  <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
+                    {r.percent.toFixed(1)}%
                   </div>
                 </div>
               </div>
