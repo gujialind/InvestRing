@@ -221,6 +221,21 @@ jobs:
               fi
             }
 
+            # 重载 nginx 刷新 upstream 解析：nginx.conf 的 upstream 块用容器主机名，
+            # 仅在配置加载时解析一次并永久缓存；backend/frontend 重建后换新 IP，
+            # 而 nginx 镜像不变从不重建，不刷新会持续 502（issue #104）。
+            # 优先 reload（重载配置即重新解析，毫秒级无中断），失败再回退 restart。
+            reload_nginx() {
+              docker compose exec -T nginx nginx -s reload 2>/dev/null || docker compose restart nginx
+            }
+
+            # frontend 独立探活：从 nginx 容器内经容器网络访问 frontend:7860
+            #（nginx:1.27-alpine 自带 busybox wget），一举验证 frontend 存活 +
+            # 网络连通 + nginx 当前解析到的 upstream IP 有效；必须排在 reload_nginx 之后。
+            probe_frontend() {
+              docker compose exec -T nginx wget -qO- http://frontend:7860/ > /dev/null
+            }
+
             # 1. 登录 ACR 并拉取新镜像（先拉后停，缩短停机时间）
             echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_REGISTRY }} \
               -u "${{ secrets.ACR_USERNAME }}" --password-stdin
@@ -237,10 +252,13 @@ jobs:
             docker rm -f investring-backend 2>/dev/null || true
 
             # 4. 启动/更新全部服务（compose 仅重建镜像变化的容器；
-            #    后端应用启动时自动执行 alembic upgrade head）
+            #    后端容器启动时经 entrypoint 一次性执行 alembic upgrade head）
             update_image_ref BACKEND_IMAGE_REF "$BACKEND_IMG"
             update_image_ref FRONTEND_IMAGE_REF "$FRONTEND_IMG"
             docker compose up -d --remove-orphans
+
+            # 4.5 重建后立即重载 nginx，避免 upstream 缓存旧容器 IP 导致入口 502
+            reload_nginx
 
             # 5. 健康检查（最长等待 120s，覆盖迁移执行时间）
             #    后端：本机回环 8000（backend 仅绑定 127.0.0.1）
@@ -267,6 +285,9 @@ jobs:
 
             HEALTHY=true
             check "后端" curl -sf http://127.0.0.1:8000/health || HEALTHY=false
+            if [ "$HEALTHY" == "true" ]; then
+              check "frontend" probe_frontend || HEALTHY=false
+            fi
             if [ "$HEALTHY" == "true" ]; then
               check "nginx 入口" probe_nginx || HEALTHY=false
             fi
@@ -305,6 +326,9 @@ jobs:
               fi
               if [ -n "$PREV_BACKEND" ] || [ -n "$PREV_FRONTEND" ]; then
                 docker compose up -d
+                # 回滚路径同样重建了容器，必须同步刷新 nginx upstream 解析，
+                # 否则回滚“成功”后入口照样 502（issue #104）
+                reload_nginx
               fi
               exit 1
             fi

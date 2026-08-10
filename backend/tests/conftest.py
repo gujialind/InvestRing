@@ -17,11 +17,24 @@ from typing import Generator
 # ---------------------------------------------------------------------------
 # 关键：在所有 app 模块导入之前设置测试数据库 URL，
 # 这样 app.config.Settings 和 app.database.engine 将使用测试数据库
+#
+# 优先级：环境变量 TEST_DB_URL（CI 显式指定）
+#        > backend/.env.test（本地默认：RDS ir_test 库，经 SSH 隧道）
+#        > 本地 SQLite 文件（两者都不可用时的降级）
 # ---------------------------------------------------------------------------
-os.environ.setdefault(
-    "DATABASE_URL",
-    os.environ.get("TEST_DB_URL", "sqlite:///./test_investring.db"),
-)
+def _load_test_db_url() -> str:
+    if os.environ.get("TEST_DB_URL"):
+        return os.environ["TEST_DB_URL"]
+    env_test = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.test")
+    if os.path.exists(env_test):
+        with open(env_test) as f:
+            for line in f:
+                if line.startswith("TEST_DB_URL="):
+                    return line.strip().split("=", 1)[1]
+    return "sqlite:///./test_investring.db"
+
+
+os.environ.setdefault("DATABASE_URL", _load_test_db_url())
 # 确保 DEBUG 不会因 .env 文件干扰测试
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing")
 os.environ.setdefault("SCHEDULER_ENABLED", "false")
@@ -43,6 +56,7 @@ from app.models import (
     Subscription, Trade, ShareChangeEvent,
     SyncJob, ManualMarketValue, Notification, IdempotencyCache,
 )
+from app.constants.asset_names import ASSET_NAME_MAP
 from app.utils.security import get_password_hash, create_access_token
 
 
@@ -59,7 +73,11 @@ def test_engine():
     """
     创建测试数据库引擎（整个测试会话共享）。
     - SQLite: 使用文件数据库 + WAL 模式
-    - MySQL: 使用 CI 环境变量配置
+    - MySQL: 本地默认经 .env.test 连 RDS ir_test，CI 用环境变量配置
+
+    清理策略：会话【开始】时 drop_all + create_all 保证干净起跑，
+    会话结束不清理——保留 _seed_base_data 的基准数据（ADMIN/产品/日历），
+    跑完测试可直接登录本地前端浏览。
     """
     if IS_SQLITE:
         engine = create_engine(
@@ -85,12 +103,12 @@ def test_engine():
             echo=False,
         )
 
-    # 创建所有表
+    # 会话开始：先删后建，清掉上一轮测试/手工种子的残留数据
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield engine
 
-    # 清理：删除所有表
-    Base.metadata.drop_all(bind=engine)
+    # 会话结束：保留表与种子数据，供测试后浏览使用
     engine.dispose()
 
 
@@ -103,7 +121,7 @@ def _seed_base_data(test_engine):
     SessionFactory = sessionmaker(bind=test_engine)
     db = SessionFactory()
     try:
-        # 1. 资产分类
+        # 1. 资产分类（asset_name 与迁移 0007/init_data.py 同源，取自 ASSET_NAME_MAP）
         asset_classes = [
             {"code": "CASH", "asset_type": "现金", "asset_category": "现金", "asset_subcat": "现金", "description": "现金类资产"},
             {"code": "STOCK_CN_LARGE", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "大盘", "description": "国内大盘股票"},
@@ -115,6 +133,8 @@ def _seed_base_data(test_engine):
             {"code": "BOND_LONG", "asset_type": "债券", "asset_category": "国内债券", "asset_subcat": "中长债", "description": "国内中长期债券"},
             {"code": "GOLD", "asset_type": "黄金", "asset_category": "黄金", "asset_subcat": "黄金", "description": "黄金资产"},
         ]
+        for ac in asset_classes:
+            ac["asset_name"] = ASSET_NAME_MAP[ac["code"]]
         for ac in asset_classes:
             if not db.query(AssetClassification).filter(AssetClassification.code == ac["code"]).first():
                 db.add(AssetClassification(**ac))

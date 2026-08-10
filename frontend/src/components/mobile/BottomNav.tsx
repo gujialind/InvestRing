@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
-import { useUIStore } from "@/stores/uiStore";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -14,36 +13,31 @@ import {
 } from "lucide-react";
 
 const adminNavItems = [
-  { href: "/dashboard", label: "首页", icon: LayoutDashboard },
-  { href: "/investors", label: "投资人", icon: Users },
-  { href: "/portfolio", label: "组合", icon: Briefcase },
-  { href: "/products", label: "产品", icon: Package },
-  { href: "/settings", label: "设置", icon: Settings },
+  { href: "/m/dashboard", label: "首页", icon: LayoutDashboard },
+  { href: "/m/investors", label: "投资人", icon: Users },
+  { href: "/m/portfolio", label: "组合", icon: Briefcase },
+  { href: "/m/products", label: "产品", icon: Package },
+  { href: "/m/settings", label: "设置", icon: Settings },
 ];
 
 const viewerNavItems = [
-  { href: "/dashboard", label: "首页", icon: LayoutDashboard },
-  { href: "/portfolio", label: "组合", icon: Briefcase },
+  { href: "/m/dashboard", label: "首页", icon: LayoutDashboard },
+  { href: "/m/portfolio", label: "组合", icon: Briefcase },
 ];
 
 export default function BottomNav() {
   const pathname = usePathname();
   const { user } = useAuthStore();
-  const { mobileNavVisible } = useUIStore();
 
   const navItems = user?.role === "admin" ? adminNavItems : viewerNavItems;
-
-  if (!mobileNavVisible) {
-    return null;
-  }
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-50 safe-area-pb">
       <div className="flex justify-around items-center h-16">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive =
-            pathname === item.href || pathname.startsWith(`${item.href}/`);
+          // 组件仅在一级 Tab 页渲染（MobileLayout 控制），精确匹配即可
+          const isActive = pathname === item.href;
 
           return (
             <Link

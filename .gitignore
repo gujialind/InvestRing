@@ -42,6 +42,8 @@ yarn.lock
 # AI IDE
 .trae/
 .qoder/tmp/
+.qoder/repowiki/
+.qoder/preview
 
 # AI Coding Assistants (multi-IDE)
 .hermes/
@@ -67,6 +69,7 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+.env.test
 *.env
 
 # OS Files
@@ -112,3 +115,9 @@ frontend/e2e/.auth/
 /check_db.py
 /backend/test_update_cash_detailed.py
 /backend/test_update_cash_api.py
+
+# Local dev helper scripts (contain environment-specific info, e.g. SSH tunnels)
+scripts/ssh-tunnel*.sh
+
+# Local design previews (kept local only, not version-controlled; see issue #109)
+docs/previews/

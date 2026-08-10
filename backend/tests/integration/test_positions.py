@@ -10,7 +10,7 @@ from tests.factories import (
     create_portfolio, create_product, create_platform,
     create_position_snapshot, create_value_snapshot,
     create_investor_holding, create_investor, create_trade,
-    create_subscription, ensure_trading_day,
+    create_subscription, create_share_change_event, ensure_trading_day,
 )
 
 
@@ -183,3 +183,563 @@ class TestInvestorAvailableShares:
             headers=admin_headers,
         )
         assert resp.status_code == 404
+
+
+# ============================================================================
+# 持仓读侧派生字段（issue #99）：asset_name / daily_profit / 分红复权 / 现金收益
+# ============================================================================
+
+class TestPositionDerivedFields:
+    """asset_name 与 daily_profit 派生"""
+
+    def test_asset_name_from_classification(self, client, admin_headers, test_db):
+        """产品挂 STOCK_CN_LARGE → asset_name 为「国内大盘」；CASH → 「现金」"""
+        create_portfolio(test_db, code="PD_AN", status="active")
+        create_platform(test_db, code="PD_AN_PLAT")
+        create_product(test_db, code="FUND_AN", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        create_position_snapshot(
+            test_db, "PD_AN", "FUND_AN", "CN_OTC",
+            snapshot_date=date(2025, 11, 3),
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="PD_AN_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "PD_AN", "CASH", "",
+            snapshot_date=date(2025, 11, 3),
+            cash_amount=500.0, unit_price=None, cost_price=None,
+            market_value=500.0, platform_code="PD_AN_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PD_AN", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        assert rows["FUND_AN"]["asset_name"] == "国内大盘"
+        assert rows["CASH"]["asset_name"] == "现金"
+        # is_qdii 读侧透传（QDII tooltip 依赖）
+        assert rows["FUND_AN"]["is_qdii"] is False
+        assert rows["CASH"]["is_qdii"] is False
+
+    def test_daily_profit_two_days_no_trade(self, client, admin_headers, test_db):
+        """两快照日 + 无当日交易 → daily_profit = 市值差值"""
+        create_portfolio(test_db, code="PD_DP", status="active")
+        create_platform(test_db, code="PD_DP_PLAT")
+        create_product(test_db, code="FUND_DP", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        create_position_snapshot(
+            test_db, "PD_DP", "FUND_DP", "CN_OTC",
+            snapshot_date=date(2025, 11, 3),
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="PD_DP_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "PD_DP", "FUND_DP", "CN_OTC",
+            snapshot_date=date(2025, 11, 4),
+            shares=1000.0, cost_price=1.5, unit_price=1.56, market_value=1560.0,
+            platform_code="PD_DP_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "PD_DP", "CASH", "",
+            snapshot_date=date(2025, 11, 3),
+            cash_amount=5000.0, unit_price=None, cost_price=None,
+            market_value=5000.0, platform_code="PD_DP_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "PD_DP", "CASH", "",
+            snapshot_date=date(2025, 11, 4),
+            cash_amount=5000.0, unit_price=None, cost_price=None,
+            market_value=5000.0, platform_code="PD_DP_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PD_DP", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        assert rows["FUND_DP"]["daily_profit"] == pytest.approx(60.0, abs=1e-4)
+        assert rows["CASH"]["daily_profit"] == pytest.approx(0.0, abs=1e-4)
+
+    def test_aggregate_flows_called_once(self, client, admin_headers, test_db):
+        """issue #103：三个 compute 函数共享一次 _aggregate_position_flows 聚合
+
+        复用 PD_DP 两快照日场景（fund + CASH 均有），用 patch(wraps=...) 包装定义处
+        模块属性，断言整个请求只聚合 1 次（原 6 条查询降至 2 条）且响应值不变。
+        """
+        from unittest.mock import patch
+        from app.services import position_service as ps
+
+        create_portfolio(test_db, code="PD_DP", status="active")
+        create_platform(test_db, code="PD_DP_PLAT")
+        create_product(test_db, code="FUND_DP", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        for d, mv in ((date(2025, 11, 3), 1500.0), (date(2025, 11, 4), 1560.0)):
+            create_position_snapshot(
+                test_db, "PD_DP", "FUND_DP", "CN_OTC", snapshot_date=d,
+                shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=mv,
+                platform_code="PD_DP_PLAT",
+            )
+            create_position_snapshot(
+                test_db, "PD_DP", "CASH", "", snapshot_date=d,
+                cash_amount=5000.0, unit_price=None, cost_price=None,
+                market_value=5000.0, platform_code="PD_DP_PLAT",
+            )
+
+        with patch.object(ps, "_aggregate_position_flows", wraps=ps._aggregate_position_flows) as spy:
+            resp = client.get("/api/positions?portfolio_code=PD_DP", headers=admin_headers)
+        assert resp.status_code == 200
+        assert spy.call_count == 1  # 聚合仅 1 次（trade 1 + event 1 = 2 查询，原 6 次）
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        assert rows["FUND_DP"]["daily_profit"] == pytest.approx(60.0, abs=1e-4)
+
+    def test_daily_profit_deducts_same_day_buy(self, client, admin_headers, test_db):
+        """当日确认买入 → daily_profit 扣除买入额；配对 CASH 腿当日净流入抵消"""
+        create_portfolio(test_db, code="PD_DB", status="active")
+        create_platform(test_db, code="PD_DB_PLAT")
+        create_product(test_db, code="FUND_DB", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
+        create_position_snapshot(
+            test_db, "PD_DB", "FUND_DB", "CN_OTC", snapshot_date=d1,
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="PD_DB_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "PD_DB", "CASH", "", snapshot_date=d1,
+            cash_amount=5000.0, unit_price=None, cost_price=None,
+            market_value=5000.0, platform_code="PD_DB_PLAT",
+        )
+        # 当日买入 300（基金腿 + CASH 腿，rebal_ 组），市值涨 4% 后加仓
+        create_trade(
+            test_db, "PD_DB", "FUND_DB", "CN_OTC", trade_type="buy",
+            amount=300.0, shares=192.31, price=1.56, platform_code="PD_DB_PLAT",
+            trade_date=d2, confirm_date=d2, status="confirmed",
+            transfer_group="rebal_pd_db_001",
+        )
+        create_trade(
+            test_db, "PD_DB", "CASH", "", trade_type="sell",
+            amount=300.0, platform_code="PD_DB_PLAT",
+            trade_date=d2, confirm_date=d2, status="confirmed",
+            transfer_group="rebal_pd_db_001",
+        )
+        create_position_snapshot(
+            test_db, "PD_DB", "FUND_DB", "CN_OTC", snapshot_date=d2,
+            shares=1192.31, cost_price=1.5, unit_price=1.56, market_value=1860.0,
+            platform_code="PD_DB_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "PD_DB", "CASH", "", snapshot_date=d2,
+            cash_amount=4700.0, unit_price=None, cost_price=None,
+            market_value=4700.0, platform_code="PD_DB_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PD_DB", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        # 基金：1860 − 1500 − 300 = 60
+        assert rows["FUND_DB"]["daily_profit"] == pytest.approx(60.0, abs=1e-4)
+        # 现金：4700 − 5000 − (−300) = 0
+        assert rows["CASH"]["daily_profit"] == pytest.approx(0.0, abs=1e-4)
+
+    def test_daily_profit_none_on_first_snapshot(self, client, admin_headers, test_db):
+        """组合首个快照日 → daily_profit 为 None"""
+        create_portfolio(test_db, code="PD_FS", status="active")
+        create_platform(test_db, code="PD_FS_PLAT")
+        create_product(test_db, code="FUND_FS", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        create_position_snapshot(
+            test_db, "PD_FS", "FUND_FS", "CN_OTC",
+            snapshot_date=date(2025, 11, 3),
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="PD_FS_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PD_FS", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = resp.json()["items"]
+        assert len(rows) == 1
+        assert rows[0]["daily_profit"] is None
+
+    def test_daily_profit_none_for_in_transit(self, client, admin_headers, test_db):
+        """IN_TRANSIT 在途行 daily_profit 恒为 None"""
+        create_portfolio(test_db, code="PD_IT", status="active")
+        create_platform(test_db, code="PD_IT_PLAT")
+        for d in (date(2025, 11, 3), date(2025, 11, 4)):
+            create_position_snapshot(
+                test_db, "PD_IT", "IN_TRANSIT_BUY", "", snapshot_date=d,
+                cash_amount=1000.0, unit_price=None, cost_price=None,
+                market_value=1000.0, platform_code="PD_IT_PLAT",
+                asset_type="cash",
+            )
+
+        resp = client.get("/api/positions?portfolio_code=PD_IT", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = resp.json()["items"]
+        assert len(rows) == 1
+        assert rows[0]["daily_profit"] is None
+
+
+class TestPositionDividendRouteC:
+    """分红复权口径（路线 C）：基金侧加回分红 + 现金侧事件入基数"""
+
+    def _build_dividend_scenario(self, test_db):
+        """构造：申购 2500 → 买基金 1500 → 次日现金分红 100（除权）"""
+        create_portfolio(test_db, code="PD_DIV", status="active")
+        create_platform(test_db, code="PD_DIV_PLAT")
+        create_product(test_db, code="FUND_DIV", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        create_investor(test_db, code="PD_DIV_INV")
+        d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
+        # 申购 2500（CASH buy，sub_ 组，d1 确认）
+        create_subscription(
+            test_db, "PD_DIV", "PD_DIV_INV", sub_type="subscribe", amount=2500.0,
+            apply_date=d1, confirm_date=d1, status="confirmed",
+            platform_code="PD_DIV_PLAT",
+        )
+        create_trade(
+            test_db, "PD_DIV", "CASH", "", trade_type="buy",
+            amount=2500.0, platform_code="PD_DIV_PLAT",
+            trade_date=d1, confirm_date=d1, status="confirmed",
+            transfer_group="sub_pd_div_001",
+        )
+        # 买基金 1500（基金 buy + CASH sell，rebal_ 组，d1 确认）
+        create_trade(
+            test_db, "PD_DIV", "FUND_DIV", "CN_OTC", trade_type="buy",
+            amount=1500.0, shares=1000.0, price=1.5, platform_code="PD_DIV_PLAT",
+            trade_date=d1, confirm_date=d1, status="confirmed",
+            transfer_group="rebal_pd_div_001",
+        )
+        create_trade(
+            test_db, "PD_DIV", "CASH", "", trade_type="sell",
+            amount=1500.0, platform_code="PD_DIV_PLAT",
+            trade_date=d1, confirm_date=d1, status="confirmed",
+            transfer_group="rebal_pd_div_001",
+        )
+        # d1 持仓：基金 1000 份（成本 1.5，市值 1500）+ 现金 1000
+        create_position_snapshot(
+            test_db, "PD_DIV", "FUND_DIV", "CN_OTC", snapshot_date=d1,
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="PD_DIV_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "PD_DIV", "CASH", "", snapshot_date=d1,
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="PD_DIV_PLAT",
+        )
+        # d2 除权：基金市值 −100，现金 +100，组合总资产不变
+        create_share_change_event(
+            test_db, "PD_DIV", "FUND_DIV", "CN_OTC",
+            event_type="cash_dividend", ex_date=d2, entitlement_date=d1,
+            status="confirmed", platform_code="PD_DIV_PLAT",
+            cash_change=100.0,
+        )
+        create_position_snapshot(
+            test_db, "PD_DIV", "FUND_DIV", "CN_OTC", snapshot_date=d2,
+            shares=1000.0, cost_price=1.5, unit_price=1.4, market_value=1400.0,
+            platform_code="PD_DIV_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "PD_DIV", "CASH", "", snapshot_date=d2,
+            cash_amount=1100.0, unit_price=None, cost_price=None,
+            market_value=1100.0, platform_code="PD_DIV_PLAT",
+        )
+        create_value_snapshot(test_db, "PD_DIV", d1, 2500.0, 2500.0, 1.0)
+        create_value_snapshot(test_db, "PD_DIV", d2, 2500.0, 2500.0, 1.0)
+        return d1, d2
+
+    def test_dividend_adjusted_profit(self, client, admin_headers, test_db):
+        """基金行 profit_loss 含分红加回；分红日两侧 daily_profit 均为 0；
+        CASH 行 profit_loss ≈ 0（事件入基数）；卡片合计 = 总资产 − 净投入"""
+        self._build_dividend_scenario(test_db)
+
+        resp = client.get("/api/positions?portfolio_code=PD_DIV", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+
+        fund = rows["FUND_DIV"]
+        # 复权口径：1400 − 1000×1.5 + 100 = 0
+        assert fund["profit_loss"] == pytest.approx(0.0, abs=1e-4)
+        # 分红日 daily：1400 − 1500 + 100 = 0（除权损失被分红加回对冲）
+        assert fund["daily_profit"] == pytest.approx(0.0, abs=1e-4)
+
+        cash = rows["CASH"]
+        # 现金累计收益 = 1100 − (2500 净存入 − 1500 买入 + 100 事件) = 0
+        assert cash["profit_loss"] == pytest.approx(0.0, abs=1e-4)
+        # 分红日现金 daily：1100 − 1000 − 100(事件当日流入) = 0
+        assert cash["daily_profit"] == pytest.approx(0.0, abs=1e-4)
+
+        # 两侧卡片合计 = 0 = 总资产 2500 − 净投入 2500（无清仓场景自洽）
+        total = fund["profit_loss"] + cash["profit_loss"]
+        assert total == pytest.approx(0.0, abs=1e-4)
+
+
+class TestPositionCashCumulativeProfit:
+    """CASH 行 profit_loss：sub_/rebal_/转移/事件四类流水（§3.3）"""
+
+    def test_cash_profit_with_all_flow_types(self, client, admin_headers, test_db):
+        create_portfolio(test_db, code="PD_CF", status="active")
+        create_platform(test_db, code="PD_CF_P1")
+        create_platform(test_db, code="PD_CF_P2")
+        create_product(test_db, code="FUND_CF", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        d1 = date(2025, 11, 3)
+        # sub_：申购存入 10000（P1）
+        create_trade(
+            test_db, "PD_CF", "CASH", "", trade_type="buy", amount=10000.0,
+            platform_code="PD_CF_P1", trade_date=d1, confirm_date=d1,
+            status="confirmed", transfer_group="sub_pd_cf_001",
+        )
+        # rebal_：买基金花 4000（P1）+ 卖基金收 500（P1）
+        create_trade(
+            test_db, "PD_CF", "CASH", "", trade_type="sell", amount=4000.0,
+            platform_code="PD_CF_P1", trade_date=d1, confirm_date=d1,
+            status="confirmed", transfer_group="rebal_pd_cf_001",
+        )
+        create_trade(
+            test_db, "PD_CF", "CASH", "", trade_type="buy", amount=500.0,
+            platform_code="PD_CF_P1", trade_date=d1, confirm_date=d1,
+            status="confirmed", transfer_group="rebal_pd_cf_002",
+        )
+        # 跨平台转移：P1 转出 800、P2 转入 800（裸 uuid 组）
+        create_trade(
+            test_db, "PD_CF", "CASH", "", trade_type="sell", amount=800.0,
+            platform_code="PD_CF_P1", trade_date=d1, confirm_date=d1,
+            status="confirmed", transfer_group="f1e2d3c4b5a6",
+        )
+        create_trade(
+            test_db, "PD_CF", "CASH", "", trade_type="buy", amount=800.0,
+            platform_code="PD_CF_P2", trade_date=d1, confirm_date=d1,
+            status="confirmed", transfer_group="f1e2d3c4b5a6",
+        )
+        # 事件：现金分红 200（P1）
+        create_share_change_event(
+            test_db, "PD_CF", "FUND_CF", "CN_OTC",
+            event_type="cash_dividend", ex_date=d1, entitlement_date=date(2025, 10, 31),
+            status="confirmed", platform_code="PD_CF_P1",
+            cash_change=200.0,
+        )
+        # 持仓：P1 现金 5900（另加 50 未记账差额验证吸收），P2 现金 800
+        create_position_snapshot(
+            test_db, "PD_CF", "CASH", "", snapshot_date=d1,
+            cash_amount=5950.0, unit_price=None, cost_price=None,
+            market_value=5950.0, platform_code="PD_CF_P1",
+        )
+        create_position_snapshot(
+            test_db, "PD_CF", "CASH", "", snapshot_date=d1,
+            cash_amount=800.0, unit_price=None, cost_price=None,
+            market_value=800.0, platform_code="PD_CF_P2",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PD_CF", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["platform_code"]: r for r in resp.json()["items"]}
+        # P1：5950 − (10000 − 4000 + 500 − 800 + 200) = 50（吸收未记账差额）
+        assert rows["PD_CF_P1"]["profit_loss"] == pytest.approx(50.0, abs=1e-4)
+        # P2：800 − 800（转移净额）= 0
+        assert rows["PD_CF_P2"]["profit_loss"] == pytest.approx(0.0, abs=1e-4)
+
+
+# ============================================================================
+# 默认查询口径：组合级最新快照日（issue #105）
+# ============================================================================
+
+class TestPositionLatestSnapshot:
+    """默认查询应按组合级最新快照日取行，非产品级各自最新日"""
+
+    def test_cleared_product_excluded_from_default_query(self, client, admin_headers, test_db):
+        """基金清仓后（d2 无该产品行），默认查询不含该产品"""
+        create_portfolio(test_db, code="LS_CLR", status="active")
+        create_platform(test_db, code="LS_CLR_PLAT", name="清仓测试平台")
+        create_product(test_db, code="FUND_CLR", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
+        # d1：基金 + CASH
+        create_position_snapshot(
+            test_db, "LS_CLR", "FUND_CLR", "CN_OTC", snapshot_date=d1,
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="LS_CLR_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "LS_CLR", "CASH", "", snapshot_date=d1,
+            cash_amount=500.0, unit_price=None, cost_price=None,
+            market_value=500.0, platform_code="LS_CLR_PLAT",
+        )
+        # d2：基金清仓（不再落行），仅 CASH
+        create_position_snapshot(
+            test_db, "LS_CLR", "CASH", "", snapshot_date=d2,
+            cash_amount=2000.0, unit_price=None, cost_price=None,
+            market_value=2000.0, platform_code="LS_CLR_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=LS_CLR", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        # 已清仓的基金不应出现
+        assert "FUND_CLR" not in rows
+        # CASH 行应在，且 snapshot_date == d2
+        assert "CASH" in rows
+        assert rows["CASH"]["snapshot_date"] == d2.isoformat()
+
+    def test_in_transit_removed_excluded_from_default_query(self, client, admin_headers, test_db):
+        """在途资金消除后（d2 无 IN_TRANSIT 行），默认查询不含在途行"""
+        create_portfolio(test_db, code="LS_IT", status="active")
+        create_platform(test_db, code="LS_IT_PLAT", name="在途测试平台")
+        d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
+        # d1：IN_TRANSIT_BUY + CASH
+        create_position_snapshot(
+            test_db, "LS_IT", "IN_TRANSIT_BUY", "", snapshot_date=d1,
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="LS_IT_PLAT",
+            asset_type="cash",
+        )
+        create_position_snapshot(
+            test_db, "LS_IT", "CASH", "", snapshot_date=d1,
+            cash_amount=5000.0, unit_price=None, cost_price=None,
+            market_value=5000.0, platform_code="LS_IT_PLAT",
+        )
+        # d2：在途消除，仅 CASH
+        create_position_snapshot(
+            test_db, "LS_IT", "CASH", "", snapshot_date=d2,
+            cash_amount=5000.0, unit_price=None, cost_price=None,
+            market_value=5000.0, platform_code="LS_IT_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=LS_IT", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        assert "IN_TRANSIT_BUY" not in rows
+        assert "CASH" in rows
+        assert rows["CASH"]["snapshot_date"] == d2.isoformat()
+
+    def test_multi_portfolio_different_snapshot_dates(self, client, admin_headers, test_db):
+        """两个组合各自最新快照日不同，全局查询返回各自组合最新日"""
+        create_portfolio(test_db, code="LS_A", status="active")
+        create_portfolio(test_db, code="LS_B", status="active")
+        create_platform(test_db, code="LS_MP_PLAT", name="多组合平台")
+        # 组合 A：最新日 d1
+        create_position_snapshot(
+            test_db, "LS_A", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="LS_MP_PLAT",
+        )
+        # 组合 B：最新日 d2（晚于 A）
+        create_position_snapshot(
+            test_db, "LS_B", "CASH", "", snapshot_date=date(2025, 11, 4),
+            cash_amount=2000.0, unit_price=None, cost_price=None,
+            market_value=2000.0, platform_code="LS_MP_PLAT",
+        )
+
+        resp = client.get("/api/positions", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        for row in items:
+            if row["portfolio_code"] == "LS_A":
+                assert row["snapshot_date"] == "2025-11-03"
+            elif row["portfolio_code"] == "LS_B":
+                assert row["snapshot_date"] == "2025-11-04"
+
+    def test_explicit_snapshot_date_unchanged(self, client, admin_headers, test_db):
+        """显式传 snapshot_date 查询历史快照行为不变"""
+        create_portfolio(test_db, code="LS_HIST", status="active")
+        create_platform(test_db, code="LS_HIST_PLAT", name="历史查询平台")
+        create_product(test_db, code="FUND_HIST", market="CN_OTC",
+                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+        d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
+        # d1：基金 + CASH
+        create_position_snapshot(
+            test_db, "LS_HIST", "FUND_HIST", "CN_OTC", snapshot_date=d1,
+            shares=1000.0, cost_price=1.5, unit_price=1.5, market_value=1500.0,
+            platform_code="LS_HIST_PLAT",
+        )
+        create_position_snapshot(
+            test_db, "LS_HIST", "CASH", "", snapshot_date=d1,
+            cash_amount=500.0, unit_price=None, cost_price=None,
+            market_value=500.0, platform_code="LS_HIST_PLAT",
+        )
+        # d2：仅 CASH
+        create_position_snapshot(
+            test_db, "LS_HIST", "CASH", "", snapshot_date=d2,
+            cash_amount=2000.0, unit_price=None, cost_price=None,
+            market_value=2000.0, platform_code="LS_HIST_PLAT",
+        )
+
+        # 查历史 d1 → 应含已清仓基金
+        resp = client.get(
+            "/api/positions?portfolio_code=LS_HIST&snapshot_date=2025-11-03",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        rows = {r["product_code"]: r for r in resp.json()["items"]}
+        assert "FUND_HIST" in rows
+        assert "CASH" in rows
+        assert rows["FUND_HIST"]["snapshot_date"] == "2025-11-03"
+
+
+# ============================================================================
+# platform_name 批量 enrich（issue #106）
+# ============================================================================
+
+class TestPositionPlatformName:
+    """platform_name 派生与防 N+1"""
+
+    def test_platform_name_enriched(self, client, admin_headers, test_db):
+        """持仓行 platform_name 等于 Platform 表对应 name"""
+        create_portfolio(test_db, code="PN_T", status="active")
+        create_platform(test_db, code="PN_PLAT", name="蚂蚁财富")
+        create_position_snapshot(
+            test_db, "PN_T", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="PN_PLAT",
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PN_T", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items[0]["platform_name"] == "蚂蚁财富"
+
+    def test_platform_name_null_when_no_platform(self, client, admin_headers, test_db):
+        """platform_code 为 null 时 platform_name 也为 null"""
+        create_portfolio(test_db, code="PN_N", status="active")
+        create_position_snapshot(
+            test_db, "PN_N", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code=None,
+        )
+
+        resp = client.get("/api/positions?portfolio_code=PN_N", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items[0]["platform_name"] is None
+
+    def test_platform_name_sql_count_constant(self, client, admin_headers, test_db):
+        """platform_name enrich 查询次数恒定，不随持仓行数增长（防 N+1）"""
+        from unittest.mock import patch
+        from app.models import platform as platform_mod
+
+        create_portfolio(test_db, code="PN_S", status="active")
+        create_platform(test_db, code="PN_S1", name="平台一")
+        create_platform(test_db, code="PN_S2", name="平台二")
+        # 两行不同平台
+        create_position_snapshot(
+            test_db, "PN_S", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=1000.0, unit_price=None, cost_price=None,
+            market_value=1000.0, platform_code="PN_S1",
+        )
+        create_position_snapshot(
+            test_db, "PN_S", "CASH", "", snapshot_date=date(2025, 11, 3),
+            cash_amount=2000.0, unit_price=None, cost_price=None,
+            market_value=2000.0, platform_code="PN_S2",
+        )
+
+        # 用 spy 包装 db.query，统计 Platform 查询次数
+        with patch.object(
+            test_db, "query",
+            wraps=test_db.query,
+        ) as spy_query:
+            resp = client.get("/api/positions?portfolio_code=PN_S", headers=admin_headers)
+        assert resp.status_code == 200
+
+        # Platform 查询应只出现 1 次（批量 IN 查询），验证 platform_name 查询不随行数增长
+        # db.query(Platform.code, Platform.name) 传入的是列属性，其 .class_ 为 Platform
+        platform_queries = [
+            call for call in spy_query.call_args_list
+            if len(call.args) > 0 and getattr(call.args[0], "class_", None) is platform_mod.Platform
+        ]
+        assert len(platform_queries) == 1

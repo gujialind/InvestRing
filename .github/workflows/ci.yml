@@ -16,9 +16,11 @@ on:
   pull_request:
     branches: [main, dev]
 
-# 并发控制：同一分支/PR 只保留最新的运行
+# 并发控制：同一源分支只保留最新的运行。
+# head_ref（PR 源分支名）优先，push 事件回落到 ref_name（分支名），
+# 使 push 到 dev 与 dev→main PR 落入同一组，避免同一 commit 重复运行。
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
