@@ -224,9 +224,20 @@ jobs:
             # 重载 nginx 刷新 upstream 解析：nginx.conf 的 upstream 块用容器主机名，
             # 仅在配置加载时解析一次并永久缓存；backend/frontend 重建后换新 IP，
             # 而 nginx 镜像不变从不重建，不刷新会持续 502（issue #104）。
-            # 优先 reload（重载配置即重新解析，毫秒级无中断），失败再回退 restart。
+            # bind mount 陷阱（issue #119）：scp 替换 nginx.conf 会换新 inode，而容器
+            # 挂载绑定的是创建时的旧 inode，reload 重读的仍是旧内容。故先比对宿主机
+            # 文件与容器内挂载点的 inode：漂移时强制 restart 重建挂载视图，
+            # 一致时才走无中断 reload（reload 失败再回退 restart）。
             reload_nginx() {
-              docker compose exec -T nginx nginx -s reload 2>/dev/null || docker compose restart nginx
+              local host_inode ctr_inode
+              host_inode=$(stat -c %i nginx/nginx.conf)
+              ctr_inode=$(docker compose exec -T nginx stat -c %i /etc/nginx/nginx.conf 2>/dev/null || true)
+              if [ -z "$ctr_inode" ] || [ "$host_inode" != "$ctr_inode" ]; then
+                echo "nginx.conf inode 漂移（host=$host_inode container=${ctr_inode:-<不可读>}），restart 重建挂载"
+                docker compose restart nginx
+              else
+                docker compose exec -T nginx nginx -s reload 2>/dev/null || docker compose restart nginx
+              fi
             }
 
             # frontend 独立探活：从 nginx 容器内经容器网络访问 frontend:7860
@@ -262,7 +273,7 @@ jobs:
 
             # 5. 健康检查（最长等待 120s，覆盖迁移执行时间）
             #    后端：本机回环 8000（backend 仅绑定 127.0.0.1）
-            #    入口：HTTPS 优先、HTTP 兜底，兼容备案审核期（仅 80）与启用证书后（443）两阶段
+            #    入口：HTTPS 必须通过（备案期已结束，HTTP 兜底已移除，issue #119）
             check() {
               local NAME="$1"; shift
               for i in $(seq 1 60); do
@@ -276,11 +287,10 @@ jobs:
               return 1
             }
 
-            # nginx 入口探活：先试 HTTPS（-k：证书按域名签发，经 localhost 访问跳过主机名校验），
-            # 阶段一（未启用 443）时回退 HTTP 80
+            # nginx 入口探活：HTTPS 必须通过（-k：证书按域名签发，经 localhost 访问跳过主机名校验）。
+            # 443 未生效时部署必须失败并触发回滚，不得静默放行（issue #119）。
             probe_nginx() {
-              curl -skf https://127.0.0.1/health > /dev/null 2>&1 \
-                || curl -sf http://127.0.0.1/health > /dev/null 2>&1
+              curl -skf https://127.0.0.1/health > /dev/null 2>&1
             }
 
             HEALTHY=true
