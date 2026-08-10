@@ -69,6 +69,7 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+.env.test
 *.env
 
 # OS Files
