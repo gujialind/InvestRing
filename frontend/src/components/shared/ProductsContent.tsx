@@ -299,11 +299,11 @@ export default function ProductsContent() {
                   <TableCell>{product.is_qdii ? "是" : "否"}</TableCell>
                   <TableCell>
                     {product.data_source_status === "success" ? (
-                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <CheckCircle className="h-4 w-4 text-success" />
                     ) : product.data_source_status === "failed" ? (
-                      <XCircle className="h-4 w-4 text-red-500" />
+                      <XCircle className="h-4 w-4 text-destructive" />
                     ) : (
-                      <span className="text-yellow-500">待验证</span>
+                      <span className="text-warning">待验证</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right">

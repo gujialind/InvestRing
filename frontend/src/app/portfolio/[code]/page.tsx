@@ -230,8 +230,8 @@ function PortfolioDetailInner() {
                             onClick={() => setNavRange(r.key)}
                             className={`rounded-full px-3.5 py-1.5 text-[13px] transition-colors ${
                               navRange === r.key
-                                ? "bg-blue-500 font-semibold text-white"
-                                : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                                ? "bg-primary font-semibold text-primary-foreground"
+                                : "bg-muted text-muted-foreground hover:bg-accent"
                             }`}
                           >
                             {r.label}
