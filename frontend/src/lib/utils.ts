@@ -244,7 +244,8 @@ export function largestRemainderPercents(weights: number[]): number[] {
 
 /**
  * 根据收益率/涨跌值获取对应的颜色类名
- * 中国市场惯例：红涨绿跌
+ * 中国市场惯例：红涨绿跌（issue #127 语义 token：gain 朱红 / loss 松绿）
+ * text-gain/text-loss 只允许由本函数（或显式涨跌语义）输出，禁止用于状态色
  * @param value 数值
  * @returns Tailwind CSS 颜色类名
  */
@@ -253,23 +254,56 @@ export function getReturnColorClass(value: number | string | undefined | null): 
     return "text-muted-foreground";
   }
   const n = typeof value === "string" ? parseFloat(value) : value;
-  if (n > 0) return "text-red-600";   // 涨：红色
-  if (n < 0) return "text-green-600"; // 跌：绿色
+  if (n > 0) return "text-gain";   // 涨：朱红
+  if (n < 0) return "text-loss";   // 跌：松绿
   return "text-muted-foreground";
 }
 
 /**
  * 根据收益率/涨跌值获取对应背景色类名
- * 中国市场惯例：红涨绿跌
+ * 中国市场惯例：红涨绿跌（issue #127 语义 token soft 浅底）
  */
 export function getReturnBgClass(value: number | string | undefined | null): string {
   if (value === undefined || value === null || value === "" || Number.isNaN(Number(value))) {
     return "bg-muted";
   }
   const n = typeof value === "string" ? parseFloat(value) : value;
-  if (n > 0) return "bg-red-50";   // 涨：红色背景
-  if (n < 0) return "bg-green-50"; // 跌：绿色背景
+  if (n > 0) return "bg-gain-soft";   // 涨：浅朱底
+  if (n < 0) return "bg-loss-soft";   // 跌：浅松底
   return "bg-muted";
+}
+
+// ==================== 状态徽标 ====================
+
+/** Badge 语义 variant（与 badge.tsx 对齐） */
+export type StatusBadgeVariant = "success" | "warning" | "destructive" | "neutral";
+
+/**
+ * 业务状态 → Badge variant 单一映射（issue #127，visual-spec §1.3）：
+ * 完成/活跃 → success（靛蓝）；待定/在途/进行中 → warning（赭珀）；
+ * 失败/异常 → destructive（绛红）；取消/关闭/草稿/停用 → neutral（灰）。
+ * 状态色永远不许用 gain/loss token（涨跌专属数值场景）。
+ */
+const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
+  confirmed: "success",
+  active: "success",
+  success: "success",
+  passed: "success",
+  enabled: "success",
+  pending: "warning",
+  running: "warning",
+  partial_success: "warning",
+  in_transit: "warning",
+  failed: "destructive",
+  error: "destructive",
+  cancelled: "neutral",
+  closed: "neutral",
+  draft: "neutral",
+  disabled: "neutral",
+};
+
+export function getStatusBadgeVariant(status: string | undefined | null): StatusBadgeVariant {
+  return (status && STATUS_BADGE_VARIANTS[status]) || "neutral";
 }
 
 /**
