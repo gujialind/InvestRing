@@ -63,16 +63,16 @@ export default function ClosePortfolioDialog({
           ) : (
             <>
               {positionCount > 0 && (
-                <p className="text-yellow-600">
+                <p className="text-warning">
                   当前仍有 {positionCount} 个持仓，关闭后持仓数据将被保留但不可操作
                 </p>
               )}
               {investors && investors.length > 0 && (
-                <p className="text-yellow-600">
+                <p className="text-warning">
                   当前有 {investors.length} 位投资人持有份额
                 </p>
               )}
-              <p className="text-red-500">关闭后无法再进行申购/赎回/调仓操作</p>
+              <p className="text-destructive">关闭后无法再进行申购/赎回/调仓操作</p>
             </>
           )}
         </div>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -236,13 +237,9 @@ export default function InvestorsContent() {
                   <TableCell className="font-medium">{investor.code}</TableCell>
                   <TableCell>{investor.name}</TableCell>
                   <TableCell>
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                      investor.role === "admin"
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-gray-100 text-gray-800"
-                    }`}>
+                    <Badge variant={investor.role === "admin" ? "default" : "neutral"}>
                       {investor.role === "admin" ? "管理员" : "投资人"}
-                    </span>
+                    </Badge>
                   </TableCell>
                   <TableCell>{investor.phone || "--"}</TableCell>
                   <TableCell>{investor.email || "--"}</TableCell>

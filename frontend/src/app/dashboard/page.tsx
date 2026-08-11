@@ -2,7 +2,8 @@
 
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency, formatShares, formatReturnRate, getReturnColorClass } from "@/lib/utils";
+import { formatCurrency, formatShares, formatReturnRate, getReturnColorClass, getStatusBadgeVariant } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
@@ -53,10 +54,10 @@ export default function DashboardPage() {
 
         {/* Pending Transactions Alerts */}
         {pendingSubscriptions.length > 0 && (
-          <Card className="bg-yellow-50 border-yellow-200">
+          <Card className="bg-warning-soft border-warning/30">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-yellow-800 flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
+              <CardTitle className="text-sm text-warning-foreground flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-warning"></div>
                 待确认交易提醒
               </CardTitle>
             </CardHeader>
@@ -64,10 +65,10 @@ export default function DashboardPage() {
               <div className="space-y-2">
                 {pendingSubscriptions.slice(0, 3).map((sub) => (
                   <div key={sub.id} className="flex items-center justify-between text-sm">
-                    <span className="text-yellow-800">
+                    <span className="text-warning-foreground">
                       {sub.sub_type === "subscribe" ? "申购" : "赎回"} - {sub.portfolio_code}
                     </span>
-                    <span className="text-yellow-700 font-mono tabular-nums">
+                    <span className="text-warning-foreground font-mono tabular-nums">
                       {sub.sub_type === "subscribe"
                         ? formatCurrency(sub.amount || 0)
                         : `${formatShares(sub.shares || 0)} 份`
@@ -76,7 +77,7 @@ export default function DashboardPage() {
                   </div>
                 ))}
                 {pendingSubscriptions.length > 3 && (
-                  <p className="text-xs text-yellow-600 text-center">
+                  <p className="text-xs text-warning text-center">
                     还有 {pendingSubscriptions.length - 3} 笔待确认交易
                   </p>
                 )}
@@ -87,10 +88,10 @@ export default function DashboardPage() {
 
         {/* Pending Trades Alert */}
         {pendingTrades.length > 0 && (
-          <Card className="bg-blue-50 border-blue-200">
+          <Card className="bg-warning-soft border-warning/30">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-blue-800 flex items-center gap-2">
-                <ArrowRightLeft className="h-4 w-4 text-blue-600" />
+              <CardTitle className="text-sm text-warning-foreground flex items-center gap-2">
+                <ArrowRightLeft className="h-4 w-4 text-warning" />
                 待确认调仓交易
               </CardTitle>
             </CardHeader>
@@ -98,10 +99,10 @@ export default function DashboardPage() {
               <div className="space-y-2">
                 {pendingTrades.slice(0, 3).map((trade) => (
                   <div key={trade.id} className="flex items-center justify-between text-sm">
-                    <span className="text-blue-800">
+                    <span className="text-warning-foreground">
                       {trade.trade_type === "buy" ? "买入" : "卖出"} - {trade.product_code}
                     </span>
-                    <span className="text-blue-700 font-mono tabular-nums">
+                    <span className="text-warning-foreground font-mono tabular-nums">
                       {trade.trade_type === "buy"
                         ? formatCurrency(trade.amount || 0)
                         : `${formatShares(trade.shares || 0)} 份`
@@ -110,7 +111,7 @@ export default function DashboardPage() {
                   </div>
                 ))}
                 {pendingTrades.length > 3 && (
-                  <p className="text-xs text-blue-600 text-center">
+                  <p className="text-xs text-warning text-center">
                     还有 {pendingTrades.length - 3} 笔待确认调仓
                   </p>
                 )}
@@ -173,15 +174,9 @@ export default function DashboardPage() {
                     <div>
                       <p className="font-medium">
                         {sub.sub_type === "subscribe" ? "申购" : "赎回"}
-                        <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
-                          sub.status === "pending"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : sub.status === "confirmed"
-                            ? "bg-green-100 text-green-800"
-                            : "bg-gray-100 text-gray-800"
-                        }`}>
+                        <Badge className="ml-2" variant={getStatusBadgeVariant(sub.status)}>
                           {sub.status === "pending" ? "待确认" : sub.status === "confirmed" ? "已确认" : "已取消"}
-                        </span>
+                        </Badge>
                       </p>
                       <p className="text-sm text-muted-foreground">
                         组合: {sub.portfolio_code} | 投资人: {sub.investor_code}

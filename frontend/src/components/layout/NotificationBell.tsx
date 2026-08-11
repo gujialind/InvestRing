@@ -14,10 +14,11 @@ import {
   useMarkAllNotificationsRead,
 } from "@/hooks/useNotification";
 
+// 通知级别圆点（#127 语义 token：info 与品牌蓝同源，不单独设色）
 const LEVEL_DOT: Record<string, string> = {
-  info: "bg-blue-500",
-  warning: "bg-yellow-500",
-  error: "bg-red-500",
+  info: "bg-success",
+  warning: "bg-warning",
+  error: "bg-destructive",
 };
 
 /**
@@ -38,7 +39,7 @@ export default function NotificationBell() {
         <Button variant="ghost" className="relative h-8 w-8 rounded-full">
           <Bell className="h-4 w-4" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-medium text-white">
+            <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-white">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}

@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/table";
 import { Play, Pause, RotateCcw, Loader2 } from "lucide-react";
 import { useTaskList, useTaskExecutions, useRunTask, useEnableTask, useDisableTask } from "@/hooks/useTask";
-import { formatDate } from "@/lib/utils";
+import { formatDate, getStatusBadgeVariant } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
 import { useState } from "react";
 
@@ -87,13 +88,9 @@ export default function TasksContent() {
                     </code>
                   </TableCell>
                   <TableCell>
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                      task.is_enabled
-                        ? "bg-green-100 text-green-800"
-                        : "bg-gray-100 text-gray-800"
-                    }`}>
+                    <Badge variant={task.is_enabled ? "success" : "neutral"}>
                       {task.is_enabled ? "启用" : "禁用"}
-                    </span>
+                    </Badge>
                   </TableCell>
                   <TableCell>{task.last_run_at ? formatDate(task.last_run_at) : "从未执行"}</TableCell>
                   <TableCell className="text-right">
@@ -159,15 +156,9 @@ export default function TasksContent() {
                   <TableRow key={exec.id}>
                     <TableCell className="font-medium">{exec.task_code}</TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        exec.status === "success"
-                          ? "bg-green-100 text-green-800"
-                          : exec.status === "failed"
-                          ? "bg-red-100 text-red-800"
-                          : "bg-yellow-100 text-yellow-800"
-                      }`}>
+                      <Badge variant={getStatusBadgeVariant(exec.status)}>
                         {exec.status === "success" ? "成功" : exec.status === "failed" ? "失败" : exec.status === "partial_success" ? "部分成功" : "运行中"}
-                      </span>
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       {exec.duration_ms ? `${(exec.duration_ms / 1000).toFixed(1)}s` : "--"}
