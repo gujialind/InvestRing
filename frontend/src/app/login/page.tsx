@@ -46,7 +46,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold text-gray-900">
@@ -98,6 +98,16 @@ export default function LoginPage() {
           </form>
         </CardContent>
       </Card>
+      <footer className="mt-8 pb-4 text-center text-xs text-gray-500">
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-gray-700"
+        >
+          浙ICP备2026062469号
+        </a>
+      </footer>
     </div>
   );
 }

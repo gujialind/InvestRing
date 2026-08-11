@@ -47,7 +47,7 @@ def _snapshot_dates(db, portfolio_code):
 
 
 class TestCatchUp:
-    """POST /api/v1/snapshots/catch-up（issue #84）
+    """POST /api/snapshots/catch-up（issue #84）
 
     - D0 = 2025-06-06（周五），后续交易日 06-09/06-10/06-11
     """
@@ -63,7 +63,7 @@ class TestCatchUp:
         _setup_cash_snapshot(test_db, port.code, self.D0)
 
         resp = client.post(
-            "/api/v1/snapshots/catch-up",
+            "/api/snapshots/catch-up",
             json={"portfolio_code": port.code, "to_date": self.DAY3.isoformat()},
             headers=admin_headers,
         )
@@ -88,7 +88,7 @@ class TestCatchUp:
         _setup_cash_snapshot(test_db, port.code, self.D0)
 
         resp = client.post(
-            "/api/v1/snapshots/catch-up",
+            "/api/snapshots/catch-up",
             json={"portfolio_code": port.code, "to_date": self.D0.isoformat()},
             headers=admin_headers,
         )
@@ -107,7 +107,7 @@ class TestCatchUp:
         port = create_portfolio(test_db, code="CATCHUP_NOBASE", status="active")
 
         resp = client.post(
-            "/api/v1/snapshots/catch-up",
+            "/api/snapshots/catch-up",
             json={"portfolio_code": port.code, "to_date": self.DAY1.isoformat()},
             headers=admin_headers,
         )
@@ -117,7 +117,7 @@ class TestCatchUp:
     def test_catch_up_portfolio_not_found(self, client, admin_headers, test_db):
         """组合不存在 → 404 PORTFOLIO_NOT_FOUND"""
         resp = client.post(
-            "/api/v1/snapshots/catch-up",
+            "/api/snapshots/catch-up",
             json={"portfolio_code": "NO_SUCH_PORT", "to_date": self.DAY1.isoformat()},
             headers=admin_headers,
         )
@@ -145,7 +145,7 @@ class TestCatchUp:
         monkeypatch.setattr(snapshot_service, "generate_daily_snapshots", flaky_generate)
 
         resp = client.post(
-            "/api/v1/snapshots/catch-up",
+            "/api/snapshots/catch-up",
             json={"portfolio_code": port.code, "to_date": self.DAY3.isoformat()},
             headers=admin_headers,
         )
@@ -165,7 +165,7 @@ class TestCatchUp:
         """viewer 无权限 → 403"""
         port = create_portfolio(test_db, code="CATCHUP_PERM", status="active")
         resp = client.post(
-            "/api/v1/snapshots/catch-up",
+            "/api/snapshots/catch-up",
             json={"portfolio_code": port.code, "to_date": self.DAY1.isoformat()},
             headers=viewer_headers,
         )
@@ -173,7 +173,7 @@ class TestCatchUp:
 
 
 class TestGenerateNext:
-    """POST /api/v1/snapshots/generate-next（issue #84）"""
+    """POST /api/snapshots/generate-next（issue #84）"""
 
     D0 = date(2025, 6, 6)
     NEXT_DAY = date(2025, 6, 9)
@@ -184,7 +184,7 @@ class TestGenerateNext:
         _setup_cash_snapshot(test_db, port.code, self.D0)
 
         resp = client.post(
-            "/api/v1/snapshots/generate-next",
+            "/api/snapshots/generate-next",
             json={"portfolio_code": port.code},
             headers=admin_headers,
         )
@@ -201,7 +201,7 @@ class TestGenerateNext:
         port = create_portfolio(test_db, code="GENNEXT_NOBASE", status="active")
 
         resp = client.post(
-            "/api/v1/snapshots/generate-next",
+            "/api/snapshots/generate-next",
             json={"portfolio_code": port.code},
             headers=admin_headers,
         )
@@ -223,7 +223,7 @@ class TestBulkDeleteDryRun:
         dates_before = _snapshot_dates(test_db, port.code)
 
         resp = client.delete(
-            f"/api/v1/snapshots/{port.code}/bulk/{self.D0.isoformat()}",
+            f"/api/snapshots/{port.code}/bulk/{self.D0.isoformat()}",
             params={"dry_run": True},
             headers=admin_headers,
         )
@@ -247,7 +247,7 @@ class TestBulkDeleteDryRun:
         _setup_cash_snapshot(test_db, port.code, self.D0)
 
         resp = client.delete(
-            f"/api/v1/snapshots/{port.code}/bulk/{self.D0.isoformat()}",
+            f"/api/snapshots/{port.code}/bulk/{self.D0.isoformat()}",
             params={"dry_run": True, "confirm": True},
             headers=admin_headers,
         )
@@ -262,7 +262,7 @@ class TestBulkDeleteDryRun:
         port = create_portfolio(test_db, code="DRYRUN_MSG", status="active")
 
         resp = client.delete(
-            f"/api/v1/snapshots/{port.code}/bulk/{self.D0.isoformat()}",
+            f"/api/snapshots/{port.code}/bulk/{self.D0.isoformat()}",
             headers=admin_headers,
         )
         assert resp.status_code == 422

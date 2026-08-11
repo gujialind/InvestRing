@@ -76,8 +76,8 @@ app.include_router(positions.router, prefix="/api/positions", tags=["持仓管�
 app.include_router(logs.router, prefix="/api/system/logs", tags=["系统日志"])
 app.include_router(tasks.router, prefix="/api/system/tasks", tags=["任务管理"])
 app.include_router(notifications.router, prefix="/api/system/notifications", tags=["通知"])
-app.include_router(snapshots.router, prefix="/api/v1", tags=["快照管理"])
-app.include_router(cash_transfers.router, prefix="/api", tags=["现金转移"])
+app.include_router(snapshots.router, prefix="/api/snapshots", tags=["快照管理"])
+app.include_router(cash_transfers.router, prefix="/api/portfolios", tags=["现金转移"])
 app.include_router(sync_jobs.router, prefix="/api/sync-jobs", tags=["价格同步任务"])
 
 @app.get("/")
