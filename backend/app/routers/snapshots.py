@@ -29,7 +29,7 @@ from app.services.snapshot_service import (
     validate_snapshot_dependencies,
 )
 
-router = APIRouter(tags=["snapshots"])
+router = APIRouter()
 
 
 @router.post("/generate", response_model=SnapshotGenerationResult)
