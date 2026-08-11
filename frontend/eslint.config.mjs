@@ -19,6 +19,8 @@ const eslintConfig = [
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    // 只作用于前端源码；排除配置文件自身（message 示例文本也会被 selector 匹配）
+    files: ["src/**"],
     rules: {
       // Next 15 + React 19 新 JSX 转换不再需要显式 React 导入
       "react/react-in-jsx-scope": "off",
