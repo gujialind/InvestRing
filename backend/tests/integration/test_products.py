@@ -18,7 +18,7 @@ class TestProductCRUD:
 
     def test_create_product(self, client, admin_headers, test_db):
         """创建产品"""
-        create_asset_classification(test_db, code="STOCK_CN_LARGE")
+        create_asset_classification(test_db, code="ASSET_STOCK")
         resp = client.post(
             "/api/products",
             json={
@@ -26,7 +26,7 @@ class TestProductCRUD:
                 "market": "CN_OTC",
                 "name": "测试新基金",
                 "product_type": "OEF",
-                "asset_class_code": "STOCK_CN_LARGE",
+                "asset_class_code": "ASSET_STOCK",
                 "confirm_days": 1,
                 "is_qdii": False,
             },

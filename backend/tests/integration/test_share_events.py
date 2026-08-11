@@ -21,7 +21,7 @@ class TestShareChangeEventCreate:
         """创建现金分红事件"""
         create_portfolio(test_db, code="SCE_P1", status="active")
         create_product(test_db, code="FUND_SC1", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         ensure_trading_day(test_db, date(2025, 12, 8), is_open=True)
 
         resp = client.post(
@@ -48,7 +48,7 @@ class TestShareChangeEventCreate:
         """创建分红再投资事件"""
         create_portfolio(test_db, code="SCE_P2", status="active")
         create_product(test_db, code="FUND_SC2", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         ensure_trading_day(test_db, date(2025, 12, 8), is_open=True)
 
         resp = client.post(
@@ -74,7 +74,7 @@ class TestShareChangeEventCreate:
         """创建份额拆分事件"""
         create_portfolio(test_db, code="SCE_P3", status="active")
         create_product(test_db, code="FUND_SC3", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         ensure_trading_day(test_db, date(2025, 12, 8), is_open=True)
 
         resp = client.post(
@@ -97,7 +97,7 @@ class TestShareChangeEventCreate:
         """权益登记日非交易日应被拒绝"""
         create_portfolio(test_db, code="SCE_NTD", status="active")
         create_product(test_db, code="FUND_NT", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         ensure_trading_day(test_db, date(2025, 12, 6), is_open=False)  # 周六
 
         resp = client.post(
@@ -121,20 +121,18 @@ class TestShareChangeEventCreate:
         """#40 改进3：多平台持仓只录 1 平台 → 默认阻断 PLATFORM_NOT_COVERED"""
         create_portfolio(test_db, code="SCE_FC1", status="active")
         create_product(test_db, code="FUND_FC1", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         ensure_trading_day(test_db, date(2025, 12, 8), is_open=True)
         # 2 平台均有持仓
         create_position_snapshot(
             test_db, portfolio_code="SCE_FC1", product_code="FUND_FC1",
             market="CN_OTC", snapshot_date=date(2025, 12, 8),
             shares=100.0, platform_code="MYCF", market_value=100.0,
-            asset_type="stock",
         )
         create_position_snapshot(
             test_db, portfolio_code="SCE_FC1", product_code="FUND_FC1",
             market="CN_OTC", snapshot_date=date(2025, 12, 8),
             shares=200.0, platform_code="HBZQ", market_value=200.0,
-            asset_type="stock",
         )
         resp = client.post(
             "/api/share-change-events",
@@ -158,19 +156,17 @@ class TestShareChangeEventCreate:
         """#40 改进3：force_cover=true 降为 warning，创建成功"""
         create_portfolio(test_db, code="SCE_FC2", status="active")
         create_product(test_db, code="FUND_FC2", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         ensure_trading_day(test_db, date(2025, 12, 8), is_open=True)
         create_position_snapshot(
             test_db, portfolio_code="SCE_FC2", product_code="FUND_FC2",
             market="CN_OTC", snapshot_date=date(2025, 12, 8),
             shares=100.0, platform_code="MYCF", market_value=100.0,
-            asset_type="stock",
         )
         create_position_snapshot(
             test_db, portfolio_code="SCE_FC2", product_code="FUND_FC2",
             market="CN_OTC", snapshot_date=date(2025, 12, 8),
             shares=200.0, platform_code="HBZQ", market_value=200.0,
-            asset_type="stock",
         )
         resp = client.post(
             "/api/share-change-events?force_cover=true",
@@ -225,7 +221,7 @@ class TestShareChangeEventCancel:
         """取消 pending 事件"""
         create_portfolio(test_db, code="SCE_CAN", status="active")
         create_product(test_db, code="FUND_CAN", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         event = create_share_change_event(
             test_db, "SCE_CAN", "FUND_CAN", "CN_OTC",
             status="pending",
@@ -248,7 +244,7 @@ class TestShareChangeEventUnconfirm:
                                         platform_code="SCE_PLAT"):
         create_portfolio(test_db, code=portfolio_code, status="active")
         create_product(test_db, code="FUND_UNC", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code=platform_code)
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
         ensure_trading_day(test_db, date(2025, 10, 8), is_open=True)
@@ -306,7 +302,7 @@ class TestShareChangeEventUnconfirm:
         """基金级父记录 unconfirm 级联删除所有子记录"""
         create_portfolio(test_db, code="SCE_FL", status="active")
         create_product(test_db, code="FUND_FL", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="FL_P1")
         create_platform(test_db, code="FL_P2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -360,7 +356,7 @@ class TestShareChangeEventUnconfirm:
         """子记录单独 unconfirm 拒绝（CANNOT_UNCONFIRM_CHILD）"""
         create_portfolio(test_db, code="SCE_CH", status="active")
         create_product(test_db, code="FUND_CH", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="CH_P1")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
         ensure_trading_day(test_db, date(2025, 10, 8), is_open=True)
@@ -394,7 +390,7 @@ class TestShareChangeEventUnconfirm:
         """仅 confirmed 状态可 unconfirm"""
         create_portfolio(test_db, code="SCE_PD", status="active")
         create_product(test_db, code="FUND_PD", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="PD_P1")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
         ensure_trading_day(test_db, date(2025, 10, 8), is_open=True)
@@ -425,7 +421,7 @@ class TestUpdateShareChangeEvent:
         """confirmed 事件不可直接修改，须先 unconfirm"""
         create_portfolio(test_db, code="UPE_P1", status="active")
         create_product(test_db, code="FUND_UPE1", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="UPE_PLAT1")
         ensure_trading_day(test_db, date(2025, 11, 10), is_open=True)
         ensure_trading_day(test_db, date(2025, 11, 12), is_open=True)
@@ -448,7 +444,7 @@ class TestUpdateShareChangeEvent:
         """pending 事件改日期时重跑创建时的双日期校验"""
         create_portfolio(test_db, code="UPE_P2", status="active")
         create_product(test_db, code="FUND_UPE2", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="UPE_PLAT2")
         ensure_trading_day(test_db, date(2025, 11, 10), is_open=True)
         ensure_trading_day(test_db, date(2025, 11, 12), is_open=True)
@@ -504,7 +500,7 @@ class TestUpdateShareChangeEvent:
         """PUT 传 status 被忽略（状态流转只走 confirm/cancel/unconfirm 端点）"""
         create_portfolio(test_db, code="UPE_P3", status="active")
         create_product(test_db, code="FUND_UPE3", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="UPE_PLAT3")
         ensure_trading_day(test_db, date(2025, 11, 10), is_open=True)
         ensure_trading_day(test_db, date(2025, 11, 12), is_open=True)
