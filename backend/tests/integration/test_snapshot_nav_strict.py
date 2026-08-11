@@ -92,7 +92,7 @@ class TestSnapshotNavStrict:
         create_price_record(test_db, "STRICTA.OF", "CN_OTC", D0, 1.0)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -121,7 +121,7 @@ class TestSnapshotNavStrict:
         create_price_record(test_db, "STRICTB.OF", "CN_OTC", NEXT_DAY, 1.5)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -148,7 +148,7 @@ class TestSnapshotNavStrict:
         create_price_record(test_db, "QDIIA.OF", "CN_OTC", T_MINUS_2, 1.8)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -175,7 +175,7 @@ class TestSnapshotNavStrict:
         create_price_record(test_db, "QDIIB.OF", "CN_OTC", NEXT_DAY, 3.0)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -201,7 +201,7 @@ class TestSnapshotNavStrict:
         ids_before = _snapshot_ids(test_db, port.code)
 
         resp = client.post(
-            "/api/v1/snapshots/recalculate",
+            "/api/snapshots/recalculate",
             json={
                 "portfolio_code": port.code,
                 "start_date": D0.isoformat(),

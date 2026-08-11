@@ -5277,494 +5277,6 @@
         ]
       }
     },
-    "/api/v1/snapshots/generate": {
-      "post": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Generate Snapshot",
-        "description": "手动触发单日快照生成\n\n权限：仅admin",
-        "operationId": "generate_snapshot_api_v1_snapshots_generate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SnapshotGenerateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotGenerationResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/snapshots/recalculate": {
-      "post": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Recalculate",
-        "description": "重算指定时间区间的快照（同步模式）\n\n单一事务（issue #58）：无 errors 时统一 commit；任一日失败则整体 rollback，\n被删快照与级联回退状态完整复原，对外「要么完整成功，要么无变化」。\n\n大区间重算易触发客户端 HTTP 超时（issue #89），建议改用\nPOST /snapshots/recalculate-async 提交后台任务并轮询终态。\n\n权限：仅admin",
-        "operationId": "recalculate_api_v1_snapshots_recalculate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SnapshotRecalculateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecalculationResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/snapshots/recalculate-async": {
-      "post": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Recalculate Async",
-        "description": "异步区间重算（issue #89）：提交后台任务立即返回 job_id，\n经 GET /api/sync-jobs/{job_id} 轮询终态（success=已提交 / failed=已整体回滚）。\n\n事务语义与同步模式一致：后台执行体按 errors 统一 commit/rollback，\n对外仍是「要么完整成功，要么无变化」。\n\n已有重算任务在运行时返回 409 RECALC_JOB_CONFLICT。\n\n权限：仅admin",
-        "operationId": "recalculate_async_api_v1_snapshots_recalculate_async_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SnapshotRecalculateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/snapshots/catch-up": {
-      "post": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Catch Up",
-        "description": "逐交易日追平快照至 to_date（issue #84）\n\nservice 内部逐日 checkpoint commit（编排层例外），router 不再重复 commit；\n单日失败仅回滚当日，已成功日保留，响应附 failed_date/error。\n\n权限：仅admin",
-        "operationId": "catch_up_api_v1_snapshots_catch_up_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SnapshotCatchUpRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotCatchUpResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/snapshots/generate-next": {
-      "post": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Generate Next",
-        "description": "生成最新快照日的下一个交易日快照（issue #84）\n\nservice 内部 commit（编排层例外），router 不再重复 commit。\n\n权限：仅admin",
-        "operationId": "generate_next_api_v1_snapshots_generate_next_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SnapshotGenerateNextRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotGenerateNextResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/snapshots/validation": {
-      "get": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Validate Dependencies",
-        "description": "预检指定日期的依赖数据\n\n权限：仅admin",
-        "operationId": "validate_dependencies_api_v1_snapshots_validation_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "portfolio_code",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "组合代码",
-              "title": "Portfolio Code"
-            },
-            "description": "组合代码"
-          },
-          {
-            "name": "target_date",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "date",
-              "description": "目标日期",
-              "title": "Target Date"
-            },
-            "description": "目标日期"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotValidationResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/snapshots/portfolios/{code}/status": {
-      "get": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Get Snapshot Status",
-        "description": "查询组合快照状态\n\n权限：所有用户（只能查看自己有权限的组合）",
-        "operationId": "get_snapshot_status_api_v1_snapshots_portfolios__code__status_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "code",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Code"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotStatusResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/snapshots/{portfolio_code}/{snapshot_date}": {
-      "delete": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Delete Snapshot",
-        "description": "删除指定日期的快照\n\n删除前自动级联回退依赖该快照的已确认申购/赎回和份额变动事件。\n\n权限：仅admin",
-        "operationId": "delete_snapshot_api_v1_snapshots__portfolio_code___snapshot_date__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "portfolio_code",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Portfolio Code"
-            }
-          },
-          {
-            "name": "snapshot_date",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "date",
-              "title": "Snapshot Date"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/snapshots/{portfolio_code}/bulk/{from_date}": {
-      "delete": {
-        "tags": [
-          "快照管理",
-          "snapshots"
-        ],
-        "summary": "Delete Snapshots Bulk",
-        "description": "批量删除从 from_date 开始的所有快照（含 from_date）\n\n从最新快照日开始倒序删除，确保级联回退的顺序正确。\n每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。\n必须显式传 confirm=true，否则返回 422 CONFIRM_REQUIRED（兼作影响面预览）。\ndry_run=true 时纯预览（issue #75）：返回将删除的日期列表，不校验 confirm、零副作用。\n\n权限：仅admin",
-        "operationId": "delete_snapshots_bulk_api_v1_snapshots__portfolio_code__bulk__from_date__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "portfolio_code",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Portfolio Code"
-            }
-          },
-          {
-            "name": "from_date",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "date",
-              "title": "From Date"
-            }
-          },
-          {
-            "name": "confirm",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "必须显式传 confirm=true 才执行删除",
-              "default": false,
-              "title": "Confirm"
-            },
-            "description": "必须显式传 confirm=true 才执行删除"
-          },
-          {
-            "name": "dry_run",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "仅预览将删除的快照日期，不执行删除",
-              "default": false,
-              "title": "Dry Run"
-            },
-            "description": "仅预览将删除的快照日期，不执行删除"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/portfolios/{portfolio_code}/cash-transfer": {
       "post": {
         "tags": [
@@ -6121,6 +5633,485 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/snapshots/generate": {
+      "post": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Generate Snapshot",
+        "description": "手动触发单日快照生成\n\n权限：仅admin",
+        "operationId": "generate_snapshot_api_v1_snapshots_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotGenerationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/snapshots/recalculate": {
+      "post": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Recalculate",
+        "description": "重算指定时间区间的快照（同步模式）\n\n单一事务（issue #58）：无 errors 时统一 commit；任一日失败则整体 rollback，\n被删快照与级联回退状态完整复原，对外「要么完整成功，要么无变化」。\n\n大区间重算易触发客户端 HTTP 超时（issue #89），建议改用\nPOST /snapshots/recalculate-async 提交后台任务并轮询终态。\n\n权限：仅admin",
+        "operationId": "recalculate_api_v1_snapshots_recalculate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotRecalculateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/snapshots/recalculate-async": {
+      "post": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Recalculate Async",
+        "description": "异步区间重算（issue #89）：提交后台任务立即返回 job_id，\n经 GET /api/sync-jobs/{job_id} 轮询终态（success=已提交 / failed=已整体回滚）。\n\n事务语义与同步模式一致：后台执行体按 errors 统一 commit/rollback，\n对外仍是「要么完整成功，要么无变化」。\n\n已有重算任务在运行时返回 409 RECALC_JOB_CONFLICT。\n\n权限：仅admin",
+        "operationId": "recalculate_async_api_v1_snapshots_recalculate_async_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotRecalculateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/snapshots/catch-up": {
+      "post": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Catch Up",
+        "description": "逐交易日追平快照至 to_date（issue #84）\n\nservice 内部逐日 checkpoint commit（编排层例外），router 不再重复 commit；\n单日失败仅回滚当日，已成功日保留，响应附 failed_date/error。\n\n权限：仅admin",
+        "operationId": "catch_up_api_v1_snapshots_catch_up_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCatchUpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotCatchUpResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/snapshots/generate-next": {
+      "post": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Generate Next",
+        "description": "生成最新快照日的下一个交易日快照（issue #84）\n\nservice 内部 commit（编排层例外），router 不再重复 commit。\n\n权限：仅admin",
+        "operationId": "generate_next_api_v1_snapshots_generate_next_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotGenerateNextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotGenerateNextResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/snapshots/validation": {
+      "get": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Validate Dependencies",
+        "description": "预检指定日期的依赖数据\n\n权限：仅admin",
+        "operationId": "validate_dependencies_api_v1_snapshots_validation_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "组合代码",
+              "title": "Portfolio Code"
+            },
+            "description": "组合代码"
+          },
+          {
+            "name": "target_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "目标日期",
+              "title": "Target Date"
+            },
+            "description": "目标日期"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotValidationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/snapshots/portfolios/{code}/status": {
+      "get": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Get Snapshot Status",
+        "description": "查询组合快照状态\n\n权限：所有用户（只能查看自己有权限的组合）",
+        "operationId": "get_snapshot_status_api_v1_snapshots_portfolios__code__status_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/snapshots/{portfolio_code}/{snapshot_date}": {
+      "delete": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Delete Snapshot",
+        "description": "删除指定日期的快照\n\n删除前自动级联回退依赖该快照的已确认申购/赎回和份额变动事件。\n\n权限：仅admin",
+        "operationId": "delete_snapshot_api_v1_snapshots__portfolio_code___snapshot_date__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          },
+          {
+            "name": "snapshot_date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Snapshot Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/snapshots/{portfolio_code}/bulk/{from_date}": {
+      "delete": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "Delete Snapshots Bulk",
+        "description": "批量删除从 from_date 开始的所有快照（含 from_date）\n\n从最新快照日开始倒序删除，确保级联回退的顺序正确。\n每个快照的删除都会触发级联回退（申购/赎回 CASH trade、事件）。\n必须显式传 confirm=true，否则返回 422 CONFIRM_REQUIRED（兼作影响面预览）。\ndry_run=true 时纯预览（issue #75）：返回将删除的日期列表，不校验 confirm、零副作用。\n\n权限：仅admin",
+        "operationId": "delete_snapshots_bulk_api_v1_snapshots__portfolio_code__bulk__from_date__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Code"
+            }
+          },
+          {
+            "name": "from_date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From Date"
+            }
+          },
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "必须显式传 confirm=true 才执行删除",
+              "default": false,
+              "title": "Confirm"
+            },
+            "description": "必须显式传 confirm=true 才执行删除"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "仅预览将删除的快照日期，不执行删除",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "仅预览将删除的快照日期，不执行删除"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }

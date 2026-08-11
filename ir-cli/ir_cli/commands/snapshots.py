@@ -1,4 +1,4 @@
-"""快照管理命令组（注意前缀为 /api/v1/snapshots）"""
+"""快照管理命令组"""
 import time
 import typer
 from typing import Optional
@@ -7,7 +7,7 @@ from ir_cli.output import success, error
 
 app = typer.Typer(no_args_is_help=True)
 
-PREFIX = "/api/v1/snapshots"
+PREFIX = "/api/snapshots"
 
 
 @app.command("generate")
