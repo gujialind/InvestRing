@@ -24,7 +24,7 @@ from app.services.cash_transfer_service import (
 router = APIRouter()
 
 
-@router.post("/portfolios/{portfolio_code}/cash-transfer", response_model=CashTransferResponse)
+@router.post("/{portfolio_code}/cash-transfer", response_model=CashTransferResponse)
 def create_cash_transfer(
     portfolio_code: str,
     request: CashTransferCreate,
@@ -46,7 +46,7 @@ def create_cash_transfer(
     return CashTransferResponse(**result)
 
 
-@router.post("/portfolios/{portfolio_code}/cash-transfer/{transfer_group}/confirm")
+@router.post("/{portfolio_code}/cash-transfer/{transfer_group}/confirm")
 def confirm_cash_transfer(
     portfolio_code: str,
     transfer_group: str,
@@ -67,7 +67,7 @@ def confirm_cash_transfer(
     }
 
 
-@router.get("/portfolios/{portfolio_code}/cash-transfers")
+@router.get("/{portfolio_code}/cash-transfers")
 def list_cash_transfers(
     portfolio_code: str,
     page: Optional[int] = 1,

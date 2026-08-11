@@ -58,7 +58,7 @@ def context(code: str = typer.Argument(..., help="组合代码")):
     """
     client = APIClient.from_config()
     portfolio = client.get(f"/api/portfolios/{code}")["data"]
-    snapshot_status = client.get(f"/api/v1/snapshots/portfolios/{code}/status")["data"]
+    snapshot_status = client.get(f"/api/snapshots/portfolios/{code}/status")["data"]
     available_cash = client.get(f"/api/positions/portfolio/{code}/available-cash")["data"]
     # 后端 list 端点不支持 status 过滤，全量拉取后本地筛 pending（摘要字段输出）
     subs = client.get_all("/api/subscriptions", params={"portfolio_code": code})["data"]
