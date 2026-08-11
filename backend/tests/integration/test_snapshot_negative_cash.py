@@ -27,7 +27,7 @@ def _setup_cash_snapshot(db, portfolio_code: str, snapshot_date: date, amount: f
         db, portfolio_code, "CASH", "",
         snapshot_date=snapshot_date,
         cash_amount=amount, unit_price=None, cost_price=None,
-        market_value=amount, platform_code="MYCF", asset_type="cash",
+        market_value=amount, platform_code="MYCF",
     )
     create_value_snapshot(
         db, portfolio_code, snapshot_date,
@@ -200,13 +200,13 @@ class TestSnapshotStatusNegativeCash:
             test_db, port.code, "CASH", "",
             snapshot_date=self.D0, cash_amount=-500.0, unit_price=None,
             cost_price=None, market_value=-500.0,
-            platform_code="MYCF", asset_type="cash",
+            platform_code="MYCF",
         )
         create_position_snapshot(
             test_db, port.code, "CASH", "",
             snapshot_date=self.D0, cash_amount=1000.0, unit_price=None,
             cost_price=None, market_value=1000.0,
-            platform_code="TTJJ", asset_type="cash",
+            platform_code="TTJJ",
         )
 
         resp = client.get(

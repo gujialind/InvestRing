@@ -20,7 +20,7 @@ class TestBuyTrade:
         """买入交易创建后应为 pending"""
         create_portfolio(test_db, code="TRD_P1", status="active")
         create_product(test_db, code="ETF01", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="TRD_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -55,7 +55,7 @@ class TestBuyTrade:
         """买入金额超过可用现金应被拒绝"""
         create_portfolio(test_db, code="TRD_NC", status="active")
         create_product(test_db, code="ETF02", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="TRD_PLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -83,7 +83,7 @@ class TestBuyTrade:
         """买入金额为 0 应被拒绝"""
         create_portfolio(test_db, code="TRD_Z", status="active")
         create_product(test_db, code="ETF03", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="TRD_PLAT3")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -107,7 +107,7 @@ class TestBuyTrade:
         """manual 覆盖 baked in 快照后，买入金额在覆盖值内应成功（回归 issue #52）"""
         create_portfolio(test_db, code="TRD_OVR", status="active")
         create_product(test_db, code="ETF_OVR", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="TRD_OVR_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -119,7 +119,6 @@ class TestBuyTrade:
             snapshot_date=date(2025, 10, 3),
             cash_amount=6001.39, unit_price=None, cost_price=None,
             market_value=6001.39, platform_code="TRD_OVR_PLAT",
-            asset_type="cash",
         )
 
         # 买入 6001（< 快照基线 6001.39）→ 应成功
@@ -147,7 +146,7 @@ class TestSellTrade:
         """卖出交易创建后应为 pending"""
         create_portfolio(test_db, code="SEL_P1", status="active")
         create_product(test_db, code="ETF04", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="SEL_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -182,7 +181,7 @@ class TestSellTrade:
         """卖出份额超过可用份额应被拒绝"""
         create_portfolio(test_db, code="SEL_EX", status="active")
         create_product(test_db, code="ETF05", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="SEL_PLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -287,7 +286,7 @@ class TestUnconfirmTradeSnapshotProtection:
         """confirm_date 及之后已有快照时，unconfirm 返回 SNAPSHOT_DEPENDENCY"""
         create_portfolio(test_db, code="UC_P1", status="active")
         create_product(test_db, code="ETF_UC", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(test_db, code="UC_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -330,7 +329,7 @@ class TestUnconfirmTradeSnapshotProtection:
         """无快照依赖时，unconfirm 成功且配对 CASH 腿同步回 pending"""
         create_portfolio(test_db, code="UC_P2", status="active")
         create_product(test_db, code="ETF_UC2", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(test_db, code="UC_PLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -377,7 +376,7 @@ class TestUpdateDeletePairedSync:
         """update 改动 trade_date 时 confirm_date 联动重算，并同步配对 CASH 腿"""
         create_portfolio(test_db, code="UPD_P1", status="active")
         create_product(test_db, code="ETF_UPD", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(test_db, code="UPD_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -462,7 +461,7 @@ class TestUpdateDeletePairedSync:
         """PUT 传 status 被忽略（状态流转只走 confirm/cancel/unconfirm 端点）"""
         create_portfolio(test_db, code="UPD_P2", status="active")
         create_product(test_db, code="ETF_UPD2", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(test_db, code="UPD_PLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -508,7 +507,7 @@ class TestUpdateDeletePairedSync:
         """delete 主腿时级联删除配对 CASH 腿"""
         create_portfolio(test_db, code="DEL_P1", status="active")
         create_product(test_db, code="ETF_DEL", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(test_db, code="DEL_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -552,7 +551,7 @@ class TestUpdateAmountSyncCashLeg:
         """修改基金腿 actual_amount 后，配对 CASH 腿 amount 同步更新"""
         create_portfolio(test_db, code="AMT_P1", status="active")
         create_product(test_db, code="ETF_AMT", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(test_db, code="AMT_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -611,7 +610,7 @@ class TestAsOfDateSellValidation:
         """补录历史日卖出，后续 confirmed 卖出不应计入扣减"""
         create_portfolio(test_db, code="ASOF_P1", status="active")
         create_product(test_db, code="FUND_ASOF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
                        confirm_days=1)
         create_platform(test_db, code="ASOF_PLAT")
         ensure_trading_day(test_db, date(2025, 1, 6), is_open=True)
@@ -659,7 +658,7 @@ class TestCancelExchangeErrorMessage:
         """场内交易 cancel 拒绝时 message 包含 PUT 和 DELETE 关键词"""
         create_portfolio(test_db, code="MSG_P1", status="active")
         create_product(test_db, code="ETF_MSG", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(test_db, code="MSG_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -720,7 +719,7 @@ class TestCashTradeForbidden:
         """REST 基金买入自动生成共享 transfer_group 的配对 CASH 腿"""
         create_portfolio(test_db, code="PAIR_P1", status="active")
         create_product(test_db, code="ETF_PAIR", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(test_db, code="PAIR_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
@@ -768,7 +767,7 @@ class TestTradePreview:
         """创建组合/产品/平台/交易日/可用现金，可选写入 T 日净值"""
         create_portfolio(test_db, code=portfolio, status="active")
         create_product(test_db, code=product, market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
                        confirm_days=confirm_days, is_qdii=is_qdii)
         create_platform(test_db, code=platform)
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)

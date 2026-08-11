@@ -56,7 +56,7 @@ from app.models import (
     Subscription, Trade, ShareChangeEvent,
     SyncJob, ManualMarketValue, Notification, IdempotencyCache,
 )
-from app.constants.asset_names import ASSET_NAME_MAP
+from app.constants.asset_dimensions import ASSET_DIMENSIONS, PRODUCT_DIMENSIONS
 from app.utils.security import get_password_hash, create_access_token
 
 
@@ -121,23 +121,13 @@ def _seed_base_data(test_engine):
     SessionFactory = sessionmaker(bind=test_engine)
     db = SessionFactory()
     try:
-        # 1. 资产分类（asset_name 与迁移 0007/init_data.py 同源，取自 ASSET_NAME_MAP）
-        asset_classes = [
-            {"code": "CASH", "asset_type": "现金", "asset_category": "现金", "asset_subcat": "现金", "description": "现金类资产"},
-            {"code": "STOCK_CN_LARGE", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "大盘", "description": "国内大盘股票"},
-            {"code": "STOCK_CN_SMALL", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "中小盘", "description": "国内中小盘股票"},
-            {"code": "STOCK_CN_VALUE", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "价值", "description": "国内价值风格股票"},
-            {"code": "STOCK_CN_GROWTH", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "成长", "description": "国内成长风格股票"},
-            {"code": "STOCK_CN_MIXED", "asset_type": "股票", "asset_category": "国内股票", "asset_subcat": "综合", "description": "国内综合风格股票"},
-            {"code": "BOND_SHORT", "asset_type": "债券", "asset_category": "国内债券", "asset_subcat": "短债", "description": "国内短期债券"},
-            {"code": "BOND_LONG", "asset_type": "债券", "asset_category": "国内债券", "asset_subcat": "中长债", "description": "国内中长期债券"},
-            {"code": "GOLD", "asset_type": "黄金", "asset_category": "黄金", "asset_subcat": "黄金", "description": "黄金资产"},
-        ]
-        for ac in asset_classes:
-            ac["asset_name"] = ASSET_NAME_MAP[ac["code"]]
-        for ac in asset_classes:
-            if not db.query(AssetClassification).filter(AssetClassification.code == ac["code"]).first():
-                db.add(AssetClassification(**ac))
+        # 1. 资产分类维度值字典（issue #128，与迁移 0008/init_data.py 同源）
+        for code, dimension, name, sort_order, description in ASSET_DIMENSIONS:
+            if not db.query(AssetClassification).filter(AssetClassification.code == code).first():
+                db.add(AssetClassification(
+                    code=code, dimension=dimension, name=name,
+                    sort_order=sort_order, description=description,
+                ))
         db.commit()
 
         # 2. 平台
@@ -152,23 +142,34 @@ def _seed_base_data(test_engine):
                 db.add(Platform(**p))
         db.commit()
 
-        # 3. 示例产品（精简版，仅用于测试）
+        # 3. 示例产品（精简版，仅用于测试；五维度标签取自 PRODUCT_DIMENSIONS 同源判定）
+        def _dims(code):
+            d = PRODUCT_DIMENSIONS[code]
+            return {"asset_class_code": d[0], "region_code": d[1],
+                    "style_code": d[2], "size_code": d[3], "segment_code": d[4]}
+
         products = [
             {"code": "CASH", "market": "", "name": "现金类资产", "product_type": "CASH",
-             "asset_class_code": "CASH", "confirm_days": 0, "is_qdii": False},
-            # #93: 在途资金虚拟产品（与 CASH 同构：market='', 无 asset_class_code）
+             "confirm_days": 0, "is_qdii": False, **_dims("CASH")},
+            # #93: 在途资金虚拟产品（与 CASH 同构：market='', 五维度全 NULL）
             {"code": "IN_TRANSIT_BUY", "market": "", "name": "买入在途资金", "product_type": "IN_TRANSIT",
-             "asset_class_code": None, "confirm_days": 0, "is_qdii": False},
+             "asset_class_code": None, "region_code": None, "style_code": None,
+             "size_code": None, "segment_code": None, "confirm_days": 0, "is_qdii": False},
             {"code": "IN_TRANSIT_SELL", "market": "", "name": "卖出在途资金", "product_type": "IN_TRANSIT",
-             "asset_class_code": None, "confirm_days": 0, "is_qdii": False},
+             "asset_class_code": None, "region_code": None, "style_code": None,
+             "size_code": None, "segment_code": None, "confirm_days": 0, "is_qdii": False},
             {"code": "510300.SH", "market": "CN_EXCHANGE", "name": "沪深300ETF", "product_type": "ETF",
-             "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 0, "is_qdii": False},
+             "confirm_days": 0, "is_qdii": False,
+             "asset_class_code": "ASSET_STOCK", "region_code": "REGION_CN",
+             "style_code": "STYLE_BALANCED", "size_code": "SIZE_LARGE", "segment_code": "SEG_COMPOSITE"},
             {"code": "000300.OF", "market": "CN_OTC", "name": "沪深300联接A", "product_type": "OEF",
-             "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 1, "is_qdii": False},
+             "confirm_days": 1, "is_qdii": False,
+             "asset_class_code": "ASSET_STOCK", "region_code": "REGION_CN",
+             "style_code": "STYLE_BALANCED", "size_code": "SIZE_LARGE", "segment_code": "SEG_COMPOSITE"},
             {"code": "270042.OF", "market": "CN_OTC", "name": "广发纳指100(QDII)A", "product_type": "OEF",
-             "asset_class_code": "STOCK_CN_LARGE", "confirm_days": 2, "is_qdii": True},
+             "confirm_days": 2, "is_qdii": True, **_dims("270042.OF")},
             {"code": "1001767344", "market": "HK_MUTUAL", "name": "摩根国际债券人民币对冲", "product_type": "OEF",
-             "asset_class_code": "BOND_LONG", "confirm_days": 1, "is_qdii": False, "data_source": "akshare"},
+             "confirm_days": 1, "is_qdii": False, "data_source": "akshare", **_dims("1001767344")},
         ]
         for p in products:
             if not db.query(Product).filter(

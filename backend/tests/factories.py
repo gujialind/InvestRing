@@ -96,18 +96,15 @@ def create_platform(
 def create_asset_classification(
     db: Session,
     code: str = "TEST_ASSET",
-    asset_type: str = "股票",
-    asset_category: str = "国内股票",
-    asset_subcat: str = "大盘",
-    asset_name: str = None,
+    dimension: str = "asset_class",
+    name: str = "测试分类",
+    sort_order: int = 0,
 ) -> AssetClassification:
     existing = db.query(AssetClassification).filter(AssetClassification.code == code).first()
     if existing:
         return existing
     ac = AssetClassification(
-        code=code, asset_type=asset_type,
-        asset_category=asset_category, asset_subcat=asset_subcat,
-        asset_name=asset_name,
+        code=code, dimension=dimension, name=name, sort_order=sort_order,
     )
     db.add(ac)
     db.commit()
@@ -125,24 +122,33 @@ def create_product(
     market: str = "CN_OTC",
     name: str = "测试基金",
     product_type: str = "OEF",
-    asset_class_code: str = "STOCK_CN_LARGE",
+    asset_class_code: str = "ASSET_STOCK",
+    region_code: str = "REGION_CN",
+    style_code: str = "STYLE_BALANCED",
+    size_code: str = "SIZE_LARGE",
+    segment_code: str = "SEG_COMPOSITE",
     confirm_days: int = 1,
     is_qdii: bool = False,
 ) -> Product:
-    """创建产品，如已存在则直接返回"""
+    """创建产品，如已存在则直接返回（维度值默认取 conftest 已种子的字典值）"""
     existing = db.query(Product).filter(
         Product.code == code, Product.market == market
     ).first()
     if existing:
         return existing
 
-    # 确保资产分类存在
-    if not db.query(AssetClassification).filter(AssetClassification.code == asset_class_code).first():
-        create_asset_classification(db, code=asset_class_code)
+    # 确保维度值存在（默认值在 conftest 种子中已存在，自定义 code 时兜底）
+    for dim_code in (asset_class_code, region_code, style_code, size_code, segment_code):
+        if dim_code and not db.query(AssetClassification).filter(
+            AssetClassification.code == dim_code
+        ).first():
+            create_asset_classification(db, code=dim_code)
 
     product = Product(
         code=code, market=market, name=name,
         product_type=product_type, asset_class_code=asset_class_code,
+        region_code=region_code, style_code=style_code,
+        size_code=size_code, segment_code=segment_code,
         confirm_days=confirm_days, is_qdii=is_qdii,
     )
     db.add(product)
@@ -294,7 +300,6 @@ def create_position_snapshot(
     platform_code: Optional[str] = None,
     frozen_shares: Optional[float] = None,
     frozen_amount: Optional[float] = None,
-    asset_type: Optional[str] = None,
 ) -> PortfolioPosition:
     """创建持仓快照。
 
@@ -314,7 +319,6 @@ def create_position_snapshot(
         market_value=Decimal(str(market_value)),
         frozen_shares=Decimal(str(frozen_shares)) if frozen_shares is not None else Decimal("0"),
         frozen_amount=Decimal(str(frozen_amount)) if frozen_amount is not None else Decimal("0"),
-        asset_type=asset_type,
         snapshot_date=snapshot_date,
     )
     db.add(pos)

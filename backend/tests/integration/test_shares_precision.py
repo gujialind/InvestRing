@@ -111,7 +111,7 @@ class TestFullSellRedeemRegression:
         """按可用份额（6837.29）全额卖出应成功"""
         create_portfolio(test_db, code="PREC_FS", status="active")
         create_product(test_db, code="ETF_PREC1", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="PREC_FSPLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -175,7 +175,7 @@ class TestFourDecimalInputQuantization:
         """可用 6837.29，输入 6837.2949 → 量化为 6837.29 后通过校验"""
         create_portfolio(test_db, code="PREC_Q1", status="active")
         create_product(test_db, code="ETF_PREC2", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="PREC_QPLAT1")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -209,7 +209,7 @@ class TestFourDecimalInputQuantization:
         """可用 6837.29，输入 6837.31（量化后仍超出）应被 INSUFFICIENT_SHARES 拒绝"""
         create_portfolio(test_db, code="PREC_Q2", status="active")
         create_product(test_db, code="ETF_PREC3", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="PREC_QPLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 

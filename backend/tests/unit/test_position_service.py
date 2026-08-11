@@ -35,7 +35,7 @@ def _seed_cash_baseline(db, portfolio_code="GV_P", platform_code="GV_PLAT", amou
                           total_value=amount, total_shares=amount, unit_price=1.0)
     create_position_snapshot(
         db, portfolio_code, "CASH", "", SNAP_DATE,
-        cash_amount=amount, platform_code=platform_code, asset_type="cash",
+        cash_amount=amount, platform_code=platform_code,
     )
     create_trade(
         db, portfolio_code, "CASH", "",
@@ -97,7 +97,7 @@ class TestCalculateAvailableCashWithOverride:
                               total_value=6001.39, total_shares=6001.39, unit_price=1.0)
         create_position_snapshot(
             test_db, "GV_P", "CASH", "", SNAP_DATE,
-            cash_amount=6001.39, platform_code="GV_PLAT", asset_type="cash",
+            cash_amount=6001.39, platform_code="GV_PLAT",
         )
         cash = calculate_available_cash(test_db, "GV_P", "GV_PLAT")
         assert cash == Decimal("6001.39")
@@ -110,7 +110,7 @@ class TestCalculateAvailableCashWithOverride:
                               total_value=6001.39, total_shares=6001.39, unit_price=1.0)
         create_position_snapshot(
             test_db, "GV_P", "CASH", "", SNAP_DATE,
-            cash_amount=6001.39, platform_code="GV_PLAT", asset_type="cash",
+            cash_amount=6001.39, platform_code="GV_PLAT",
         )
         # 快照后 confirmed CASH buy
         create_trade(
@@ -130,7 +130,7 @@ class TestCalculateAvailableCashWithOverride:
                               total_value=6001.39, total_shares=6001.39, unit_price=1.0)
         create_position_snapshot(
             test_db, "GV_P", "CASH", "", SNAP_DATE,
-            cash_amount=6001.39, platform_code="GV_PLAT", asset_type="cash",
+            cash_amount=6001.39, platform_code="GV_PLAT",
         )
         # pending CASH sell（已承诺未执行，需预留）
         create_trade(
@@ -165,7 +165,7 @@ class TestCalculateAvailableCashWithOverride:
                               total_value=10200, total_shares=10200, unit_price=1.0)
         create_position_snapshot(
             test_db, "GV_P", "CASH", "", SNAP_DATE,
-            cash_amount=10200, platform_code="GV_PLAT", asset_type="cash",
+            cash_amount=10200, platform_code="GV_PLAT",
         )
         # 无 manual_market_value 记录在 SNAP_DATE
         # 流水只有一笔原始 buy 6000（全量重算会得 6000，但快照基线应为 10200）
@@ -193,7 +193,7 @@ class TestCalculateAvailableCashAsOfDate:
         )
         create_position_snapshot(
             test_db, "GV_P", "CASH", "", date(2025, 1, 13),
-            cash_amount=20000, platform_code="GV_PLAT", asset_type="cash",
+            cash_amount=20000, platform_code="GV_PLAT",
         )
         cash = calculate_available_cash(
             test_db, "GV_P", "GV_PLAT", as_of_date=date(2025, 1, 10)

@@ -62,7 +62,7 @@ class TestFullTradeFlow:
         """买入 → 确认完整流程"""
         create_portfolio(test_db, code="FLOW_T1", status="active")
         create_product(test_db, code="ETF_F1", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="FLOW_PLAT")
         ensure_trading_day(test_db, date(2025, 11, 3), is_open=True)
 
@@ -168,7 +168,7 @@ class TestClosedPortfolioRestrictions:
         """已关闭组合不能调仓"""
         create_portfolio(test_db, code="CLD_TRD", status="closed")
         create_product(test_db, code="ETF_CLD", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="CLD_PLAT")
         ensure_trading_day(test_db, date(2025, 11, 3), is_open=True)
 

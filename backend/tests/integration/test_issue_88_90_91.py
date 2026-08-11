@@ -45,7 +45,7 @@ def _seed_cash(db, portfolio_code, platform_code, cash, snap_date=SNAP):
                           total_value=cash, total_shares=cash, unit_price=1.0)
     create_position_snapshot(
         db, portfolio_code, "CASH", "", snap_date,
-        cash_amount=cash, platform_code=platform_code, asset_type="cash",
+        cash_amount=cash, platform_code=platform_code,
     )
 
 
@@ -179,7 +179,7 @@ class TestProductCreateSync:
             product = create_product_service(
                 test_db,
                 code="I90SYNC.OF", market="CN_OTC", name="回填测试基金",
-                product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                product_type="OEF", asset_class_code="ASSET_STOCK",
                 sync_history=True,
             )
         mock_sync.assert_called_once()
@@ -196,7 +196,7 @@ class TestProductCreateSync:
             product = create_product_service(
                 test_db,
                 code="I90FAIL.OF", market="CN_OTC", name="回填失败基金",
-                product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                product_type="OEF", asset_class_code="ASSET_STOCK",
                 sync_history=True,
             )
         test_db.commit()
@@ -209,7 +209,7 @@ class TestProductCreateSync:
         product = create_product_service(
             test_db,
             code="I90OFF.OF", market="CN_OTC", name="不回填基金",
-            product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+            product_type="OEF", asset_class_code="ASSET_STOCK",
         )
         assert getattr(product, "sync_result", None) is None
 
@@ -321,7 +321,7 @@ class TestCrossPlatformCashLeg:
         create_platform(test_db, code="XP_TT2")
         create_position_snapshot(
             test_db, "XP_P2", "CASH", "", SNAP,
-            cash_amount=99999, platform_code="XP_TT2", asset_type="cash",
+            cash_amount=99999, platform_code="XP_TT2",
         )
 
         with pytest.raises(BusinessError) as exc:

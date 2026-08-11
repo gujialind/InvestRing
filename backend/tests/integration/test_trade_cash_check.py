@@ -37,7 +37,7 @@ def _seed_cash(db, portfolio_code, platform_code, cash, snap_date=SNAP):
                           total_value=cash, total_shares=cash, unit_price=1.0)
     create_position_snapshot(
         db, portfolio_code, "CASH", "", snap_date,
-        cash_amount=cash, platform_code=platform_code, asset_type="cash",
+        cash_amount=cash, platform_code=platform_code,
     )
 
 
@@ -245,7 +245,7 @@ class TestDuplicateTrade:
         create_platform(test_db, code="DP_PL4B")
         create_position_snapshot(
             test_db, "DP_P4", "CASH", "", SNAP,
-            cash_amount=10000, platform_code="DP_PL4B", asset_type="cash",
+            cash_amount=10000, platform_code="DP_PL4B",
         )
         self._etf_buy(test_db, "DP_P4", "DP_PL4A")
         test_db.flush()
