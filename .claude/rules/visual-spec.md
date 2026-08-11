@@ -5,7 +5,7 @@ paths:
 
 # 前端视觉规范（issue #127）
 
-所有 frontend 改动必须遵循 `@../docs/design/visual-spec.md`（完整规范，写 UI 前阅读）。要点：
+所有 frontend 改动必须遵循 `@../../docs/design/visual-spec.md`（完整规范，写 UI 前阅读）。要点：
 
 - **语义色彩 token**：用 `--color-gain/loss/success/warning/destructive` 及 `-soft` / `-foreground` 变体；禁止 `text-red-500` 等调色板裸类名（ESLint 已强制）。
 - **红绿专属涨跌**：`text-gain` / `text-loss` 只用于涨跌数值（经 `getReturnColorClass` / `getReturnBgClass`）；badge 状态色用 `success` / `warning` / `destructive` / `neutral` variant，永不用 gain/loss。
