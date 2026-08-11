@@ -66,9 +66,9 @@ export function DatePicker({
     : undefined
   const modifiersClassNames = hasCalendarData
     ? {
-        // 交易日：日期下方绿色小圆点（day 单元格自带 relative 定位）
+        // 交易日：日期下方小圆点（day 单元格自带 relative 定位；success 色 = 可用/正常态）
         tradingDay:
-          "after:absolute after:bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:rounded-full after:bg-green-500 after:pointer-events-none",
+          "after:absolute after:bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:rounded-full after:bg-success after:pointer-events-none",
         nonTradingDay: "text-muted-foreground/60",
       }
     : undefined
@@ -127,7 +127,7 @@ export function DatePicker({
         />
         {hasCalendarData && (
           <div className="flex items-center gap-1.5 border-t px-3 py-2 text-xs text-muted-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
             交易日
           </div>
         )}

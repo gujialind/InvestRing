@@ -9,8 +9,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { Position } from "@/types/position";
+import { ASSET_TYPE_COLORS } from "@/lib/colors";
 import {
-  ASSET_TYPE_COLORS,
   CATEGORY_ORDER,
   buildRowPercents,
   categoryOf,
@@ -143,15 +143,6 @@ interface AssetGroup {
   percent: number;
 }
 
-/** 子分组名目 chip 配色（加深 chip，跟随大类色系，对齐 V4 预览稿） */
-const CHIP_STYLES: Record<string, string> = {
-  股票: "bg-blue-100 text-blue-700",
-  债券: "bg-violet-100 text-violet-700",
-  黄金: "bg-amber-100 text-amber-700",
-  现金: "bg-slate-100 text-slate-600",
-  其他: "bg-slate-100 text-slate-600",
-};
-
 /**
  * 分区内按 asset_name 二级分组（issue #109）：
  * 组间按合计市值降序、未分类恒垫底；组内卡片按市值降序。
@@ -261,11 +252,12 @@ export default function PositionSections({ positions, action }: PositionSections
                         data-testid="asset-group-header"
                         className="mb-2 flex items-center justify-between px-0.5"
                       >
-                        <span
-                          className={`rounded px-2 py-0.5 text-xs font-semibold ${
-                            CHIP_STYLES[section.name] ?? CHIP_STYLES["其他"]
-                          }`}
-                        >
+                        {/* 名目 chip：neutral 底 + 大类色小圆点（#127，色点取 lib/colors 分类色） */}
+                        <span className="inline-flex items-center rounded bg-muted px-2 py-0.5 text-xs font-semibold text-foreground-secondary">
+                          <span
+                            className="mr-1.5 h-1.5 w-1.5 rounded-full"
+                            style={{ background: section.color }}
+                          />
                           {g.name}
                         </span>
                         {/* 名目 chip 行占比取整（同大类分区头口径） */}

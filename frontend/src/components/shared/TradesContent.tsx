@@ -34,7 +34,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatNumber, formatNav, formatMarketName, toDateOnly, parseDateOnly } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatNav, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { TRADE_DIRECTION_COLORS } from "@/lib/colors";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo } from "lucide-react";
 import Link from "next/link";
 import { ApiException } from "@/lib/api";
@@ -357,11 +359,14 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                     <TableCell>{formatMarketName(trade.market)}</TableCell>
                     <TableCell>{trade.platform_code || "-"}</TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        trade.trade_type === "buy" ? "bg-blue-100 text-blue-800" : "bg-orange-100 text-orange-800"
-                      }`}>
+                      {/* 方向标识无状态语义：neutral badge + 方向色圆点（lib/colors，#127） */}
+                      <Badge variant="neutral">
+                        <span
+                          className="mr-1.5 h-1.5 w-1.5 rounded-full"
+                          style={{ background: TRADE_DIRECTION_COLORS[trade.trade_type === "buy" ? "buy" : "sell"] }}
+                        />
                         {trade.trade_type === "buy" ? "买入" : "卖出"}
-                      </span>
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       {trade.amount ? formatCurrency(trade.amount) : formatNumber(trade.shares || 0)}
@@ -370,15 +375,9 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                     <TableCell>{trade.trade_date}</TableCell>
                     <TableCell>{trade.confirm_date || "-"}</TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        trade.status === "confirmed"
-                          ? "bg-green-100 text-green-800"
-                          : trade.status === "pending"
-                          ? "bg-yellow-100 text-yellow-800"
-                          : "bg-gray-100 text-gray-800"
-                      }`}>
+                      <Badge variant={getStatusBadgeVariant(trade.status)}>
                         {trade.status === "confirmed" ? "已确认" : trade.status === "pending" ? "待确认" : "已取消"}
-                      </span>
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       {trade.status === "pending" && (

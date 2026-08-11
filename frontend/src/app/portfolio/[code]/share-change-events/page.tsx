@@ -33,7 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatNumber, toDateOnly, parseDateOnly } from "@/lib/utils";
+import { formatCurrency, formatNumber, toDateOnly, parseDateOnly, getStatusBadgeVariant } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
 import { ShareChangeEventCreate, ApiException } from "@/lib/api";
@@ -69,10 +69,11 @@ const EVENT_TYPE_LABELS: Record<EventType, string> = {
   forced_adjustment: "强制调整",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  confirmed: "bg-green-100 text-green-800",
-  cancelled: "bg-gray-100 text-gray-800",
+// 状态徽标统一走 Badge variant 语义映射（#127，visual-spec §1.3）
+const STATUS_LABELS: Record<string, string> = {
+  pending: "待确认",
+  confirmed: "已确认",
+  cancelled: "已取消",
 };
 
 export default function ShareChangeEventsPage() {
@@ -411,8 +412,8 @@ export default function ShareChangeEventsPage() {
                           {event.cash_change ? formatCurrency(event.cash_change) : "--"}
                         </TableCell>
                         <TableCell>
-                          <Badge className={STATUS_COLORS[event.status] || ""}>
-                            {event.status === "pending" ? "待确认" : event.status === "confirmed" ? "已确认" : "已取消"}
+                          <Badge variant={getStatusBadgeVariant(event.status)}>
+                            {STATUS_LABELS[event.status] || event.status}
                           </Badge>
                         </TableCell>
                         <TableCell>
@@ -425,7 +426,7 @@ export default function ShareChangeEventsPage() {
                                   onClick={() => confirmEvent.mutate(event.id)}
                                   disabled={confirmEvent.isPending}
                                 >
-                                  <CheckCircle className="h-4 w-4 text-green-600" />
+                                  <CheckCircle className="h-4 w-4 text-success" />
                                 </Button>
                                 <Button
                                   size="sm"
@@ -433,7 +434,7 @@ export default function ShareChangeEventsPage() {
                                   onClick={() => cancelEvent.mutate(event.id)}
                                   disabled={cancelEvent.isPending}
                                 >
-                                  <XCircle className="h-4 w-4 text-red-600" />
+                                  <XCircle className="h-4 w-4 text-destructive" />
                                 </Button>
                               </>
                             )}

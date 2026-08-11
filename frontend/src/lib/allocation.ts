@@ -1,4 +1,5 @@
 import type { Position } from "@/types/position";
+import { ASSET_TYPE_COLORS } from "@/lib/colors";
 import { largestRemainderPercents } from "@/lib/utils";
 
 /**
@@ -12,15 +13,7 @@ import { largestRemainderPercents } from "@/lib/utils";
 
 export const IN_TRANSIT_CODES = new Set(["IN_TRANSIT_BUY", "IN_TRANSIT_SELL"]);
 
-/** 大类色板（对齐预览稿）：股票 blue / 债券 violet / 黄金 amber / 现金 slate-400 / 在途 slate-300 */
-export const ASSET_TYPE_COLORS: Record<string, string> = {
-  股票: "#3b82f6",
-  债券: "#8b5cf6",
-  黄金: "#f59e0b",
-  现金: "#94a3b8",
-  在途: "#cbd5e1",
-  其他: "#64748b",
-};
+/** 大类色板已迁至 @/lib/colors（issue #127：图表/分类色唯一来源，组件内禁止 hex 字面量） */
 
 /** 大类展示顺序 */
 export const CATEGORY_ORDER = ["股票", "债券", "黄金", "现金", "在途", "其他"];

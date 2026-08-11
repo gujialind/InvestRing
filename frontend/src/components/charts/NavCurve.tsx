@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
+import { CHART_OTHER, NAV_LINE } from "@/lib/colors";
 
 interface NavPoint {
   date: string;
@@ -51,14 +52,14 @@ export default function NavCurve({ data, height = 300, initialNav = 1.0 }: NavCu
         />
         <ReferenceLine
           y={initialNav}
-          stroke="#94a3b8"
+          stroke={CHART_OTHER}
           strokeDasharray="5 5"
           label={{ value: "初始净值", position: "right", fontSize: 12 }}
         />
         <Line
           type="monotone"
           dataKey="nav"
-          stroke="#3b82f6"
+          stroke={NAV_LINE}
           strokeWidth={2}
           dot={false}
           activeDot={{ r: 4 }}
