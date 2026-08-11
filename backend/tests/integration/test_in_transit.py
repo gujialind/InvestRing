@@ -105,7 +105,7 @@ def _setup_full_snapshot(db, portfolio_code, snapshot_date,
 def _gen_snapshot(client, headers, portfolio_code, target_date):
     """调用快照生成 API 并断言成功"""
     resp = client.post(
-        "/api/v1/snapshots/generate",
+        "/api/snapshots/generate",
         json={"portfolio_code": portfolio_code, "target_date": target_date.isoformat()},
         headers=headers,
     )

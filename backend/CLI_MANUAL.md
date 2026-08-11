@@ -960,7 +960,7 @@ ir snapshot delete-bulk <PORTFOLIO_CODE> <FROM_DATE> --dry-run   # 仅预览，�
 | `--yes` | false | 必传。不带 `--yes` 时拒绝执行（`CONFIRM_REQUIRED`） |
 | `--dry-run` | false | 仅预览将删除的快照日期列表，不执行删除（无需 `--yes`） |
 
-> **破坏性操作**：逐日 commit，不可中途回滚；建议先用 `--dry-run` 预览影响面。对应的 REST 端点 `DELETE /api/v1/snapshots/{portfolio_code}/bulk/{from_date}` 同样支持 `dry_run=true` Query 参数，且真删除时要求显式传 `confirm=true`，否则返回 422 `CONFIRM_REQUIRED`（兼作影响面预览）。
+> **破坏性操作**：逐日 commit，不可中途回滚；建议先用 `--dry-run` 预览影响面。对应的 REST 端点 `DELETE /api/snapshots/{portfolio_code}/bulk/{from_date}` 同样支持 `dry_run=true` Query 参数，且真删除时要求显式传 `confirm=true`，否则返回 422 `CONFIRM_REQUIRED`（兼作影响面预览）。
 
 ---
 

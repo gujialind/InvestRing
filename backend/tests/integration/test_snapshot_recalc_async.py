@@ -3,7 +3,7 @@
 # ============================================================================
 # - submit_snapshot_recalc_job：落 job / 同类型单 active 锁 / 与价格同步锁互不阻塞
 # - _run_snapshot_recalc_job_impl：成功 commit、errors 整体回滚、异常兜底的 job 终态
-# - REST POST /api/v1/snapshots/recalculate-async：提交 / 409 冲突 / 404 组合不存在
+# - REST POST /api/snapshots/recalculate-async：提交 / 409 冲突 / 404 组合不存在
 # ============================================================================
 
 import pytest
@@ -110,13 +110,13 @@ class TestRunImpl:
 
 
 class TestRestAsyncEndpoint:
-    """REST POST /api/v1/snapshots/recalculate-async"""
+    """REST POST /api/snapshots/recalculate-async"""
 
     def test_submit_returns_job_id(self, client, admin_headers, test_db):
         create_portfolio(test_db, code="RCA_P1", status="active")
         with _mock_executor():
             resp = client.post(
-                "/api/v1/snapshots/recalculate-async",
+                "/api/snapshots/recalculate-async",
                 json={"portfolio_code": "RCA_P1",
                       "start_date": "2025-01-06", "end_date": "2025-01-07"},
                 headers=admin_headers,
@@ -131,7 +131,7 @@ class TestRestAsyncEndpoint:
         create_portfolio(test_db, code="RCA_P2", status="active")
         create_sync_job(test_db, job_type="snapshot_recalc", status="running")
         resp = client.post(
-            "/api/v1/snapshots/recalculate-async",
+            "/api/snapshots/recalculate-async",
             json={"portfolio_code": "RCA_P2",
                   "start_date": "2025-01-06", "end_date": "2025-01-07"},
             headers=admin_headers,
@@ -141,7 +141,7 @@ class TestRestAsyncEndpoint:
 
     def test_portfolio_not_found_returns_404(self, client, admin_headers, test_db):
         resp = client.post(
-            "/api/v1/snapshots/recalculate-async",
+            "/api/snapshots/recalculate-async",
             json={"portfolio_code": "NO_SUCH_PORT",
                   "start_date": "2025-01-06", "end_date": "2025-01-07"},
             headers=admin_headers,

@@ -62,7 +62,7 @@ class TestGenerateNegativeCashWarning:
         )
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": self.NEXT_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -93,7 +93,7 @@ class TestGenerateNegativeCashWarning:
         _setup_cash_snapshot(test_db, port.code, self.D0, amount=1000.0)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": self.NEXT_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -125,7 +125,7 @@ class TestRecalculateNegativeCashWarning:
         )
 
         resp = client.post(
-            "/api/v1/snapshots/recalculate",
+            "/api/snapshots/recalculate",
             json={
                 "portfolio_code": port.code,
                 "start_date": self.D0.isoformat(),
@@ -167,7 +167,7 @@ class TestRecalculateNegativeCashWarning:
         _setup_cash_snapshot(test_db, port.code, self.D0, amount=1000.0)
 
         resp = client.post(
-            "/api/v1/snapshots/recalculate",
+            "/api/snapshots/recalculate",
             json={
                 "portfolio_code": port.code,
                 "start_date": self.D0.isoformat(),
@@ -210,7 +210,7 @@ class TestSnapshotStatusNegativeCash:
         )
 
         resp = client.get(
-            f"/api/v1/snapshots/portfolios/{port.code}/status",
+            f"/api/snapshots/portfolios/{port.code}/status",
             headers=admin_headers,
         )
         assert resp.status_code == 200
@@ -223,7 +223,7 @@ class TestSnapshotStatusNegativeCash:
         _setup_cash_snapshot(test_db, port.code, self.D0, amount=1000.0)
 
         resp = client.get(
-            f"/api/v1/snapshots/portfolios/{port.code}/status",
+            f"/api/snapshots/portfolios/{port.code}/status",
             headers=admin_headers,
         )
         assert resp.status_code == 200
@@ -234,7 +234,7 @@ class TestSnapshotStatusNegativeCash:
         port = create_portfolio(test_db, code="NEGC_ST_NONE", status="active")
 
         resp = client.get(
-            f"/api/v1/snapshots/portfolios/{port.code}/status",
+            f"/api/snapshots/portfolios/{port.code}/status",
             headers=admin_headers,
         )
         assert resp.status_code == 200

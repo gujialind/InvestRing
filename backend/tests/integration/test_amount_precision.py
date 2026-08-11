@@ -284,7 +284,7 @@ class TestSnapshotCashPrecision:
         # 顺延生成 T、T1 两日快照
         for target in (T, T1):
             resp = client.post(
-                "/api/v1/snapshots/generate",
+                "/api/snapshots/generate",
                 json={"portfolio_code": "AMT_P7", "target_date": target.isoformat()},
                 headers=admin_headers,
             )
