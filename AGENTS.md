@@ -164,7 +164,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 端点以 `backend/app/main.py` 注册为准；CLI 机读契约见 §6 `ir schema`。
 
-> 前缀例外（易踩坑）：`snapshots` 挂 `/api/v1`（`/api/v1/snapshots/...`）；`cash_transfers` 挂 `/api`（形如 `/api/portfolios/{code}/cash-transfer`）；日志/任务/通知/数据源均在 `/api/system/*`。
+> 前缀约定：所有资源挂 `/api/<资源名>`（如 `/api/snapshots/...`）；`cash_transfers` 作为 `portfolios` 子资源挂 `/api/portfolios/{code}/cash-transfer`；日志/任务/通知/数据源在 `/api/system/*` 二级命名空间。
 
 ### 4.3 核心服务
 

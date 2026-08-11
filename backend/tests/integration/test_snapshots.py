@@ -60,7 +60,7 @@ class TestSnapshotContinuity:
         _setup_cash_snapshot(test_db, port.code, self.D0)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": self.SKIP_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -80,7 +80,7 @@ class TestSnapshotContinuity:
         _setup_cash_snapshot(test_db, port.code, self.D0)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": self.NEXT_DAY.isoformat()},
             headers=admin_headers,
         )
@@ -97,7 +97,7 @@ class TestSnapshotContinuity:
         _setup_cash_snapshot(test_db, port.code, self.D0)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": self.D0.isoformat()},
             headers=admin_headers,
         )
@@ -111,7 +111,7 @@ class TestSnapshotContinuity:
         _setup_cash_snapshot(test_db, port.code, self.NEXT_DAY)
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": self.D0.isoformat()},
             headers=admin_headers,
         )
@@ -123,7 +123,7 @@ class TestSnapshotContinuity:
         port = self._portfolio(test_db, code="SNAP_FIRST")
 
         resp = client.post(
-            "/api/v1/snapshots/generate",
+            "/api/snapshots/generate",
             json={"portfolio_code": port.code, "target_date": self.D0.isoformat()},
             headers=admin_headers,
         )
@@ -137,7 +137,7 @@ class TestSnapshotContinuity:
         _setup_cash_snapshot(test_db, port.code, self.NEXT_DAY)
 
         resp = client.post(
-            "/api/v1/snapshots/recalculate",
+            "/api/snapshots/recalculate",
             json={
                 "portfolio_code": port.code,
                 "start_date": self.D0.isoformat(),
@@ -158,7 +158,7 @@ class TestSnapshotBulkDeleteGuard:
     def test_bulk_delete_without_confirm_rejected(self, client, admin_headers, active_portfolio):
         """不带 confirm 参数 → 422 CONFIRM_REQUIRED，不执行删除"""
         resp = client.delete(
-            f"/api/v1/snapshots/{active_portfolio.code}/bulk/2025-01-06",
+            f"/api/snapshots/{active_portfolio.code}/bulk/2025-01-06",
             headers=admin_headers,
         )
         assert resp.status_code == 422
@@ -168,7 +168,7 @@ class TestSnapshotBulkDeleteGuard:
     def test_bulk_delete_confirm_false_rejected(self, client, admin_headers, active_portfolio):
         """显式传 confirm=false 同样拒绝"""
         resp = client.delete(
-            f"/api/v1/snapshots/{active_portfolio.code}/bulk/2025-01-06",
+            f"/api/snapshots/{active_portfolio.code}/bulk/2025-01-06",
             params={"confirm": False},
             headers=admin_headers,
         )
@@ -178,7 +178,7 @@ class TestSnapshotBulkDeleteGuard:
     def test_bulk_delete_with_confirm_no_snapshots(self, client, admin_headers, active_portfolio):
         """带 confirm=true 且无快照 → 200，deleted_count == 0"""
         resp = client.delete(
-            f"/api/v1/snapshots/{active_portfolio.code}/bulk/2025-01-06",
+            f"/api/snapshots/{active_portfolio.code}/bulk/2025-01-06",
             params={"confirm": True},
             headers=admin_headers,
         )
@@ -190,7 +190,7 @@ class TestSnapshotBulkDeleteGuard:
     def test_bulk_delete_portfolio_not_found(self, client, admin_headers):
         """组合不存在 → 404"""
         resp = client.delete(
-            "/api/v1/snapshots/NO_SUCH_PORT/bulk/2025-01-06",
+            "/api/snapshots/NO_SUCH_PORT/bulk/2025-01-06",
             params={"confirm": True},
             headers=admin_headers,
         )
@@ -200,7 +200,7 @@ class TestSnapshotBulkDeleteGuard:
     def test_viewer_cannot_bulk_delete(self, client, viewer_headers, active_portfolio):
         """viewer 无权限 → 403"""
         resp = client.delete(
-            f"/api/v1/snapshots/{active_portfolio.code}/bulk/2025-01-06",
+            f"/api/snapshots/{active_portfolio.code}/bulk/2025-01-06",
             params={"confirm": True},
             headers=viewer_headers,
         )
@@ -240,7 +240,7 @@ class TestRecalculateAtomicity:
         ids_before = self._snapshot_ids(test_db, port.code)
 
         resp = client.post(
-            "/api/v1/snapshots/recalculate",
+            "/api/snapshots/recalculate",
             json={
                 "portfolio_code": port.code,
                 "start_date": self.D0.isoformat(),
@@ -278,7 +278,7 @@ class TestRecalculateAtomicity:
         assert len(ids_before) == 2
 
         resp = client.post(
-            "/api/v1/snapshots/recalculate",
+            "/api/snapshots/recalculate",
             json={
                 "portfolio_code": port.code,
                 "start_date": self.D0.isoformat(),
@@ -309,7 +309,7 @@ class TestRecalculateAtomicity:
         baseline_id = ids_before[0]
 
         resp = client.post(
-            "/api/v1/snapshots/recalculate",
+            "/api/snapshots/recalculate",
             json={
                 "portfolio_code": port.code,
                 "start_date": self.D0.isoformat(),
