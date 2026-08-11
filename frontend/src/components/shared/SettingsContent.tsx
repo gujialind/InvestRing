@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -252,7 +253,7 @@ export default function SettingsContent() {
               {syncResult && (
                 <div
                   className={`flex items-center gap-2 rounded-lg p-3 ${
-                    syncResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+                    syncResult.success ? "bg-success-soft text-success-foreground" : "bg-destructive-soft text-destructive-foreground"
                   }`}
                 >
                   {syncResult.success ? (
@@ -314,20 +315,16 @@ export default function SettingsContent() {
                             <TableCell>{getWeekDay(day.calendar_date)}</TableCell>
                             <TableCell>
                               {day.is_open ? (
-                                <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700">
-                                  是
-                                </span>
+                                <Badge variant="success">是</Badge>
                               ) : (
-                                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
-                                  否
-                                </span>
+                                <Badge variant="neutral">否</Badge>
                               )}
                             </TableCell>
                             <TableCell>
                               {day.is_open ? (
-                                <span className="text-green-600">交易日</span>
+                                <span className="text-success">交易日</span>
                               ) : (
-                                <span className="text-gray-500">节假日/周末</span>
+                                <span className="text-muted-foreground">节假日/周末</span>
                               )}
                             </TableCell>
                           </TableRow>

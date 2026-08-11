@@ -1,7 +1,8 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { formatCurrency, formatShares, formatReturnRate, getReturnColorClass } from "@/lib/utils";
+import { formatCurrency, formatShares, formatReturnRate, getReturnColorClass, getStatusBadgeVariant } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import DashboardStatsCards from "@/components/shared/DashboardStatsCards";
@@ -45,11 +46,11 @@ export default function MobileDashboardPage() {
 
       {/* Pending Transactions Alert */}
       {pendingSubscriptions.length > 0 && (
-        <Card className="bg-yellow-50 border-yellow-200">
+        <Card className="bg-warning-soft border-warning/30">
           <CardContent className="p-3">
             <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
-              <span className="text-sm font-medium text-yellow-800">
+              <div className="h-2 w-2 rounded-full bg-warning"></div>
+              <span className="text-sm font-medium text-warning-foreground">
                 {pendingSubscriptions.length} 笔待确认交易
               </span>
             </div>
@@ -104,15 +105,9 @@ export default function MobileDashboardPage() {
                     <div>
                       <p className="text-sm font-medium">
                         {sub.sub_type === "subscribe" ? "申购" : "赎回"}
-                        <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
-                          sub.status === "pending"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : sub.status === "confirmed"
-                            ? "bg-green-100 text-green-800"
-                            : "bg-gray-100 text-gray-800"
-                        }`}>
+                        <Badge className="ml-2" variant={getStatusBadgeVariant(sub.status)}>
                           {sub.status === "pending" ? "待确认" : sub.status === "confirmed" ? "已确认" : "已取消"}
-                        </span>
+                        </Badge>
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {sub.portfolio_code} | {sub.investor_code}

@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, getStatusBadgeVariant } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { useCashTransferList, useConfirmCashTransfer } from "@/hooks/useCashTransfer";
 
 interface CashTransferListDialogProps {
@@ -82,15 +83,9 @@ export default function CashTransferListDialog({
                     <TableCell className="text-right">{formatCurrency(t.amount)}</TableCell>
                     <TableCell>{t.cross_day ? "跨天到账" : "当天完成"}</TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        isPending
-                          ? "bg-yellow-100 text-yellow-800"
-                          : t.sell_status === "confirmed"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-gray-100 text-gray-800"
-                      }`}>
+                      <Badge variant={isPending ? "warning" : getStatusBadgeVariant(t.sell_status)}>
                         {isPending ? "在途" : t.sell_status === "confirmed" ? "已完成" : "已取消"}
-                      </span>
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       {isPending && (

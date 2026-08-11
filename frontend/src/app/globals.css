@@ -26,6 +26,25 @@
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
 
+  /* 语义色 token（issue #127，配色方案 v1；色值与决策见 docs/design/visual-spec.md） */
+  /* 涨跌：红涨绿跌，专属数值场景，只允许由 getReturnColorClass/getReturnBgClass 输出 */
+  --color-gain: hsl(var(--gain));
+  --color-gain-soft: hsl(var(--gain-soft));
+  --color-gain-foreground: hsl(var(--gain-foreground));
+  --color-loss: hsl(var(--loss));
+  --color-loss-soft: hsl(var(--loss-soft));
+  --color-loss-foreground: hsl(var(--loss-foreground));
+  /* 状态：success 兼品牌主色；cancelled/closed/draft/停用归 neutral（bg-muted） */
+  --color-success: hsl(var(--success));
+  --color-success-soft: hsl(var(--success-soft));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-soft: hsl(var(--warning-soft));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-destructive-soft: hsl(var(--destructive-soft));
+  /* 二级文字（表头、标签） */
+  --color-foreground-secondary: hsl(var(--foreground-secondary));
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -40,7 +59,8 @@
   --card-foreground: 222.2 84% 4.9%;
   --popover: 0 0% 100%;
   --popover-foreground: 222.2 84% 4.9%;
-  --primary: 222.2 47.4% 11.2%;
+  /* primary/ring = success 靛蓝（#2B5CD7，品牌主色，issue #127） */
+  --primary: 223 68% 51%;
   --primary-foreground: 210 40% 98%;
   --secondary: 210 40% 96.1%;
   --secondary-foreground: 222.2 47.4% 11.2%;
@@ -48,11 +68,28 @@
   --muted-foreground: 215.4 16.3% 46.9%;
   --accent: 210 40% 96.1%;
   --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
+  /* 异常红 = 绛红（#C22745，与涨红朱红双红分离）；destructive-foreground 为 soft 底上文字，
+     solid 危险按钮文字用纯白 text-white */
+  --destructive: 348 67% 46%;
+  --destructive-soft: 347 64% 95%;
+  --destructive-foreground: 347 69% 33%;
   --border: 214.3 31.8% 91.4%;
   --input: 214.3 31.8% 91.4%;
-  --ring: 222.2 84% 4.9%;
+  --ring: 223 68% 51%;
+  /* 涨跌（红涨绿跌）与状态色（配色方案 v1 §1） */
+  --gain: 5 69% 48%;
+  --gain-soft: 9 70% 95%;
+  --gain-foreground: 7 74% 36%;
+  --loss: 150 66% 27%;
+  --loss-soft: 125 32% 93%;
+  --loss-foreground: 150 72% 21%;
+  --success: 223 68% 51%;
+  --success-soft: 220 64% 95%;
+  --success-foreground: 223 72% 40%;
+  --warning: 38 88% 31%;
+  --warning-soft: 41 76% 94%;
+  --warning-foreground: 35 95% 25%;
+  --foreground-secondary: 217 14% 41%;
   --radius: 0.5rem;
 }
 
@@ -63,7 +100,7 @@
   --card-foreground: 210 40% 98%;
   --popover: 222.2 84% 4.9%;
   --popover-foreground: 210 40% 98%;
-  --primary: 210 40% 98%;
+  --primary: 221 79% 72%;
   --primary-foreground: 222.2 47.4% 11.2%;
   --secondary: 217.2 32.6% 17.5%;
   --secondary-foreground: 210 40% 98%;
@@ -71,11 +108,26 @@
   --muted-foreground: 215 20.2% 65.1%;
   --accent: 217.2 32.6% 17.5%;
   --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 210 40% 98%;
+  --destructive: 350 79% 68%;
+  --destructive-soft: 344 29% 20%;
+  --destructive-foreground: 349 75% 79%;
   --border: 217.2 32.6% 17.5%;
   --input: 217.2 32.6% 17.5%;
-  --ring: 212.7 26.8% 83.9%;
+  --ring: 221 79% 72%;
+  /* 语义色 dark 预案值（未启用、未实测，启用前须实测对比度，visual-spec §14） */
+  --gain: 8 83% 66%;
+  --gain-soft: 9 30% 18%;
+  --gain-foreground: 9 82% 78%;
+  --loss: 151 49% 49%;
+  --loss-soft: 154 32% 17%;
+  --loss-foreground: 150 49% 71%;
+  --success: 221 79% 72%;
+  --success-soft: 221 40% 22%;
+  --success-foreground: 220 80% 81%;
+  --warning: 38 75% 59%;
+  --warning-soft: 33 31% 18%;
+  --warning-foreground: 38 71% 73%;
+  --foreground-secondary: 221 22% 71%;
 }
 
 @layer base {
