@@ -34,7 +34,7 @@ def cleanup_old_logs(db: Session) -> dict:
     - 净值同步明细：保留 90 天
     - 系统错误日志：保留 30 天
 
-    不 commit（AGENTS.md §4.1），事务边界交调用方（router tasks / cli_context）。
+    不 commit（AGENTS.md §4.1），事务边界交调用方（router tasks）。
     """
     from app.models.login_log import LoginLog
     from app.models.audit_log import AuditLog

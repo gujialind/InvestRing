@@ -26,14 +26,9 @@ dependencies = [
     "tushare>=1.4.14",
     "lxml>=6.0.0",
     "simplejson>=4.1.0",
-    "typer>=0.9.0",
     "click>=8.0.0",
-    "tqdm>=4.60.0",
     "python-dotenv>=1.0.0",
 ]
-
-[project.scripts]
-ir = "cli.main:app"
 
 [project.optional-dependencies]
 dev = [
@@ -45,4 +40,4 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["cli*", "app*"]
+include = ["app*"]

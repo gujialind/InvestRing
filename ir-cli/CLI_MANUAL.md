@@ -1,49 +1,69 @@
-# InvestRing Admin CLI 使用说明书
+# InvestRing CLI 使用说明书
 
 ## 1. 概述
 
-`ir` 是 InvestRing 的 AI Agent 原生命令行工具，直接操作后端数据库服务层（不经过 HTTP 接口），所有输出为结构化 JSON，适合 AI agent 和脚本自动化调用。
+`ir` 是 InvestRing 的轻量 HTTP 客户端命令行工具，通过 REST API 调用运行中的后端服务，所有输出为结构化 JSON，适合 AI agent 和脚本自动化调用。
 
-**版本**：主管理员版（覆盖全部管理功能，不含普通投资者查询接口）
+**特点**：仅需 `typer` + `httpx` 两个依赖，可在任意设备上安装使用，不依赖后端代码库。
 
 ## 2. 安装与环境
 
 ### 2.1 安装
 
-```bash
-cd backend
-uv pip install --python ../.venv/bin/python -e .
-```
-
-安装后 `ir` 命令注册到虚拟环境的 `bin/` 目录下。
-
-### 2.2 运行方式
+**方式一：一键脚本（推荐）**
 
 ```bash
-# 方式一：通过虚拟环境路径直接调用
-/home/collyn/projects/InvestRing/.venv/bin/ir <command>
+# 从 GitHub 安装（默认）
+./ir-cli/install.sh
 
-# 方式二：激活虚拟环境后使用
-source /home/collyn/projects/InvestRing/.venv/bin/activate
-ir <command>
+# 从 Gitee 安装（国内设备）
+./ir-cli/install.sh --repo gitee
 
-# 方式三：开发模式（不安装，通过 PYTHONPATH 运行）
-cd backend
-PYTHONPATH=. /home/collyn/projects/InvestRing/.venv/bin/python -m typer cli.main run <command>
+# 指定分支 + 顺便配置服务端地址
+./ir-cli/install.sh --ref dev --base-url https://ir.example.com
+
+# curl 一键安装
+curl -LsSf https://raw.githubusercontent.com/gujialind/InvestRing/main/ir-cli/install.sh | bash -s -- --repo gitee --base-url https://ir.example.com
 ```
 
-### 2.3 运行前提
+**方式二：pip / uv 手动安装**
 
-- 必须在 `backend/` 目录下运行（CLI 依赖 `backend/.env` 中的数据库连接配置）
-- 虚拟环境中需安装：`typer`、`pymysql`、`sqlalchemy` 等依赖
-- `.env` 文件中需正确配置 `DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_NAME`
+```bash
+# uv（推荐）
+uv tool install "git+ssh://git@github.com/gujialind/InvestRing.git#subdirectory=ir-cli"
 
-### 2.4 获取帮助
+# pip
+pip install "git+ssh://git@github.com/gujialind/InvestRing.git#subdirectory=ir-cli"
+```
+
+安装后 `ir` 命令注册到 PATH 中。升级 = 重跑安装脚本（`--force --reinstall`）。
+
+### 2.2 运行前提
+
+- 后端服务已启动且可访问（默认地址 `http://localhost:8000`）
+- 已通过 `ir auth login` 登录获取 token（token 存储在 `~/.ir/token.json`，权限 0600）
+- 服务端地址可通过以下方式配置（优先级从高到低）：
+  - 环境变量 `IR_BASE_URL`
+  - `~/.ir/config` 文件中的 `base_url=` 行
+  - 默认 `http://localhost:8000`
+
+```bash
+# 配置服务端地址
+ir config set base_url https://ir.example.com
+
+# 或通过环境变量
+export IR_BASE_URL=https://ir.example.com
+```
+
+### 2.3 获取帮助
 
 ```bash
 ir --help                    # 查看所有命令组
 ir portfolio --help          # 查看命令组下的子命令
 ir portfolio create --help   # 查看具体命令的参数帮助
+ir schema                    # 一次性输出全 CLI 机读 JSON 结构
+ir schema --index            # 极简命令索引
+ir schema trade              # 仅输出指定命令组
 ```
 
 ## 3. 输出格式
@@ -60,15 +80,17 @@ ir portfolio create --help   # 查看具体命令的参数帮助
 
 - `data`：主要数据，可以是对象或数组
 - `meta`：分页元数据（仅列表命令返回），包含 `total`（总数）、`page`（当前页）、`page_size`（每页大小）
+- `hints`：可选的顶层提示数组（如 create 返回 pending 时提示 confirm）
 
-### 3.2 错误响应（exit code 1）
+### 3.2 错误响应（exit code 1=业务错误 / 2=认证错误 / 3=连接错误）
 
 ```json
 {
   "ok": false,
   "error": {
     "code": "NOT_FOUND",
-    "message": "组合 PORT999 不存在"
+    "message": "组合 PORT999 不存在",
+    "hints": ["下一步补救命令"]
   }
 }
 ```
@@ -94,23 +116,31 @@ ir portfolio create --help   # 查看具体命令的参数帮助
 | `PORTFOLIO_NOT_ACTIVE` | 组合未激活 |
 | `INVESTOR_HAS_SHARES` | 投资人仍持有份额，不可删除 |
 | `DATA_SOURCE_ERROR` | 外部数据源同步失败 |
+| `CASH_TRADE_FORBIDDEN` | 禁止直接创建 CASH 产品交易 |
+| `CANNOT_CANCEL_EXCHANGE` | 场内交易不可取消 |
+| `SNAPSHOT_DEPENDENCY` | 快照已依赖该记录，无法取消确认 |
+| `SNAPSHOT_NOT_CONTINUOUS` | 快照日期不连续 |
+| `CONFIRM_REQUIRED` | 需要显式确认（如 `--yes`） |
+| `AUTH_REQUIRED` | 未登录或 token 已过期 |
 | `INTERNAL_ERROR` | 系统内部错误 |
 
 ### 3.4 数据类型说明
 
 - **日期参数**：所有日期参数使用 `YYYY-MM-DD` 格式字符串，如 `--apply-date 2025-01-06`
-- **金额/份额**：使用浮点数输入，内部以 Decimal 运算；金额输出保留 4 位小数，份额统一 2 位小数（ROUND_HALF_UP，四舍五入）
+- **金额/份额**：使用浮点数输入，内部以 Decimal 运算；金额输出保留 2 位小数，份额统一 2 位小数（ROUND_HALF_UP，四舍五入）
 - **ID 参数**：数值型主键，直接作为位置参数传入
 
-### 3.5 AI Agent 友好特性（仅 ir-cli HTTP 版）
+### 3.5 AI Agent 友好特性
 
-以下特性仅在 `ir-cli`（HTTP 客户端版）提供，用于降低 AI agent 的学习成本与 token 消耗：
+以下特性用于降低 AI agent 的学习成本与 token 消耗：
 
 - **`ir schema [命令组]`**：一次性输出全 CLI 机读 JSON 结构，含命令树/参数/枚举取值/错误码补救指引/端到端业务配方（workflows）/输出协议，替代逐个 `--help` 探索；传命令组名（如 `ir schema trade`）仅输出单组。
 - **`ir portfolio context <code>`**：操作前侦察聚合命令，一次返回组合详情/快照状态/实时可用现金/pending 申赎交易，替代 4-5 次分步查询。
 - **`hints` 字段**：错误响应按错误码自动附加 `error.hints`（下一步补救命令，如 `SNAPSHOT_DEPENDENCY` → 先 `ir snapshot delete-bulk`）；关键写操作成功后输出顶层 `hints`（如 create 返回 pending 时提示 confirm、confirm 后提示生成快照）。映射表见 `ir_cli/hints.py`。
 - **摘要字段默认输出**：`trade list` / `sub list` / `position list` / `log login|audit|error` 默认仅输出摘要字段（见 `ir_cli/utils.py::SUMMARY_FIELDS`），`--full` 输出全字段；优先级：显式 `--fields` > `--full` > 摘要预设。
 - **`--quiet`**：`trade` / `sub` 的 create/confirm/cancel/unconfirm 仅输出 `{id, status, confirm_date}`。
+- **`--json`**：所有 create/update 命令支持 `--json` 传完整 JSON 请求体，优先于逐项参数，适合复杂请求。
+- **`--all`**：列表命令自动翻页获取全部记录。
 - **plain help**：全部 `--help` 为无框线/无 ANSI 的纯文本输出，顶层 `ir --help` 含输出协议与退出码速览。
 
 ## 4. 命令详解
@@ -119,24 +149,48 @@ ir portfolio create --help   # 查看具体命令的参数帮助
 
 ### 4.1 `ir auth` — 认证管理
 
-#### `ir auth create-admin`
+#### `ir auth login`
 
-创建管理员账户。
+登录获取 token（存储到 `~/.ir/token.json`）。
 
 ```bash
-ir auth create-admin --code <管理员代码> --name <姓名> --password <密码>
+ir auth login --code <用户代码> --password <密码>
 ```
 
 | 参数 | 必填 | 说明 |
 |------|:----:|------|
-| `--code` | 是 | 管理员代码（唯一标识） |
-| `--name` | 是 | 管理员姓名 |
-| `--password` | 是 | 登录密码（存储时自动哈希） |
+| `--code` | 是 | 用户代码（管理员或投资人） |
+| `--password` | 是 | 登录密码 |
 
-**示例：**
+> 登录成功后 token 自动存储，后续命令自动携带。token 过期前 24 小时会在 stderr 打印警告。
+
+#### `ir auth logout`
+
+登出并清理本地 token。
+
 ```bash
-ir auth create-admin --code ADMIN --name "系统管理员" --password "secure123"
+ir auth logout
 ```
+
+#### `ir auth change-password`
+
+修改密码。
+
+```bash
+ir auth change-password --old-password <旧密码> --new-password <新密码>
+```
+
+> 修改密码后服务端会使旧 token 失效，需重新登录。
+
+#### `ir auth status`
+
+显示当前用户和 token 状态（本地操作，不请求服务端）。
+
+```bash
+ir auth status
+```
+
+> 未登录时返回 `AUTH_REQUIRED`（exit code 2）。
 
 ---
 
@@ -310,6 +364,14 @@ ir portfolio cash-flow <CODE>
 
 返回数据包含：`total_inflow`（总申购金额）、`total_outflow`（总赎回金额）、`net_inflow`（净流入）。
 
+#### `ir portfolio context`
+
+操作前侦察聚合命令，一次返回组合详情/快照状态/实时可用现金/pending 申赎交易。
+
+```bash
+ir portfolio context <CODE>
+```
+
 ---
 
 ### 4.4 `ir position` — 持仓管理
@@ -335,8 +397,6 @@ ir position list --portfolio-code <组合代码> [--snapshot-date YYYY-MM-DD] [-
 ir position available-cash --portfolio-code <组合代码>
 ```
 
-> 旧版位置参数写法 `ir position available-cash <PORTFOLIO_CODE>` 仍兼容但已弃用，请改用 `--portfolio-code`。
-
 #### `ir position available-shares`
 
 查看产品可用份额（实时计算）。
@@ -345,11 +405,9 @@ ir position available-cash --portfolio-code <组合代码>
 ir position available-shares --portfolio-code <组合代码> --product-code <产品代码> [--market <市场>]
 ```
 
-> 旧版位置参数写法 `ir position available-shares <PORTFOLIO_CODE> <PRODUCT_CODE>` 仍兼容但已弃用，请改用 option 风格。
-
 #### `ir position update-cash`
 
-更新非净值类现金市值：写入 `manual_market_value`（绝对替换），**不直接写快照表 `portfolio_position`**；写入后需重新生成快照方能反映到持仓（响应含 `requires_snapshot_regen: true`）。与 REST `POST /api/positions/portfolio/{code}/cash-position` 共用同一 service。
+更新非净值类现金市值：写入 `manual_market_value`（绝对替换），**不直接写快照表 `portfolio_position`**；写入后需重新生成快照方能反映到持仓（响应含 `requires_snapshot_regen: true`）。
 
 ```bash
 ir position update-cash <PORTFOLIO_CODE> --platform-code <平台代码> --cash-amount <金额> [--update-date YYYY-MM-DD]
@@ -513,7 +571,7 @@ ir trade get <ID>
 
 #### `ir trade preview`
 
-确认前预览：返回真实确认将写入的净值/份额/金额，不落库（与 `confirm` 共用同一计算实现，预览 == 真实确认）。两套 CLI（管理 CLI 与 ir-cli）均提供本命令。
+确认前预览：返回真实确认将写入的净值/份额/金额，不落库（与 `confirm` 共用同一计算实现，预览 == 真实确认）。
 
 ```bash
 ir trade preview <ID> [--confirm-date YYYY-MM-DD] [--price <价格>]
@@ -536,7 +594,7 @@ ir trade confirm <ID> [--confirm-date YYYY-MM-DD] [--price <价格>] [--sync-nav
 > **业务规则**：
 > - 仅 `pending` 状态可确认
 > - 确认日期根据产品的 `confirm_days` 自动计算（普通基金 T+1，QDII T+2）
-> - 场外净值类产品（OEF/LOF + CN_OTC）自动从 `PriceRecord` 获取净值
+> - 场外净值型产品（OEF/LOF + CN_OTC）自动从 `PriceRecord` 获取净值
 > - **QDII 产品**：使用交易日当天的净值（需 T+2 日后确认）
 > - 可通过 `--price` 手动覆盖价格
 > - `--sync-nav`（issue #90）：命中 `MISSING_NAV` 时自动回填该标的历史净值后重试一次（会访问外部数据源），同步后仍缺失则照常报 `MISSING_NAV`
@@ -875,12 +933,12 @@ ir snapshot generate --portfolio-code <组合> --target-date YYYY-MM-DD
 
 #### `ir snapshot recalculate`
 
-区间重算快照。大区间重算耗时长，ir-cli（HTTP）建议加 `--async` 提交后台任务，避免客户端超时后无法判定终态（issue #89）；管理 CLI 直连数据库无超时问题，保持同步。
+区间重算快照。大区间重算耗时长，建议加 `--async` 提交后台任务，避免客户端超时后无法判定终态（issue #89）。
 
 ```bash
 ir snapshot recalculate --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--portfolio-code <组合>] [--force]
 
-# ir-cli 异步模式（issue #89）
+# 异步模式（issue #89）
 ir snapshot recalculate --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--portfolio-code <组合>] --async
 ir snapshot recalculate ... --wait [--poll-interval 5]   # 提交后轮询至终态再返回
 ```
@@ -891,8 +949,8 @@ ir snapshot recalculate ... --wait [--poll-interval 5]   # 提交后轮询至终
 | `--start-date` | 起始日期（必填） |
 | `--end-date` | 截止日期（必填） |
 | `--force` | 跳过校验强制重算 |
-| `--async` | （仅 ir-cli）提交后台任务立即返回 job_id，用 `ir sync-job status <id>` 轮询终态（success=已提交 / failed=已整体回滚） |
-| `--wait` | （仅 ir-cli）隐含 `--async`，提交后轮询至终态再返回；每次轮询都是短请求，不受长事务超时影响 |
+| `--async` | 提交后台任务立即返回 job_id，用 `ir sync-job status <id>` 轮询终态（success=已提交 / failed=已整体回滚） |
+| `--wait` | 隐含 `--async`，提交后轮询至终态再返回；每次轮询都是短请求，不受长事务超时影响 |
 
 > 异步模式事务语义与同步一致：后台按 errors 统一 commit/rollback，对外仍是「要么完整成功，要么无变化」；已有重算任务在跑时返回 409 `RECALC_JOB_CONFLICT`。
 
@@ -1121,13 +1179,165 @@ ir task logs <CODE> [--page N] [--page-size N]
 
 ---
 
+### 4.15 `ir cash-transfer` — 现金转移管理
+
+管理平台间现金转移，复用 `trade` 表，一次转移生成两条 CASH 腿（sell + buy）。
+
+#### `ir cash-transfer create`
+
+创建平台间现金转移。
+
+```bash
+ir cash-transfer create --portfolio-code <组合> --from <转出平台> --to <转入平台> \
+  --amount <金额> --date YYYY-MM-DD [--cross-day] [--notes <备注>] [--json <完整JSON>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `--portfolio-code` | 是 | 组合代码 |
+| `--from` | 是 | 转出平台代码 |
+| `--to` | 是 | 转入平台代码 |
+| `--amount` | 是 | 转移金额 |
+| `--date` | 是 | 转出日期（YYYY-MM-DD，必须是交易日） |
+| `--cross-day` | 否 | 是否跨天到账（默认 false，当天完成） |
+| `--notes` | 否 | 备注 |
+| `--json` | 否 | 完整 JSON 请求体，优先于逐项参数 |
+
+> - **当天完成**（`cross_day=False`）：两腿立即 confirmed
+> - **跨天到账**（`cross_day=True`）：转出方当日 confirmed，转入方 pending 待次日确认
+
+#### `ir cash-transfer list`
+
+查询现金转移记录。
+
+```bash
+ir cash-transfer list --portfolio-code <组合> [--page N] [--page-size N] [--all]
+```
+
+#### `ir cash-transfer confirm`
+
+确认跨天转移的转入腿。
+
+```bash
+ir cash-transfer confirm --portfolio-code <组合> --group <transfer_group>
+```
+
+---
+
+### 4.16 `ir sync-job` — 同步任务管理
+
+查询异步同步任务状态（如快照重算后台任务）。
+
+#### `ir sync-job status`
+
+查询同步任务状态。
+
+```bash
+ir sync-job status <JOB_ID>
+```
+
+#### `ir sync-job details`
+
+查询同步任务逐产品明细。
+
+```bash
+ir sync-job details <JOB_ID>
+```
+
+---
+
+### 4.17 `ir notification` — 通知管理
+
+#### `ir notification list`
+
+获取通知列表。
+
+```bash
+ir notification list [--status <状态>] [--page N] [--page-size N] [--all] [--fields <字段>]
+```
+
+| 参数 | 说明 |
+|------|------|
+| `--status` | 状态筛选：`pending` / `read` |
+
+#### `ir notification read`
+
+标记通知为已读。
+
+```bash
+ir notification read <ID>
+```
+
+#### `ir notification read-all`
+
+标记全部通知为已读。
+
+```bash
+ir notification read-all
+```
+
+---
+
+### 4.18 `ir config` — 本地配置管理
+
+纯本地操作，读写 `~/.ir/config` 文件。
+
+#### `ir config set`
+
+写入配置项。
+
+```bash
+ir config set base_url https://ir.example.com
+```
+
+| 配置键 | 说明 |
+|--------|------|
+| `base_url` | 服务端地址（优先级低于 `IR_BASE_URL` 环境变量） |
+
+#### `ir config show`
+
+显示当前生效配置（含环境变量覆盖后的实际值）。
+
+```bash
+ir config show
+```
+
+---
+
+### 4.19 `ir schema` — CLI 机读结构
+
+输出全 CLI 机读 JSON 结构，供 AI agent 一次性了解全部指令。
+
+```bash
+# 全量输出
+ir schema
+
+# 极简命令索引（<1KB）
+ir schema --index
+
+# 仅输出指定命令组
+ir schema trade
+```
+
+| 参数 | 说明 |
+|------|------|
+| `group` | 命令组名（可选，如 `trade`） |
+| `--index` | 仅输出极简命令索引，与命令组参数互斥 |
+
+> 输出包含：命令树/参数/枚举取值/错误码补救指引/端到端业务配方（workflows）/输出协议/响应字段契约。响应字段契约由 `ir-cli/scripts/gen_response_fields.py` 从 `backend/openapi.json` 生成，CI 做一致性校验。
+
+---
+
 ## 5. 典型业务流程
 
 ### 5.1 从零开始创建组合并完成首笔交易
 
 ```bash
-# 1. 创建管理员（首次使用）
-ir auth create-admin --code ADMIN --name "管理员" --password "pass123"
+# 0. 配置服务端地址（首次使用）
+ir config set base_url http://localhost:8000
+
+# 1. 登录（管理员账户需通过 REST API 或初始化脚本创建）
+ir auth login --code ADMIN --password "pass123"
 
 # 2. 创建投资人
 ir investor create --code INV001 --name "张三" --password "pass123"
@@ -1167,8 +1377,8 @@ ir portfolio returns PORT001
 # 1. 创建现金分红事件
 ir share-event create --portfolio-code PORT001 --product-code 000051.OF --market CN_OTC \
   --event-type cash_dividend \
-  --event-date 2025-06-15 --entitlement-date 2025-06-13 \
-  --div-cash 500 --entitlement-shares 33333.3333
+  --ex-date 2025-06-15 --entitlement-date 2025-06-13 \
+  --div-cash 500 --entitlement-shares 33333.33
 
 # 2. 生成权益登记日的快照（如果还没有）
 ir snapshot generate --portfolio-code PORT001 --target-date 2025-06-13
@@ -1203,13 +1413,15 @@ AI agent 可通过 shell 命令直接调用，解析 JSON 输出获取结果：
 import subprocess, json
 
 result = subprocess.run(
-    ["/path/to/.venv/bin/ir", "portfolio", "list", "--status", "active"],
-    capture_output=True, text=True, cwd="/path/to/backend"
+    ["ir", "portfolio", "list", "--status", "active"],
+    capture_output=True, text=True
 )
 data = json.loads(result.stdout)
 if data["ok"]:
     portfolios = data["data"]
 ```
+
+> 诊断信息输出至 stderr，脚本/Agent 解析请只读取 stdout。
 
 ### 6.2 错误处理
 
@@ -1223,6 +1435,8 @@ if [ $exit_code -ne 0 ]; then
     # 处理错误
 fi
 ```
+
+**退出码：** 0=成功 / 1=业务错误(可换参重试) / 2=认证错误(需 `ir auth login`) / 3=连接/超时
 
 ### 6.3 链式操作
 
@@ -1238,6 +1452,19 @@ for code in $(ir portfolio list --status active --all 2>/dev/null | jq -r '.data
 done
 ```
 
+### 6.4 使用 `ir schema` 快速了解全部指令
+
+```bash
+# 先拿极简索引
+ir schema --index
+
+# 按需加载某个命令组的完整结构
+ir schema trade
+
+# 一次性获取全部（输出较大）
+ir schema
+```
+
 ## 7. 注意事项
 
 1. **交易日历依赖**：申购、赎回、交易、份额变动事件的日期必须是交易日。请先确保已通过 `ir system calendar-sync` 同步了当年的交易日历。
@@ -1250,6 +1477,6 @@ done
 
 5. **QDII 产品**：QDII 产品的净值延迟一天（T+2 确认），确认交易时需确保净值已同步。
 
-6. **数据精度**：内部使用 Python `Decimal` 进行运算，输出时金额保留 2 位小数，份额和净值保留 4 位小数。
+6. **数据精度**：内部使用 Python `Decimal` 进行运算，输出时金额保留 2 位小数，份额统一 2 位小数，净值保留 4 位小数。
 
-7. **运行目录**：建议在 `backend/` 目录下执行 CLI 命令，确保 `.env` 配置文件能被正确读取。
+7. **认证与 token**：登录后 token 存储在 `~/.ir/token.json`（权限 0600），过期前 24 小时会在 stderr 打印警告。token 过期后需重新 `ir auth login`。修改密码后旧 token 会失效。
