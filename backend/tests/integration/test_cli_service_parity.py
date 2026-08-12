@@ -141,7 +141,8 @@ class TestProductConfirmDaysParity:
         result = runner.invoke(products_app, [
             "create", "--code", "PAR_OTC.OF", "--market", "CN_OTC",
             "--name", "场外非QDII", "--product-type", "OEF",
-            "--asset-class-code", "STOCK_CN_LARGE",
+            "--asset-class-code", "ASSET_STOCK",
+            "--region-code", "REGION_CN", "--style-code", "STYLE_BALANCED", "--size-code", "SIZE_LARGE",
         ])
         assert result.exit_code == 0, result.output
         payload = _parse(result.output)
@@ -151,7 +152,8 @@ class TestProductConfirmDaysParity:
         result = runner.invoke(products_app, [
             "create", "--code", "PAR_EXC.SH", "--market", "CN_EXCHANGE",
             "--name", "场内", "--product-type", "ETF",
-            "--asset-class-code", "STOCK_CN_LARGE",
+            "--asset-class-code", "ASSET_STOCK",
+            "--region-code", "REGION_CN", "--style-code", "STYLE_BALANCED", "--size-code", "SIZE_LARGE",
         ])
         assert result.exit_code == 0, result.output
         payload = _parse(result.output)
@@ -161,7 +163,8 @@ class TestProductConfirmDaysParity:
         result = runner.invoke(products_app, [
             "create", "--code", "PQD.OF", "--market", "CN_OTC",
             "--name", "场外QDII", "--product-type", "OEF",
-            "--asset-class-code", "STOCK_CN_LARGE", "--is-qdii",
+            "--asset-class-code", "ASSET_STOCK",
+            "--region-code", "REGION_CN", "--style-code", "STYLE_BALANCED", "--size-code", "SIZE_LARGE", "--is-qdii",
         ])
         assert result.exit_code == 0, result.output
         payload = _parse(result.output)
@@ -171,7 +174,8 @@ class TestProductConfirmDaysParity:
         resp = client.post(
             "/api/products",
             json={"code": "POTCR.OF", "market": "CN_OTC", "name": "场外非QDII",
-                  "product_type": "OEF", "asset_class_code": "STOCK_CN_LARGE",
+                  "product_type": "OEF", "asset_class_code": "ASSET_STOCK",
+                  "region_code": "REGION_CN", "style_code": "STYLE_BALANCED", "size_code": "SIZE_LARGE",
                   "is_qdii": False},
             headers=admin_headers,
         )

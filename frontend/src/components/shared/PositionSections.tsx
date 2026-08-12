@@ -9,17 +9,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { Position } from "@/types/position";
-import { ASSET_TYPE_COLORS } from "@/lib/colors";
+import type { AssetClassificationItem } from "@/types/asset-classification";
+import { assetClassColor, IN_TRANSIT_COLOR, OTHER_COLOR } from "@/lib/colors";
 import {
-  CATEGORY_ORDER,
+  PSEUDO_IN_TRANSIT_CODE,
+  PSEUDO_OTHER_CODE,
   buildRowPercents,
-  categoryOf,
+  categoryCodeOf,
   positionAmount,
 } from "@/lib/allocation";
 import { formatNumber, getReturnColorClass } from "@/lib/utils";
 
 interface PositionSectionsProps {
   positions: Position[];
+  /** asset_class 维度字典（分区顺序/颜色/二级分组维度由此驱动，issue #128） */
+  assetClasses: AssetClassificationItem[];
   /** 分区头右侧操作位（如桌面端「管理持仓」按钮） */
   action?: ReactNode;
 }
@@ -31,7 +35,7 @@ function formatProfit(value: number | null | undefined): string {
 }
 
 /** 单个持仓行卡片（白底 + slate-200 边框 + 8px 圆角，#109 V4 定稿）
- * row1=产品全称（15px/600；名目统一由上方 chip 承载，卡片不再出现 asset_name）
+ * row1=产品全称（15px/600；名目统一由上方 chip 承载，卡片不再出现维度名）
  * row2=平台徽标 + 产品代码
  * row3 三列：持仓金额(占比置于数字行下方) | 累计收益 | 最新收益(日期置于数字行下方) */
 function PositionCard({
@@ -122,19 +126,31 @@ function PositionCard({
 }
 
 /**
- * 分类持仓分区（issue #99，双端复用）：
- * 按资产大类分组（股票/债券/黄金/现金），IN_TRANSIT 在途行抽出为独立
- * 「在途资金」卡片（仅金额+占比，无收益列）。占比全部来自行级最大余数法，
- * 分区头 = 行占比加总，与饼图图例严格自洽。
+ * 分类持仓分区（issue #99，双端复用；#128 维度化）：
+ * 按资产大类分组（分区顺序/颜色由 asset_class 字典 sort_order 驱动），
+ * IN_TRANSIT 在途行抽出为独立「在途资金」卡片（仅金额+占比，无收益列）。
+ * 占比全部来自行级最大余数法，分区头 = 行占比加总，与饼图图例严格自洽。
  *
- * asset_name 二级聚合（issue #109，V4 定稿，#114 修正）：分区内按 asset_name
- * 子分组，名目 chip 始终位于产品名之上（与大类同名如现金/黄金时不渲染 chip、
+ * 维度二级分组（承 #109 V4 定稿 + #114 修正，#128 起数据源从 asset_name
+ * 换成维度 name）：分区内按维度值子分组（股票→region、债券/商品→segment、
+ * 现金平铺），分组 chip 始终位于产品名之上（与大类同名时不渲染 chip、
  * 卡片平铺），chip 行右侧恒显示市值合计 + 占比合计（无论名下 1 行还是多行，
  * 保证同分区内各 chip 展示口径一致，#114）；chip 组内卡片缩进渲染并带左侧
  * 引导线（空间嵌套）。
  */
 
 type Row = { position: Position; percent: number };
+
+/** 二级分组维度（本期按大类固定；组合级 display_config 配置归后续 issue） */
+type SubDimension = "region" | "style" | "size" | "segment";
+
+/** 大类 → 二级分组维度默认（issue #128）：股票→地域、债券/商品→细分、现金平铺 */
+const SUB_DIM_BY_CLASS: Record<string, SubDimension | null> = {
+  ASSET_STOCK: "region",
+  ASSET_BOND: "segment",
+  ASSET_COMMODITY: "segment",
+  ASSET_CASH: null,
+};
 
 interface AssetGroup {
   name: string;
@@ -144,13 +160,19 @@ interface AssetGroup {
 }
 
 /**
- * 分区内按 asset_name 二级分组（issue #109）：
+ * 分区内按维度 name 二级分组（#128，维度名做参数不写死）：
+ * dim=null 时平铺（单组、组名=大类名，与大类同名不渲染 chip）；
  * 组间按合计市值降序、未分类恒垫底；组内卡片按市值降序。
  */
-function groupRowsByAssetName(rows: Row[]): AssetGroup[] {
+function groupRowsByDimension(
+  rows: Row[],
+  dim: SubDimension | null,
+  fallbackName: string
+): AssetGroup[] {
+  const nameKey = dim ? (`${dim}_name` as const) : null;
   const byName = new Map<string, Row[]>();
   for (const r of rows) {
-    const name = r.position.asset_name ?? "未分类";
+    const name = nameKey ? r.position[nameKey] ?? "未分类" : fallbackName;
     const arr = byName.get(name) ?? [];
     arr.push(r);
     byName.set(name, arr);
@@ -174,7 +196,7 @@ function groupRowsByAssetName(rows: Row[]): AssetGroup[] {
   return groups;
 }
 
-export default function PositionSections({ positions, action }: PositionSectionsProps) {
+export default function PositionSections({ positions, assetClasses, action }: PositionSectionsProps) {
   if (!positions.length) {
     return (
       <div className="py-8 text-center text-muted-foreground">暂无持仓记录</div>
@@ -184,20 +206,41 @@ export default function PositionSections({ positions, action }: PositionSections
   const rowPercents = buildRowPercents(positions);
   const rows = positions.map((p, i) => ({ position: p, percent: rowPercents[i] }));
 
-  const inTransitRows = rows.filter((r) => categoryOf(r.position) === "在途");
-  const normalRows = rows.filter((r) => categoryOf(r.position) !== "在途");
+  const inTransitRows = rows.filter(
+    (r) => categoryCodeOf(r.position) === PSEUDO_IN_TRANSIT_CODE
+  );
+  const normalRows = rows.filter(
+    (r) => categoryCodeOf(r.position) !== PSEUDO_IN_TRANSIT_CODE
+  );
 
-  const sections: { name: string; color: string; rows: typeof rows }[] = [];
-  for (const name of CATEGORY_ORDER) {
-    if (name === "在途") continue;
-    const sectionRows = normalRows.filter((r) => categoryOf(r.position) === name);
+  // 分区顺序/颜色/二级分组维度全部由 asset_class 字典驱动（sort_order 排序）
+  const knownCodes = new Set(assetClasses.map((a) => a.code));
+  const sections: {
+    name: string;
+    color: string;
+    subDim: SubDimension | null;
+    rows: Row[];
+  }[] = [];
+  for (const ac of [...assetClasses].sort((a, b) => a.sort_order - b.sort_order)) {
+    const sectionRows = normalRows.filter(
+      (r) => categoryCodeOf(r.position) === ac.code
+    );
     if (sectionRows.length) {
       sections.push({
-        name,
-        color: ASSET_TYPE_COLORS[name] ?? ASSET_TYPE_COLORS["其他"],
+        name: ac.name,
+        color: assetClassColor(ac.sort_order),
+        subDim: SUB_DIM_BY_CLASS[ac.code] ?? null,
         rows: sectionRows,
       });
     }
+  }
+  // 「其他」兜底分区：派生缺失或字典未收录的行（固定垫底，平铺不分组）
+  const otherRows = normalRows.filter((r) => {
+    const c = categoryCodeOf(r.position);
+    return c === PSEUDO_OTHER_CODE || !knownCodes.has(c);
+  });
+  if (otherRows.length) {
+    sections.push({ name: "其他", color: OTHER_COLOR, subDim: null, rows: otherRows });
   }
 
   const inTransitTotal = inTransitRows.reduce(
@@ -241,9 +284,9 @@ export default function PositionSections({ positions, action }: PositionSections
               </span>
             </div>
             <div className="space-y-3">
-              {groupRowsByAssetName(section.rows).map((g) => {
-                // V4 定稿 + #114 修正：名目 chip 始终位于产品名之上，仅名目与
-                // 大类同名（现金/黄金）时不渲染 chip、卡片平铺；chip 行合计恒显示
+              {groupRowsByDimension(section.rows, section.subDim, section.name).map((g) => {
+                // V4 定稿 + #114 修正：分组 chip 始终位于产品名之上，仅组名与
+                // 大类同名（平铺组）时不渲染 chip；chip 行合计恒显示
                 const showChip = g.name !== section.name;
                 return (
                   <div key={g.name} data-testid="asset-group">
@@ -252,7 +295,7 @@ export default function PositionSections({ positions, action }: PositionSections
                         data-testid="asset-group-header"
                         className="mb-2 flex items-center justify-between px-0.5"
                       >
-                        {/* 名目 chip：neutral 底 + 大类色小圆点（#127，色点取 lib/colors 分类色） */}
+                        {/* 维度分组 chip：neutral 底 + 大类色小圆点（#127，色点取 lib/colors 分类色） */}
                         <span className="inline-flex items-center rounded bg-muted px-2 py-0.5 text-xs font-semibold text-foreground-secondary">
                           <span
                             className="mr-1.5 h-1.5 w-1.5 rounded-full"
@@ -260,7 +303,7 @@ export default function PositionSections({ positions, action }: PositionSections
                           />
                           {g.name}
                         </span>
-                        {/* 名目 chip 行占比取整（同大类分区头口径） */}
+                        {/* 分组 chip 行占比取整（同大类分区头口径） */}
                         <span className="text-sm font-bold tabular-nums">
                           {formatNumber(g.total)}
                           <span className="ml-0.5 text-xs font-normal text-slate-500">
@@ -302,7 +345,7 @@ export default function PositionSections({ positions, action }: PositionSections
             <span className="flex items-center text-[15px] font-bold">
               <span
                 className="mr-1.5 h-2 w-2 rounded-sm"
-                style={{ background: ASSET_TYPE_COLORS["在途"] }}
+                style={{ background: IN_TRANSIT_COLOR }}
               />
               在途资金
             </span>

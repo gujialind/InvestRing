@@ -74,7 +74,7 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 * **现金中转约束**：卖出 pending 不自动增加可用现金，买入只能用已有可用现金；不足时须先卖后买两步操作。
 * **CASH trade 来源受限**：仅由申赎、基金调仓配对、跨平台现金转移三条路径生成（均预置 `transfer_group`）；`trade.transfer_group` 为 **NOT NULL**，REST 与 CLI 均禁止直接创建 `product_code="CASH"` 的交易（`CASH_TRADE_FORBIDDEN`）。
 * **平台维度**：现金按平台分别追踪，`portfolio_position` 的 CASH 记录唯一约束为 `(portfolio_code, product_code, market, platform_code, snapshot_date)`；申购/赎回必须指定 `platform_code`（现金归属平台）。跨平台转移的状态机见 §3.3。
-* **在途资金虚拟产品**（#93）：`portfolio_position` 除 CASH 行外还有 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL` 两类现金行，由 `snapshot_service._compute_in_transit_amounts` 每日独立计算、不继承前日。`IN_TRANSIT_BUY`（买入在途）= 已扣款但基金份额未确认（CASH sell 已确认、基金 buy 待确认）；`IN_TRANSIT_SELL`（卖出在途）= 已卖出但到账未确认（基金 sell 已确认、CASH buy 待确认）。两者 `market=""`、`asset_type="cash"`、`shares=NULL`、`cash_amount` 恒正，种子产品定义见 §4.4。
+* **在途资金虚拟产品**（#93）：`portfolio_position` 除 CASH 行外还有 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL` 两类现金行，由 `snapshot_service._compute_in_transit_amounts` 每日独立计算、不继承前日。`IN_TRANSIT_BUY`（买入在途）= 已扣款但基金份额未确认（CASH sell 已确认、基金 buy 待确认）；`IN_TRANSIT_SELL`（卖出在途）= 已卖出但到账未确认（基金 sell 已确认、CASH buy 待确认）。两者 `market=""`、`shares=NULL`、`cash_amount` 恒正，种子产品定义见 §4.4。快照表不存分类列（#128 起 `asset_type` 已删列），**现金行一律以 `cash_amount IS NOT NULL` 判定**（CHECK 约束保证与 shares 恰有其一），CASH 与在途行由此自然落入现金口径。
 
 ### 2.3 实时可用量计算
 
@@ -185,12 +185,12 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 * `portfolio_position` 有 CHECK 约束：`shares` 与 `cash_amount` 二者恰有其一（净值型 vs 非净值型）。
 * `share_change_event` 双日期分级：`ex_date`（除息日，应用日）+ `entitlement_date`（权益登记日，基数日），要求 `ex_date > entitlement_date` 且均为交易日；`parent_event_id` 为基金级拆分子记录自引用。
 * 外键删除行为均为 **RESTRICT**，通过业务流程（关闭/停用）管理生命周期，保留历史数据。
-* **虚拟产品**（#93）：除 `CASH`（`scripts/init_data.py` 种子）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向，`asset_type="cash"` 使下游现金处理代码无需改动即自动纳入（语义见 §2.2）。
-* `asset_classification.asset_name`（#98）语义分工：`asset_name`=聚合展示短名目（UI 分区/图例用），`description`=说明性文本；code→asset_name 映射单一事实来源为 `app/constants/asset_names.py::ASSET_NAME_MAP`（迁移 0007 与 init_data.py 种子共用），IN\_TRANSIT 虚拟产品 `asset_class_code` 为 NULL、无分类行。
+* **虚拟产品**（#93）：除 `CASH`（`scripts/init_data.py` 种子）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向。维度标签（#128）：CASH 产品 `asset_class_code=ASSET_CASH`、其余四维 NULL；IN_TRANSIT 五维全 NULL。
+* **资产分类五维度字典**（#128）：`asset_classification` 是正交维度值字典（`code/dimension/name/sort_order/description`），五个维度 asset_class（股票/债券/商品/现金，维持 4 类，REITs/另类按需再加）/region/style/size/segment（股票行业·债券期限·商品品种共用一维）。产品以 5 个 FK 列挂维度值，适用矩阵由 `product_service.validate_dimension_tags` 校验：股票必填 region/style/size，债券必填 region+segment 且禁 style/size，商品/现金禁 region/style/size，asset_class 为 NULL 时其余必须全 NULL。字典单一事实来源为 `app/constants/asset_dimensions.py`（迁移 0008、init_data.py、conftest 三方共用）；**维度值按需扩展（YAGNI），不为假想需求预留空值**；**asset_class 的 `sort_order` 即前端饼图/分区色板序位，变更即改色**。分类信息只在 positions API 读侧派生（产品五维 join 字典，code+name 成对输出），快照表无分类列；前端二级分组默认股票→region、债券/商品→segment、现金平铺（组合级 display_config 配置归后续 issue）。
 
 ### 4.5 配置与运行
 
-* 配置项以 `app/config.py` + `.env` 覆盖为准；迁移在 `alembic/`，启动时自动 `upgrade head`。**注意 0006（#93）不可逆**：扩展 8 处 code 列至 String(20)、新增 `in_transit_total`、种子 IN\_TRANSIT 产品（幂等设计）。
+* 配置项以 `app/config.py` + `.env` 覆盖为准；迁移在 `alembic/`，启动时自动 `upgrade head`。**注意 0006（#93）与 0008（#128）均不可逆**：0006 扩展 8 处 code 列至 String(20)、新增 `in_transit_total`、种子 IN\_TRANSIT 产品（幂等设计）；0008 维度化重构 asset_classification、product 加 4 个维度 FK 列并回填、**DROP `portfolio_position.asset_type`**（回填校验先于任何破坏性操作，失败即中止不留半成品）。
 * 调度：`scheduler_enabled`；`init_tasks.py` 确保任务记录存在并同步文案，但不覆盖已有 cron\_expr。
 * 数据源：Tushare / AkShare，`data_sources` 路由读写 `.env`；安全：登录失败锁定、Token 过期/黑名单、改密后强制重登（参数明细见 `config.py`）。
 
@@ -268,6 +268,7 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 3. 组合份额仅因申购赎回变化；分红再投资只影响成分基金份额。
 4. 投资人不支持强制物理删除——份额需为 0 才能删。
 5. 幂等性缓存（`idempotency_cache`）24 小时过期，批量调仓用 `Idempotency-Key`。
+6. 分类信息只从 positions API 读侧派生（#128）：快照表无分类列，不要在写侧/快照链路重新引入 asset_type 冗余；判断现金行用 `cash_amount IS NOT NULL`，不用产品类型字符串。产品维度标签改动走 product create/update（service 层矩阵校验），不直改 DB。
 
 ***
 

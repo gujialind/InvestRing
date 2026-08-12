@@ -16,6 +16,12 @@ def get_products(
     market: Optional[str] = None,
     data_source: Optional[str] = None,
     data_source_status: Optional[str] = None,
+    # 维度筛选（issue #128）
+    asset_class_code: Optional[str] = None,
+    region_code: Optional[str] = None,
+    style_code: Optional[str] = None,
+    size_code: Optional[str] = None,
+    segment_code: Optional[str] = None,
     page: Optional[int] = 1,
     page_size: Optional[int] = 20,
     db: Session = Depends(get_db),
@@ -30,6 +36,16 @@ def get_products(
         query = query.filter(Product.data_source == data_source)
     if data_source_status:
         query = query.filter(Product.data_source_status == data_source_status)
+    if asset_class_code:
+        query = query.filter(Product.asset_class_code == asset_class_code)
+    if region_code:
+        query = query.filter(Product.region_code == region_code)
+    if style_code:
+        query = query.filter(Product.style_code == style_code)
+    if size_code:
+        query = query.filter(Product.size_code == size_code)
+    if segment_code:
+        query = query.filter(Product.segment_code == segment_code)
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
     return {
@@ -53,6 +69,10 @@ def create_product(
         name=product.name,
         product_type=product.product_type,
         asset_class_code=product.asset_class_code,
+        region_code=product.region_code,
+        style_code=product.style_code,
+        size_code=product.size_code,
+        segment_code=product.segment_code,
         is_qdii=product.is_qdii,
         data_source=product.data_source,
         sync_history=bool(product.sync_history),

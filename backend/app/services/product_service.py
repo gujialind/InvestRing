@@ -8,8 +8,84 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.asset_classification import AssetClassification
 from app.models.product import Product
 from app.services.exceptions import BusinessError, NotFoundError
+
+# 维度字段 → 字典 dimension（issue #128）
+DIMENSION_FIELDS = ("asset_class_code", "region_code", "style_code", "size_code", "segment_code")
+_DIMENSION_OF_FIELD = {
+    "asset_class_code": "asset_class",
+    "region_code": "region",
+    "style_code": "style",
+    "size_code": "size",
+    "segment_code": "segment",
+}
+
+
+def validate_dimension_tags(db: Session, dims: dict) -> None:
+    """校验五维度标签（create 传入值 / update 合并值）：
+
+    1. 每个非 NULL code 必须存在于维度字典且 dimension 匹配字段；
+    2. 适用矩阵：股票必填 region/style/size；债券必填 region+segment 且
+       style/size 为 NULL；商品/现金的 region/style/size 必须为 NULL；
+       asset_class 为 NULL（虚拟产品）时其余维度必须全 NULL；
+    3. asset_class 为字典中已存在、但适用矩阵未登记的新大类（YAGNI 扩展
+       遗漏）时显式 422，不得 KeyError → 500。
+    非法组合抛 INVALID_DIMENSION_TAGS（422）。
+    """
+    for field in DIMENSION_FIELDS:
+        code = dims.get(field)
+        if code is None:
+            continue
+        ac = db.query(AssetClassification).filter(AssetClassification.code == code).first()
+        if not ac or ac.dimension != _DIMENSION_OF_FIELD[field]:
+            raise BusinessError(
+                "INVALID_DIMENSION_TAGS",
+                f"维度值 {code} 不存在或不属于 {_DIMENSION_OF_FIELD[field]} 维度",
+                details={"field": field, "code": code},
+            )
+
+    asset = dims.get("asset_class_code")
+    if asset is None:
+        extra = [f for f in DIMENSION_FIELDS if f != "asset_class_code" and dims.get(f)]
+        if extra:
+            raise BusinessError(
+                "INVALID_DIMENSION_TAGS",
+                "未指定 asset_class 时其余维度必须为空",
+                details={"fields": extra},
+            )
+        return
+
+    # 适用矩阵（单一事实来源）：大类 → (必填维度, 禁止维度)。
+    # 字典新增大类值时必须同步在此登记，否则使用该大类的请求显式 422。
+    matrix = {
+        "ASSET_STOCK": (("region_code", "style_code", "size_code"), ()),
+        "ASSET_BOND": (("region_code", "segment_code"), ("style_code", "size_code")),
+        "ASSET_COMMODITY": ((), ("region_code", "style_code", "size_code")),
+        "ASSET_CASH": ((), ("region_code", "style_code", "size_code")),
+    }.get(asset)
+    if matrix is None:
+        raise BusinessError(
+            "INVALID_DIMENSION_TAGS",
+            f"大类 {asset} 的维度适用矩阵未定义",
+            details={"asset_class_code": asset},
+        )
+    required, forbidden = matrix
+    missing = [f for f in required if not dims.get(f)]
+    if missing:
+        raise BusinessError(
+            "INVALID_DIMENSION_TAGS",
+            f"{asset} 缺少必填维度：{', '.join(missing)}",
+            details={"asset_class_code": asset, "missing": missing},
+        )
+    present = [f for f in forbidden if dims.get(f)]
+    if present:
+        raise BusinessError(
+            "INVALID_DIMENSION_TAGS",
+            f"{asset} 不允许维度：{', '.join(present)}",
+            details={"asset_class_code": asset, "forbidden": present},
+        )
 
 
 def calculate_confirm_days(market: Optional[str], is_qdii: bool) -> int:
@@ -64,11 +140,15 @@ def create_product(
     name: str,
     product_type: str,
     asset_class_code: Optional[str] = None,
+    region_code: Optional[str] = None,
+    style_code: Optional[str] = None,
+    size_code: Optional[str] = None,
+    segment_code: Optional[str] = None,
     is_qdii: bool = False,
     data_source: Optional[str] = None,
     sync_history: bool = False,
 ) -> Product:
-    """创建产品（自动计算 confirm_days）。不 commit。
+    """创建产品（自动计算 confirm_days，校验五维度适用矩阵）。不 commit。
 
     sync_history=True 时（issue #90）创建后立即回填历史净值；
     同步失败不回滚产品创建，结果挂在返回对象的瞬态属性 sync_result。
@@ -79,16 +159,22 @@ def create_product(
     if existing:
         raise BusinessError("ALREADY_EXISTS", f"产品 {code}({market}) 已存在", http_status=400)
 
+    dims = {
+        "asset_class_code": asset_class_code, "region_code": region_code,
+        "style_code": style_code, "size_code": size_code, "segment_code": segment_code,
+    }
+    validate_dimension_tags(db, dims)
+
     confirm_days = calculate_confirm_days(market or "CN_OTC", is_qdii)
     product = Product(
         code=code,
         market=market or "",
         name=name,
         product_type=product_type,
-        asset_class_code=asset_class_code,
         confirm_days=confirm_days,
         is_qdii=is_qdii,
         data_source=data_source,
+        **dims,
     )
     db.add(product)
 
@@ -128,6 +214,11 @@ def update_product(
     new_is_qdii = updates.get("is_qdii", product.is_qdii)
     if "market" in updates or "is_qdii" in updates:
         updates = {**updates, "confirm_days": calculate_confirm_days(new_market or "CN_OTC", new_is_qdii)}
+
+    # 维度标签按合并后结果校验适用矩阵（部分更新不允许造成非法组合）
+    if any(f in updates for f in DIMENSION_FIELDS):
+        merged = {f: updates.get(f, getattr(product, f)) for f in DIMENSION_FIELDS}
+        validate_dimension_tags(db, merged)
 
     for field, value in updates.items():
         setattr(product, field, value)

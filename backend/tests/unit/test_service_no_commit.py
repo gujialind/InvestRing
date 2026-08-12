@@ -44,7 +44,7 @@ def _setup_cash_snapshot(db, portfolio_code: str, snapshot_date: date, amount: f
         db, portfolio_code, "CASH", "",
         snapshot_date=snapshot_date,
         cash_amount=amount, unit_price=None, cost_price=None,
-        market_value=amount, platform_code="MYCF", asset_type="cash",
+        market_value=amount, platform_code="MYCF",
     )
     create_value_snapshot(
         db, portfolio_code, snapshot_date,
@@ -104,13 +104,13 @@ class TestSnapshotServiceNoCommit:
 
         create_portfolio(test_db, code="NC_PRE", status="active")
         create_product(test_db, code="NAVX.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         _setup_cash_snapshot(test_db, "NC_PRE", D0)
         # 最新持仓含无任何价格记录的基金 → price_data 预校验必失败
         create_position_snapshot(
             test_db, "NC_PRE", "NAVX.OF", "CN_OTC",
             snapshot_date=D0, shares=100.0, market_value=100.0,
-            platform_code="MYCF", asset_type="stock",
+            platform_code="MYCF",
         )
 
         _forbid_commit(monkeypatch, test_db)
@@ -199,7 +199,7 @@ class TestTradePreviewNoCommit:
         create_portfolio(test_db, code="NC_PRV", status="active")
         product = create_product(
             test_db, code="PRVNC.OF", market="CN_OTC",
-            product_type="OEF", asset_class_code="STOCK_CN_LARGE", confirm_days=1,
+            product_type="OEF", asset_class_code="ASSET_STOCK", confirm_days=1,
         )
         create_price_record(test_db, "PRVNC.OF", "CN_OTC", D0, unit_price=1.25)
         trade = create_trade(

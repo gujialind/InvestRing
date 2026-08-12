@@ -55,7 +55,7 @@ class TestAvailableCash:
         """pending 买入应减少可用现金"""
         create_portfolio(test_db, code="AC_PB", status="active")
         create_product(test_db, code="ETF_AC1", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="AC_PLAT")
         ensure_trading_day(test_db, date(2025, 11, 3), is_open=True)
 
@@ -90,7 +90,6 @@ class TestAvailableCash:
             snapshot_date=date(2025, 10, 31),
             cash_amount=6001.39, unit_price=None, cost_price=None,
             market_value=6001.39, platform_code="AC_OVR_PLAT",
-            asset_type="cash",
         )
 
         resp = client.get(
@@ -186,18 +185,18 @@ class TestInvestorAvailableShares:
 
 
 # ============================================================================
-# 持仓读侧派生字段（issue #99）：asset_name / daily_profit / 分红复权 / 现金收益
+# 持仓读侧派生字段（issue #99/#128）：维度派生 / daily_profit / 分红复权 / 现金收益
 # ============================================================================
 
 class TestPositionDerivedFields:
-    """asset_name 与 daily_profit 派生"""
+    """五维度派生（#128）与 daily_profit 派生"""
 
-    def test_asset_name_from_classification(self, client, admin_headers, test_db):
-        """产品挂 STOCK_CN_LARGE → asset_name 为「国内大盘」；CASH → 「现金」"""
+    def test_dimension_fields_derived(self, client, admin_headers, test_db):
+        """基金行派生五维度 code+name；CASH 行 asset_class=现金、其余维度 NULL（不归「其他」）"""
         create_portfolio(test_db, code="PD_AN", status="active")
         create_platform(test_db, code="PD_AN_PLAT")
         create_product(test_db, code="FUND_AN", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_position_snapshot(
             test_db, "PD_AN", "FUND_AN", "CN_OTC",
             snapshot_date=date(2025, 11, 3),
@@ -214,18 +213,30 @@ class TestPositionDerivedFields:
         resp = client.get("/api/positions?portfolio_code=PD_AN", headers=admin_headers)
         assert resp.status_code == 200
         rows = {r["product_code"]: r for r in resp.json()["items"]}
-        assert rows["FUND_AN"]["asset_name"] == "国内大盘"
-        assert rows["CASH"]["asset_name"] == "现金"
+        fund = rows["FUND_AN"]
+        assert fund["asset_class_code"] == "ASSET_STOCK"
+        assert fund["asset_class_name"] == "股票"
+        assert fund["region_code"] == "REGION_CN"
+        assert fund["region_name"] == "中国"
+        assert fund["style_name"] == "平衡"
+        assert fund["size_name"] == "大盘"
+        assert fund["segment_name"] == "综合"
+        cash = rows["CASH"]
+        assert cash["asset_class_code"] == "ASSET_CASH"
+        assert cash["asset_class_name"] == "现金"
+        assert cash["region_code"] is None
+        assert cash["style_code"] is None
+        assert cash["segment_code"] is None
         # is_qdii 读侧透传（QDII tooltip 依赖）
-        assert rows["FUND_AN"]["is_qdii"] is False
-        assert rows["CASH"]["is_qdii"] is False
+        assert fund["is_qdii"] is False
+        assert cash["is_qdii"] is False
 
     def test_daily_profit_two_days_no_trade(self, client, admin_headers, test_db):
         """两快照日 + 无当日交易 → daily_profit = 市值差值"""
         create_portfolio(test_db, code="PD_DP", status="active")
         create_platform(test_db, code="PD_DP_PLAT")
         create_product(test_db, code="FUND_DP", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_position_snapshot(
             test_db, "PD_DP", "FUND_DP", "CN_OTC",
             snapshot_date=date(2025, 11, 3),
@@ -269,7 +280,7 @@ class TestPositionDerivedFields:
         create_portfolio(test_db, code="PD_DP", status="active")
         create_platform(test_db, code="PD_DP_PLAT")
         create_product(test_db, code="FUND_DP", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         for d, mv in ((date(2025, 11, 3), 1500.0), (date(2025, 11, 4), 1560.0)):
             create_position_snapshot(
                 test_db, "PD_DP", "FUND_DP", "CN_OTC", snapshot_date=d,
@@ -294,7 +305,7 @@ class TestPositionDerivedFields:
         create_portfolio(test_db, code="PD_DB", status="active")
         create_platform(test_db, code="PD_DB_PLAT")
         create_product(test_db, code="FUND_DB", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
         create_position_snapshot(
             test_db, "PD_DB", "FUND_DB", "CN_OTC", snapshot_date=d1,
@@ -343,7 +354,7 @@ class TestPositionDerivedFields:
         create_portfolio(test_db, code="PD_FS", status="active")
         create_platform(test_db, code="PD_FS_PLAT")
         create_product(test_db, code="FUND_FS", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_position_snapshot(
             test_db, "PD_FS", "FUND_FS", "CN_OTC",
             snapshot_date=date(2025, 11, 3),
@@ -366,7 +377,6 @@ class TestPositionDerivedFields:
                 test_db, "PD_IT", "IN_TRANSIT_BUY", "", snapshot_date=d,
                 cash_amount=1000.0, unit_price=None, cost_price=None,
                 market_value=1000.0, platform_code="PD_IT_PLAT",
-                asset_type="cash",
             )
 
         resp = client.get("/api/positions?portfolio_code=PD_IT", headers=admin_headers)
@@ -384,7 +394,7 @@ class TestPositionDividendRouteC:
         create_portfolio(test_db, code="PD_DIV", status="active")
         create_platform(test_db, code="PD_DIV_PLAT")
         create_product(test_db, code="FUND_DIV", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_investor(test_db, code="PD_DIV_INV")
         d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
         # 申购 2500（CASH buy，sub_ 组，d1 确认）
@@ -478,7 +488,7 @@ class TestPositionCashCumulativeProfit:
         create_platform(test_db, code="PD_CF_P1")
         create_platform(test_db, code="PD_CF_P2")
         create_product(test_db, code="FUND_CF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         d1 = date(2025, 11, 3)
         # sub_：申购存入 10000（P1）
         create_trade(
@@ -548,7 +558,7 @@ class TestPositionLatestSnapshot:
         create_portfolio(test_db, code="LS_CLR", status="active")
         create_platform(test_db, code="LS_CLR_PLAT", name="清仓测试平台")
         create_product(test_db, code="FUND_CLR", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
         # d1：基金 + CASH
         create_position_snapshot(
@@ -587,7 +597,6 @@ class TestPositionLatestSnapshot:
             test_db, "LS_IT", "IN_TRANSIT_BUY", "", snapshot_date=d1,
             cash_amount=1000.0, unit_price=None, cost_price=None,
             market_value=1000.0, platform_code="LS_IT_PLAT",
-            asset_type="cash",
         )
         create_position_snapshot(
             test_db, "LS_IT", "CASH", "", snapshot_date=d1,
@@ -640,7 +649,7 @@ class TestPositionLatestSnapshot:
         create_portfolio(test_db, code="LS_HIST", status="active")
         create_platform(test_db, code="LS_HIST_PLAT", name="历史查询平台")
         create_product(test_db, code="FUND_HIST", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         d1, d2 = date(2025, 11, 3), date(2025, 11, 4)
         # d1：基金 + CASH
         create_position_snapshot(

@@ -47,7 +47,6 @@ def _setup_fund_snapshot(db, portfolio_code: str, product_code: str, market: str
         db, portfolio_code, product_code, market,
         snapshot_date=snapshot_date, shares=shares, unit_price=1.0,
         cost_price=1.0, market_value=shares, platform_code="MYCF",
-        asset_type="stock",
     )
     create_value_snapshot(
         db, portfolio_code, snapshot_date,
@@ -62,7 +61,6 @@ def _setup_cash_snapshot(db, portfolio_code: str, snapshot_date: date, amount: f
         db, portfolio_code, "CASH", "",
         snapshot_date=snapshot_date, cash_amount=amount, unit_price=None,
         cost_price=None, market_value=amount, platform_code="MYCF",
-        asset_type="cash",
     )
     create_value_snapshot(
         db, portfolio_code, snapshot_date,
@@ -86,7 +84,7 @@ class TestSnapshotNavStrict:
         """缺 target_date 当日净值 → 422 MISSING_NAV，指出产品与日期，不产生快照（验收 1、5）"""
         port = create_portfolio(test_db, code="NAV_S1", status="active")
         create_product(test_db, code="STRICTA.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         _setup_fund_snapshot(test_db, port.code, "STRICTA.OF", "CN_OTC", D0)
         # 仅 D0 有净值，NEXT_DAY 无净值（旧逻辑会静默回退用 D0 净值）
         create_price_record(test_db, "STRICTA.OF", "CN_OTC", D0, 1.0)
@@ -116,7 +114,7 @@ class TestSnapshotNavStrict:
         """补齐当日净值后生成成功，unit_price == target_date 当日净值（验收 2、4）"""
         port = create_portfolio(test_db, code="NAV_S2", status="active")
         create_product(test_db, code="STRICTB.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         _setup_fund_snapshot(test_db, port.code, "STRICTB.OF", "CN_OTC", D0)
         create_price_record(test_db, "STRICTB.OF", "CN_OTC", NEXT_DAY, 1.5)
 
@@ -141,7 +139,7 @@ class TestSnapshotNavStrict:
         """QDII：T-1 缺失即拒绝，不回退 T-2 净值（验收 3 前半）"""
         port = create_portfolio(test_db, code="NAV_S3", status="active")
         create_product(test_db, code="QDIIA.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
                        confirm_days=2, is_qdii=True)
         _setup_fund_snapshot(test_db, port.code, "QDIIA.OF", "CN_OTC", D0)
         # 仅 T-2（06-05）有净值，T-1（06-06）缺失
@@ -167,7 +165,7 @@ class TestSnapshotNavStrict:
         """QDII：T-1 存在时严格用 T-1，不用 target_date 当日净值（验收 3 后半）"""
         port = create_portfolio(test_db, code="NAV_S4", status="active")
         create_product(test_db, code="QDIIB.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
                        confirm_days=2, is_qdii=True)
         _setup_fund_snapshot(test_db, port.code, "QDIIB.OF", "CN_OTC", D0)
         # NEXT_DAY 的 T-1 = D0（06-06）；两日净值不同值以区分取价日
@@ -194,7 +192,7 @@ class TestSnapshotNavStrict:
         """重算预校验同样严格：区间内含缺净值交易日 → 422 VALIDATION_FAILED，不删任何快照"""
         port = create_portfolio(test_db, code="NAV_S5", status="active")
         create_product(test_db, code="STRICTC.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         _setup_fund_snapshot(test_db, port.code, "STRICTC.OF", "CN_OTC", D0)
         # D0 净值齐全（D0 预校验通过），NEXT_DAY 缺失（旧逻辑 <= 会放行）
         create_price_record(test_db, "STRICTC.OF", "CN_OTC", D0, 1.0)
@@ -224,7 +222,7 @@ class TestSnapshotNavStrict:
         缺 target_date 净值时，_generate_portfolio_position 直接抛 MISSING_NAV"""
         port = create_portfolio(test_db, code="NAV_S6", status="active")
         create_product(test_db, code="STRICTD.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         _setup_cash_snapshot(test_db, port.code, D0)
         # 窗口内确认的基金买入：confirm_date=NEXT_DAY，持仓首次出现于目标日
         create_trade(
