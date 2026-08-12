@@ -134,11 +134,15 @@ def create_product(
     name: str,
     product_type: str,
     asset_class_code: Optional[str] = None,
+    region_code: Optional[str] = None,
+    style_code: Optional[str] = None,
+    size_code: Optional[str] = None,
+    segment_code: Optional[str] = None,
     is_qdii: bool = False,
     data_source: Optional[str] = None,
     sync_history: bool = False,
 ) -> Product:
-    """创建产品（自动计算 confirm_days）。不 commit。
+    """创建产品（自动计算 confirm_days，校验五维度适用矩阵）。不 commit。
 
     sync_history=True 时（issue #90）创建后立即回填历史净值；
     同步失败不回滚产品创建，结果挂在返回对象的瞬态属性 sync_result。
@@ -149,16 +153,22 @@ def create_product(
     if existing:
         raise BusinessError("ALREADY_EXISTS", f"产品 {code}({market}) 已存在", http_status=400)
 
+    dims = {
+        "asset_class_code": asset_class_code, "region_code": region_code,
+        "style_code": style_code, "size_code": size_code, "segment_code": segment_code,
+    }
+    validate_dimension_tags(db, dims)
+
     confirm_days = calculate_confirm_days(market or "CN_OTC", is_qdii)
     product = Product(
         code=code,
         market=market or "",
         name=name,
         product_type=product_type,
-        asset_class_code=asset_class_code,
         confirm_days=confirm_days,
         is_qdii=is_qdii,
         data_source=data_source,
+        **dims,
     )
     db.add(product)
 
@@ -198,6 +208,11 @@ def update_product(
     new_is_qdii = updates.get("is_qdii", product.is_qdii)
     if "market" in updates or "is_qdii" in updates:
         updates = {**updates, "confirm_days": calculate_confirm_days(new_market or "CN_OTC", new_is_qdii)}
+
+    # 维度标签按合并后结果校验适用矩阵（部分更新不允许造成非法组合）
+    if any(f in updates for f in DIMENSION_FIELDS):
+        merged = {f: updates.get(f, getattr(product, f)) for f in DIMENSION_FIELDS}
+        validate_dimension_tags(db, merged)
 
     for field, value in updates.items():
         setattr(product, field, value)
