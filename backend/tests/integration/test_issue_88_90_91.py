@@ -180,6 +180,7 @@ class TestProductCreateSync:
                 test_db,
                 code="I90SYNC.OF", market="CN_OTC", name="回填测试基金",
                 product_type="OEF", asset_class_code="ASSET_STOCK",
+                region_code="REGION_CN", style_code="STYLE_BALANCED", size_code="SIZE_LARGE",
                 sync_history=True,
             )
         mock_sync.assert_called_once()
@@ -197,6 +198,7 @@ class TestProductCreateSync:
                 test_db,
                 code="I90FAIL.OF", market="CN_OTC", name="回填失败基金",
                 product_type="OEF", asset_class_code="ASSET_STOCK",
+                region_code="REGION_CN", style_code="STYLE_BALANCED", size_code="SIZE_LARGE",
                 sync_history=True,
             )
         test_db.commit()
@@ -210,6 +212,7 @@ class TestProductCreateSync:
             test_db,
             code="I90OFF.OF", market="CN_OTC", name="不回填基金",
             product_type="OEF", asset_class_code="ASSET_STOCK",
+                region_code="REGION_CN", style_code="STYLE_BALANCED", size_code="SIZE_LARGE",
         )
         assert getattr(product, "sync_result", None) is None
 

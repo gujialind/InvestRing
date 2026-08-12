@@ -14,6 +14,11 @@ app = typer.Typer(no_args_is_help=True)
 @app.command("list")
 def list_products(
     product_type: Optional[str] = typer.Option(None, "--product-type", help="ETF/OEF/LOF/CASH"),
+    asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code", help="维度筛选：大类"),
+    region_code: Optional[str] = typer.Option(None, "--region-code", help="维度筛选：地域"),
+    style_code: Optional[str] = typer.Option(None, "--style-code", help="维度筛选：风格"),
+    size_code: Optional[str] = typer.Option(None, "--size-code", help="维度筛选：规模"),
+    segment_code: Optional[str] = typer.Option(None, "--segment-code", help="维度筛选：细分"),
     page: int = typer.Option(1, "--page"),
     page_size: int = typer.Option(20, "--page-size"),
     all: bool = typer.Option(False, "--all"),
@@ -25,6 +30,16 @@ def list_products(
         query = db.query(Product).order_by(Product.code)
         if product_type:
             query = query.filter(Product.product_type == product_type)
+        if asset_class_code:
+            query = query.filter(Product.asset_class_code == asset_class_code)
+        if region_code:
+            query = query.filter(Product.region_code == region_code)
+        if style_code:
+            query = query.filter(Product.style_code == style_code)
+        if size_code:
+            query = query.filter(Product.size_code == size_code)
+        if segment_code:
+            query = query.filter(Product.segment_code == segment_code)
         items, total, page, page_size = paginate(query, page, page_size, all)
         success(
             data=[serialize_model(i) for i in items],
@@ -39,11 +54,15 @@ def create_product(
     name: str = typer.Option(..., "--name"),
     product_type: str = typer.Option(..., "--product-type", help="ETF/OEF/LOF/CASH"),
     asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code"),
+    region_code: Optional[str] = typer.Option(None, "--region-code"),
+    style_code: Optional[str] = typer.Option(None, "--style-code"),
+    size_code: Optional[str] = typer.Option(None, "--size-code"),
+    segment_code: Optional[str] = typer.Option(None, "--segment-code"),
     is_qdii: bool = typer.Option(False, "--is-qdii"),
     data_source: Optional[str] = typer.Option(None, "--data-source"),
     sync: bool = typer.Option(False, "--sync", help="创建后立即回填历史净值（issue #90）"),
 ):
-    """创建产品（自动计算 confirm_days）"""
+    """创建产品（自动计算 confirm_days，校验五维度适用矩阵）"""
     with cli_context() as db:
         from app.services import product_service
 
@@ -54,6 +73,10 @@ def create_product(
             name=name,
             product_type=product_type,
             asset_class_code=asset_class_code,
+            region_code=region_code,
+            style_code=style_code,
+            size_code=size_code,
+            segment_code=segment_code,
             is_qdii=is_qdii,
             data_source=data_source,
             sync_history=sync,
@@ -94,9 +117,13 @@ def update_product(
     name: Optional[str] = typer.Option(None, "--name"),
     is_qdii: Optional[bool] = typer.Option(None, "--is-qdii"),
     asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code"),
+    region_code: Optional[str] = typer.Option(None, "--region-code"),
+    style_code: Optional[str] = typer.Option(None, "--style-code"),
+    size_code: Optional[str] = typer.Option(None, "--size-code"),
+    segment_code: Optional[str] = typer.Option(None, "--segment-code"),
     data_source: Optional[str] = typer.Option(None, "--data-source"),
 ):
-    """更新产品信息"""
+    """更新产品信息（维度标签按合并后结果校验适用矩阵）"""
     with cli_context() as db:
         from app.services import product_service
 
@@ -105,6 +132,14 @@ def update_product(
             updates["name"] = name
         if asset_class_code is not None:
             updates["asset_class_code"] = asset_class_code
+        if region_code is not None:
+            updates["region_code"] = region_code
+        if style_code is not None:
+            updates["style_code"] = style_code
+        if size_code is not None:
+            updates["size_code"] = size_code
+        if segment_code is not None:
+            updates["segment_code"] = segment_code
         if data_source is not None:
             updates["data_source"] = data_source
         if is_qdii is not None:
