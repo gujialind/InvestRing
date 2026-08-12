@@ -45,7 +45,7 @@ export default function DashboardStatsCards({
     },
     {
       icon: TrendingUp,
-      iconCls: "text-red-500",
+      iconCls: getReturnColorClass(avgReturn),
       label: variant === "mobile" ? "平均收益" : "平均累计收益",
       value: formatReturnRate(avgReturn),
       valueCls: getReturnColorClass(avgReturn),

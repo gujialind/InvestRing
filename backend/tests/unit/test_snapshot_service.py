@@ -133,7 +133,7 @@ class TestCheckPendingTransactions:
     def test_pending_trade_fails(self, test_db):
         """存在 pending 调仓交易应失败"""
         create_portfolio(test_db, code="PEND_T", status="active")
-        create_product(test_db, code="FUND01", market="CN_OTC", asset_class_code="STOCK_CN_LARGE")
+        create_product(test_db, code="FUND01", market="CN_OTC", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="PLAT_P")
         create_trade(
             test_db, portfolio_code="PEND_T",
@@ -160,7 +160,7 @@ class TestCheckPendingTransactions:
     def test_pending_trade_null_confirm_date_fails(self, test_db):
         """confirm_date 为 NULL 的 pending 交易应兜底按 trade_date 命中（防 NULL 逃逸）"""
         create_portfolio(test_db, code="PEND_TN", status="active")
-        create_product(test_db, code="FUND02", market="CN_OTC", asset_class_code="STOCK_CN_LARGE")
+        create_product(test_db, code="FUND02", market="CN_OTC", asset_class_code="ASSET_STOCK")
         create_trade(
             test_db, portfolio_code="PEND_TN",
             product_code="FUND02", market="CN_OTC",
@@ -185,7 +185,7 @@ class TestCheckPendingTransactions:
     def test_pending_null_confirm_date_after_target_passes(self, test_db):
         """NULL confirm_date 但 trade_date/apply_date 晚于 target 时不应误报"""
         create_portfolio(test_db, code="PEND_NF", status="active")
-        create_product(test_db, code="FUND03", market="CN_OTC", asset_class_code="STOCK_CN_LARGE")
+        create_product(test_db, code="FUND03", market="CN_OTC", asset_class_code="ASSET_STOCK")
         create_trade(
             test_db, portfolio_code="PEND_NF",
             product_code="FUND03", market="CN_OTC",
@@ -221,7 +221,7 @@ class TestFrozenSharesCalculation:
         """pending 卖出应冻结对应份额"""
         create_portfolio(test_db, code="FZ1", status="active")
         create_product(test_db, code="510300.SH", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="PLAT_FZ")
         create_trade(
             test_db, portfolio_code="FZ1",
@@ -264,7 +264,7 @@ class TestFrozenSharesCalculation:
         """confirmed 卖出不计入冻结"""
         create_portfolio(test_db, code="FZC", status="active")
         create_product(test_db, code="510300.SH", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
         create_platform(test_db, code="PLAT_FZC")
         create_trade(
             test_db, portfolio_code="FZC",
@@ -346,7 +346,6 @@ class TestGeneratePortfolioValueSnapshot:
             cash_amount=Decimal(str(market_value)),
             market_value=Decimal(str(market_value)),
             snapshot_date=snapshot_date,
-            asset_type="cash",
         )
 
     def test_first_snapshot_fallback(self, test_db):
@@ -457,12 +456,12 @@ class TestGeneratePortfolioPositionCashNone:
         create_portfolio(test_db, code="ZS20", status="active")
         create_platform(test_db, code="PLAT20")
         create_product(test_db, code="STK20", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         create_position_snapshot(
             test_db, portfolio_code="ZS20", product_code="STK20",
             market="CN_OTC", snapshot_date=date(2025, 3, 3),
             shares=0.0, cash_amount=None, platform_code="PLAT20",
-            asset_type="stock", market_value=0.0,
+ market_value=0.0,
         )
         # 修复前：(None <= 0) 抛 TypeError；修复后：零持仓被跳过
         result, _ = _generate_portfolio_position(test_db, "ZS20", date(2025, 3, 4))
@@ -493,7 +492,7 @@ class TestCascadeUnconfirmEvents:
         """entitlement_date == snapshot_date 的事件应被回退"""
         create_portfolio(test_db, code="CAS34A", status="active")
         create_product(test_db, code="F34", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         evt = self._make_event(
             test_db, "CAS34A",
             ex_date=date(2025, 3, 10), entitlement_date=date(2025, 3, 5),
@@ -508,7 +507,7 @@ class TestCascadeUnconfirmEvents:
         """ex_date == snapshot_date 但 entitlement_date < snapshot_date 不应回退"""
         create_portfolio(test_db, code="CAS34B", status="active")
         create_product(test_db, code="F34", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         evt = self._make_event(
             test_db, "CAS34B",
             ex_date=date(2025, 3, 10), entitlement_date=date(2025, 3, 5),
@@ -556,7 +555,7 @@ class TestUnitPriceChangePct:
             portfolio_code=portfolio_code, product_code="CASH", market="",
             platform_code="MYCF", shares=None,
             cash_amount=Decimal(str(market_value)), market_value=Decimal(str(market_value)),
-            snapshot_date=snapshot_date, asset_type="cash",
+            snapshot_date=snapshot_date,
         )
 
     def test_first_snapshot_pct_zero(self, test_db):
@@ -589,7 +588,7 @@ class TestFrozenAmount:
         create_position_snapshot(
             test_db, portfolio_code="FA1", product_code="CASH", market="",
             snapshot_date=date(2025, 1, 6), cash_amount=1000.0, market_value=1000.0,
-            platform_code="PLAT_FA", asset_type="cash",
+            platform_code="PLAT_FA",
         )
         # pending CASH sell 300
         create_trade(
@@ -611,7 +610,7 @@ class TestPositionListener:
         pos = create_position_snapshot(
             test_db, portfolio_code="LST1", product_code="CASH", market="",
             snapshot_date=date(2025, 1, 6), cash_amount=100.0, market_value=100.0,
-            platform_code="MYCF", asset_type="cash",
+            platform_code="MYCF",
         )
         pos.market_value = Decimal("200")
         with pytest.raises(RuntimeError):
@@ -622,7 +621,7 @@ class TestPositionListener:
         pos = create_position_snapshot(
             test_db, portfolio_code="LST2", product_code="CASH", market="",
             snapshot_date=date(2025, 1, 6), cash_amount=100.0, market_value=100.0,
-            platform_code="MYCF", asset_type="cash",
+            platform_code="MYCF",
         )
         test_db.delete(pos)
         with pytest.raises(RuntimeError):
@@ -692,7 +691,7 @@ class TestCashIncrementalWithManual:
         create_position_snapshot(
             test_db, portfolio_code="MMV_P", product_code="CASH", market="",
             snapshot_date=date(2025, 3, 7), cash_amount=9900.0, market_value=9900.0,
-            platform_code="MMV_PLAT", asset_type="cash",
+            platform_code="MMV_PLAT",
         )
         # 设置 manual_market_value 覆盖为 8888
         create_manual_market_value(
@@ -716,7 +715,7 @@ class TestCashIncrementalWithManual:
         create_position_snapshot(
             test_db, portfolio_code="CV_P", product_code="CASH", market="",
             snapshot_date=date(2025, 3, 7), cash_amount=5000.0, market_value=5000.0,
-            platform_code="CV_PLAT", asset_type="cash",
+            platform_code="CV_PLAT",
         )
         # 窗口内 CASH buy +3000, CASH sell -1000
         create_trade(
@@ -748,7 +747,7 @@ class TestCashIncrementalWithManual:
         create_position_snapshot(
             test_db, portfolio_code="INH_P", product_code="CASH", market="",
             snapshot_date=date(2025, 3, 7), cash_amount=9900.0, market_value=9900.0,
-            platform_code="INH_PLAT", asset_type="cash",
+            platform_code="INH_PLAT",
         )
         # D-2 有 manual 覆盖为 10000，先生成 D-2 快照
         create_manual_market_value(
@@ -760,7 +759,7 @@ class TestCashIncrementalWithManual:
         create_position_snapshot(
             test_db, portfolio_code="INH_P", product_code="CASH", market="",
             snapshot_date=date(2025, 3, 8), cash_amount=10000.0, market_value=10000.0,
-            platform_code="INH_PLAT", asset_type="cash",
+            platform_code="INH_PLAT",
         )
         # D-1 窗口内申购 +1000
         create_trade(

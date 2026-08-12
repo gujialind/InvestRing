@@ -63,7 +63,7 @@ def _setup_cash_snapshot(db, portfolio_code, snapshot_date, amount, platform_cod
         db, portfolio_code, "CASH", "",
         snapshot_date=snapshot_date,
         cash_amount=amount, unit_price=None, cost_price=None,
-        market_value=amount, platform_code=platform_code, asset_type="cash",
+        market_value=amount, platform_code=platform_code,
     )
     create_value_snapshot(
         db, portfolio_code, snapshot_date,
@@ -85,7 +85,7 @@ def _setup_full_snapshot(db, portfolio_code, snapshot_date,
         db, portfolio_code, "CASH", "",
         snapshot_date=snapshot_date,
         cash_amount=cash_amount, unit_price=None, cost_price=None,
-        market_value=cash_amount, platform_code=platform_code, asset_type="cash",
+        market_value=cash_amount, platform_code=platform_code,
     )
     create_position_snapshot(
         db, portfolio_code, fund_code, fund_market,
@@ -202,7 +202,7 @@ class TestBuyInTransit:
         _ensure_all_trading_days(db)
         create_portfolio(db, code=portfolio_code, status="active")
         create_product(db, code=self.FUND_CODE, market=self.FUND_MARKET,
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
                        confirm_days=1, is_qdii=False)
         create_platform(db, code=self.PLATFORM)
         # D0 快照：CASH = 50000
@@ -307,7 +307,7 @@ class TestSellInTransit:
         _ensure_all_trading_days(db)
         create_portfolio(db, code=portfolio_code, status="active")
         create_product(db, code=self.FUND_CODE, market=self.FUND_MARKET,
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
                        confirm_days=1, is_qdii=False)
         create_platform(db, code=self.PLATFORM)
         # D0 快照：CASH=10000 + 基金 10000 份
@@ -423,7 +423,7 @@ class TestSellNoCashConfirmDate:
         _ensure_all_trading_days(test_db)
         create_portfolio(test_db, code=port, status="active")
         create_product(test_db, code=self.FUND_CODE, market=self.FUND_MARKET,
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
                        confirm_days=1, is_qdii=False)
         create_platform(test_db, code=self.PLATFORM)
         _setup_full_snapshot(test_db, port, D0,

@@ -20,7 +20,7 @@ from sqlalchemy import func, and_, or_, delete
 from app.models import (
     Portfolio, PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
     Trade, Subscription, ShareChangeEvent, PriceRecord, Product,
-    TradingCalendar, Investor, AssetClassification
+    TradingCalendar, Investor
 )
 from app.services.trading_utils import (
     is_trading_day as _trading_utils_is_trading_day,
@@ -827,27 +827,13 @@ def _generate_portfolio_position(
                     "shares": None,
                     "cash_amount": Decimal(str(pos.cash_amount or 0)),
                     "cost_price": None,
-                    "asset_type": "cash",
                 }
                 continue
             key = (pos.product_code, pos.market, pos.platform_code)
-            pos_asset_type = pos.asset_type
-            if not pos_asset_type:
-                product = db.query(Product).filter(
-                    Product.code == pos.product_code,
-                    Product.market == pos.market
-                ).first()
-                if product and product.asset_class_code:
-                    ac = db.query(AssetClassification).filter(
-                        AssetClassification.code == product.asset_class_code
-                    ).first()
-                    if ac:
-                        pos_asset_type = ac.asset_type
             positions[key] = {
                 "shares": Decimal(str(pos.shares or 0)),
                 "cash_amount": Decimal(str(pos.cash_amount or 0)) if pos.cash_amount is not None else None,
                 "cost_price": Decimal(str(pos.cost_price or 0)) if pos.cost_price else None,
-                "asset_type": pos_asset_type,
             }
     
     # 应用期间内的已确认交易（从prev_snapshot次日到target_date）
@@ -866,20 +852,15 @@ def _generate_portfolio_position(
         if trade.product_code == "CASH":
             cash_key = ("CASH", "", trade.platform_code)
             if cash_key not in positions:
-                positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
+                positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None}
             positions[cash_key]["cash_amount"] += Decimal(str(trade.amount or 0))
             continue
         key = (trade.product_code, trade.market, trade.platform_code)
         if key not in positions:
-            product = db.query(Product).filter(
-                Product.code == trade.product_code,
-                Product.market == trade.market
-            ).first()
             positions[key] = {
                 "shares": Decimal("0"),
                 "cash_amount": None,
                 "cost_price": None,
-                "asset_type": _get_product_asset_type(db, product) if product else "stock",
             }
 
         new_shares = Decimal(str(trade.shares or 0))
@@ -908,7 +889,7 @@ def _generate_portfolio_position(
         if trade.product_code == "CASH":
             cash_key = ("CASH", "", trade.platform_code)
             if cash_key not in positions:
-                positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
+                positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None}
             positions[cash_key]["cash_amount"] -= Decimal(str(trade.amount or 0))
             continue
         key = (trade.product_code, trade.market, trade.platform_code)
@@ -932,7 +913,7 @@ def _generate_portfolio_position(
             if event.cash_change:
                 cash_key = ("CASH", "", event.platform_code)
                 if cash_key not in positions:
-                    positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None, "asset_type": "cash"}
+                    positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None}
                 positions[cash_key]["cash_amount"] += Decimal(str(event.cash_change))
             continue
 
@@ -941,15 +922,10 @@ def _generate_portfolio_position(
 
         if fund_key not in positions:
             # 持仓不存在，创建
-            product = db.query(Product).filter(
-                Product.code == event.product_code,
-                Product.market == event.market
-            ).first()
             positions[fund_key] = {
                 "shares": Decimal("0"),
                 "cash_amount": None,
                 "cost_price": None,
-                "asset_type": _get_product_asset_type(db, product) if product else "stock",
             }
 
         old_shares = Decimal(str(positions[fund_key]["shares"] or 0))
@@ -959,8 +935,9 @@ def _generate_portfolio_position(
             positions[fund_key]["shares"] = old_shares + Decimal(str(event.shares_change))
 
     # CASH 持仓：应用 manual_market_value 绝对覆盖（日期精确匹配）
+    # 现金行判定：cash_amount 非 NULL（CHECK 约束保证 shares/cash_amount 恰有其一，#128）
     for key, pos_data in list(positions.items()):
-        if pos_data.get("asset_type") == "cash":
+        if pos_data.get("cash_amount") is not None:
             _, _, plat_code = key
             manual = db.query(ManualMarketValue).filter(
                 ManualMarketValue.portfolio_code == portfolio_code,
@@ -980,7 +957,6 @@ def _generate_portfolio_position(
             "shares": None,
             "cash_amount": amount,  # 始终正数
             "cost_price": None,
-            "asset_type": "cash",  # 在途资金本质是现金
         }
 
     # 构建最终的持仓快照对象
@@ -989,7 +965,7 @@ def _generate_portfolio_position(
     missing_nav: List[str] = []
     for (product_code, market, platform_code), pos_data in positions.items():
         # 跳过零持仓（现金允许为0但不跳过，保留现金持仓记录）
-        is_cash = pos_data.get("asset_type") == "cash"
+        is_cash = pos_data["cash_amount"] is not None
         is_in_transit = product_code in ("IN_TRANSIT_BUY", "IN_TRANSIT_SELL")
         if not is_cash:
             if pos_data["shares"] is not None and pos_data["shares"] <= 0 and (pos_data.get("cash_amount") or Decimal("0")) <= 0:
@@ -1004,8 +980,8 @@ def _generate_portfolio_position(
         unit_price = None
         market_value = None
         
-        if pos_data["asset_type"] == "cash":
-            # 现金资产
+        if is_cash:
+            # 现金/在途资产：市值即金额
             market_value = pos_data["cash_amount"]
         elif product:
             # issue #96 严格净值匹配：普通基金=target_date 当日，QDII=T-1 交易日，禁止向前回退
@@ -1054,7 +1030,6 @@ def _generate_portfolio_position(
             cost_price=float(pos_data["cost_price"]) if pos_data["cost_price"] else None,
             unit_price=float(unit_price) if unit_price else None,
             market_value=float(market_value) if market_value is not None else None,
-            asset_type=pos_data["asset_type"],
             snapshot_date=target_date
         )
         result_positions.append(position)
@@ -1667,17 +1642,6 @@ def _check_share_change_events(
             "message": f"存在{pending_events}笔未确认的份额变动事件（ex_date <= {target_date}），请先确认或取消后再生成快照"
         }
     return {"check_type": "share_change_events", "status": "passed", "message": "无未确认的份额变动事件"}
-
-
-def _get_product_asset_type(db: Session, product: Product) -> str:
-    """从产品表获取资产类型"""
-    if product.asset_class_code:
-        ac = db.query(AssetClassification).filter(
-            AssetClassification.code == product.asset_class_code
-        ).first()
-        if ac:
-            return ac.asset_type
-    return "stock"  # 默认返回股票类型
 
 
 # ==================== 冻结字段计算函数 ====================

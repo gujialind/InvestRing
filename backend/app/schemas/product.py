@@ -8,7 +8,13 @@ class ProductBase(BaseModel):
     market: Optional[str] = None
     name: str
     product_type: str
+    # 正交维度标签（issue #128）：适用矩阵由服务端校验（股票必填 region/style/size；
+    # 债券必填 region+segment；商品/现金的 region/style/size 必须为 NULL）
     asset_class_code: Optional[str] = None
+    region_code: Optional[str] = None
+    style_code: Optional[str] = None
+    size_code: Optional[str] = None
+    segment_code: Optional[str] = None
     confirm_days: int = 1
     is_qdii: bool = False
     data_source: Optional[str] = "tushare"
@@ -22,6 +28,10 @@ class ProductCreate(ProductBase):
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     asset_class_code: Optional[str] = None
+    region_code: Optional[str] = None
+    style_code: Optional[str] = None
+    size_code: Optional[str] = None
+    segment_code: Optional[str] = None
     confirm_days: Optional[int] = None
     is_qdii: Optional[bool] = None
 

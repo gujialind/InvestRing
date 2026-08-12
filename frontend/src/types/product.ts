@@ -3,7 +3,13 @@ export interface Product {
   market?: string;
   name: string;
   product_type: string;
-  asset_class_code?: string;
+  // 五维度标签（issue #128）：股票必填 region/style/size；债券必填 region+segment；
+  // 商品/现金 region/style/size 为 NULL；IN_TRANSIT 虚拟产品全 NULL
+  asset_class_code?: string | null;
+  region_code?: string | null;
+  style_code?: string | null;
+  size_code?: string | null;
+  segment_code?: string | null;
   confirm_days: number;
   is_qdii: boolean;
   data_source?: string;
@@ -19,6 +25,10 @@ export interface ProductCreate {
   name: string;
   product_type: string;
   asset_class_code?: string;
+  region_code?: string;
+  style_code?: string;
+  size_code?: string;
+  segment_code?: string;
   confirm_days?: number;
   is_qdii?: boolean;
   /** 数据源（后端默认 tushare） */
@@ -30,6 +40,10 @@ export interface ProductCreate {
 export interface ProductUpdate {
   name?: string;
   asset_class_code?: string;
+  region_code?: string;
+  style_code?: string;
+  size_code?: string;
+  segment_code?: string;
   confirm_days?: number;
   is_qdii?: boolean;
 }

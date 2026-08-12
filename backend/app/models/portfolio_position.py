@@ -17,7 +17,6 @@ class PortfolioPosition(Base):
     market_value = Column(Numeric(15, 4), default=0)
     cash_amount = Column(Numeric(15, 4))
     frozen_amount = Column(Numeric(15, 4), default=0)
-    asset_type = Column(String(20))
     snapshot_date = Column(Date, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 

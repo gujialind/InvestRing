@@ -24,7 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Eye, Users, Loader2, Power, PowerOff } from "lucide-react";
-import { formatCurrency, formatReturnRate, getReturnColorClass } from "@/lib/utils";
+import { formatCurrency, formatReturnRate, getReturnColorClass, getStatusBadgeVariant } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import {
   usePortfolioList,
   useCreatePortfolio,
@@ -186,15 +187,9 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">{portfolio.name}</CardTitle>
-                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                  portfolio.status === "active"
-                    ? "bg-green-100 text-green-800"
-                    : portfolio.status === "draft"
-                    ? "bg-yellow-100 text-yellow-800"
-                    : "bg-gray-100 text-gray-800"
-                }`}>
+                <Badge variant={getStatusBadgeVariant(portfolio.status)}>
                   {portfolio.status === "active" ? "活跃" : portfolio.status === "draft" ? "草稿" : "已关闭"}
-                </span>
+                </Badge>
               </div>
               <CardDescription>{portfolio.code}</CardDescription>
             </CardHeader>
@@ -250,7 +245,7 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
                       disabled={closePortfolio.isPending}
                       title="关闭组合"
                     >
-                      <PowerOff className="h-4 w-4 text-red-500" />
+                      <PowerOff className="h-4 w-4 text-destructive" />
                     </Button>
                   )}
                   {isAdmin && portfolio.status === "closed" && (
@@ -261,7 +256,7 @@ export default function PortfolioListContent({ basePath, variant = "desktop" }: 
                       disabled={activatePortfolio.isPending}
                       title="重新激活"
                     >
-                      <Power className="h-4 w-4 text-green-500" />
+                      <Power className="h-4 w-4 text-success" />
                     </Button>
                   )}
                 </div>

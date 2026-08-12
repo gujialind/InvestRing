@@ -79,7 +79,7 @@ export default function PortfolioActionButtons({
       disabled={isActivatePending}
       className={variant === "mobile" ? "col-span-2 w-full" : ""}
     >
-      <Power className="mr-2 h-4 w-4 text-green-500" />
+      <Power className="mr-2 h-4 w-4 text-success" />
       重新激活
     </Button>
   );

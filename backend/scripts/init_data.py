@@ -19,7 +19,7 @@ from app.models.scheduled_task import ScheduledTask
 from app.models.portfolio import Portfolio
 from app.models.product import Product
 from app.models.asset_classification import AssetClassification
-from app.constants.asset_names import ASSET_NAME_MAP
+from app.constants.asset_dimensions import ASSET_DIMENSIONS, PRODUCT_DIMENSIONS
 from app.models.platform import Platform
 from app.models.investor import Investor
 
@@ -239,8 +239,16 @@ def init_products(session):
     session.commit()
     
     for prod_data in products:
+        # 五维度标签（issue #128）：以 PRODUCT_DIMENSIONS 逐产品判定为准，
+        # 上方 dict 中的旧 asset_class_code 仅留作历史参照，落库前整体覆盖
+        dims = PRODUCT_DIMENSIONS[prod_data['code']]
+        prod_data.pop('asset_class_code', None)
+        prod_data.update({
+            'asset_class_code': dims[0], 'region_code': dims[1],
+            'style_code': dims[2], 'size_code': dims[3], 'segment_code': dims[4],
+        })
         existing = session.query(Product).filter(
-            Product.code == prod_data['code'], 
+            Product.code == prod_data['code'],
             Product.market == prod_data['market']
         ).first()
         if not existing:
@@ -253,44 +261,22 @@ def init_products(session):
     session.commit()
 
 def init_asset_classification(session):
-    """初始化资产分类数据"""
-    classifications = [
-        {'code': 'STOCK_CN_LARGE', 'asset_type': '股票', 'asset_category': '国内股票', 'asset_subcat': '大盘', 'description': '国内大盘股票'},
-        {'code': 'STOCK_CN_SMALL', 'asset_type': '股票', 'asset_category': '国内股票', 'asset_subcat': '中小盘', 'description': '国内中小盘股票'},
-        {'code': 'STOCK_CN_VALUE', 'asset_type': '股票', 'asset_category': '国内股票', 'asset_subcat': '价值', 'description': '国内价值风格股票'},
-        {'code': 'STOCK_CN_GROWTH', 'asset_type': '股票', 'asset_category': '国内股票', 'asset_subcat': '成长', 'description': '国内成长风格股票'},
-        {'code': 'STOCK_CN_MIXED', 'asset_type': '股票', 'asset_category': '国内股票', 'asset_subcat': '综合', 'description': '国内综合风格股票'},
-        {'code': 'STOCK_HK_LARGE', 'asset_type': '股票', 'asset_category': '港股', 'asset_subcat': '大盘', 'description': '港股大盘股票'},
-        {'code': 'STOCK_HK_SMALL', 'asset_type': '股票', 'asset_category': '港股', 'asset_subcat': '中小盘', 'description': '港股中小盘股票'},
-        {'code': 'STOCK_US', 'asset_type': '股票', 'asset_category': '美股', 'asset_subcat': '美股', 'description': '美国股票'},
-        {'code': 'STOCK_EU', 'asset_type': '股票', 'asset_category': '欧洲', 'asset_subcat': '欧洲', 'description': '欧洲股票'},
-        {'code': 'STOCK_JP', 'asset_type': '股票', 'asset_category': '日本', 'asset_subcat': '日本', 'description': '日本股票'},
-        {'code': 'STOCK_GLOBAL', 'asset_type': '股票', 'asset_category': '海外股票', 'asset_subcat': '全球', 'description': '全球股票'},
-        {'code': 'BOND_SHORT', 'asset_type': '债券', 'asset_category': '国内债券', 'asset_subcat': '短债', 'description': '国内短期债券'},
-        {'code': 'BOND_LONG', 'asset_type': '债券', 'asset_category': '国内债券', 'asset_subcat': '中长债', 'description': '国内中长期债券'},
-        {'code': 'BOND_MIXED', 'asset_type': '债券', 'asset_category': '国内债券', 'asset_subcat': '综合债', 'description': '国内综合债券'},
-        {'code': 'BOND_US', 'asset_type': '债券', 'asset_category': '国际债券', 'asset_subcat': '美债', 'description': '美国债券'},
-        {'code': 'BOND_GLOBAL', 'asset_type': '债券', 'asset_category': '国际债券', 'asset_subcat': '全球', 'description': '全球债券'},
-        {'code': 'GOLD', 'asset_type': '黄金', 'asset_category': '黄金', 'asset_subcat': '黄金', 'description': '黄金资产'},
-        {'code': 'CASH', 'asset_type': '现金', 'asset_category': '现金', 'asset_subcat': '现金', 'description': '现金类资产（含货币基金）'}
-    ]
-    
-    for class_data in classifications:
-        # asset_name 单一事实来源为 ASSET_NAME_MAP（与迁移 0007 回填共用）
-        class_data['asset_name'] = ASSET_NAME_MAP[class_data['code']]
-        existing = session.query(AssetClassification).filter(AssetClassification.code == class_data['code']).first()
+    """初始化资产分类维度值字典（issue #128 正交维度重构）
+
+    维度值单一事实来源为 app/constants/asset_dimensions.py::ASSET_DIMENSIONS
+    （与迁移 0008、tests/conftest.py 共用）。已存在维度值不覆盖（管理面归 #111）。
+    """
+    for code, dimension, name, sort_order, description in ASSET_DIMENSIONS:
+        existing = session.query(AssetClassification).filter(AssetClassification.code == code).first()
         if not existing:
-            classification = AssetClassification(**class_data)
-            session.add(classification)
-            print(f"添加资产分类: {class_data['code']}")
+            session.add(AssetClassification(
+                code=code, dimension=dimension, name=name,
+                sort_order=sort_order, description=description,
+            ))
+            print(f"添加维度值: {code} ({dimension}/{name})")
         else:
-            # 老库脚本级兜底：仅补 NULL，不覆盖迁移回填或人工修改的值
-            if existing.asset_name is None:
-                existing.asset_name = class_data['asset_name']
-                print(f"回填资产分类名目: {class_data['code']}")
-            else:
-                print(f"资产分类已存在: {class_data['code']}")
-    
+            print(f"维度值已存在: {code}")
+
     session.commit()
 
 def init_platforms(session):

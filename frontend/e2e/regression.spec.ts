@@ -61,13 +61,14 @@ test.describe('移动端布局回归（防 P0-8 复发）', () => {
   });
 });
 
-test.describe('持仓明细 asset_name 二级聚合（防 #109 / #114 复发）', () => {
-  // 防 #109：同名目产品曾各自独立成卡、无名目级合计；
+test.describe('持仓明细维度二级分组（防 #109 / #114 复发，#128 维度化）', () => {
+  // 防 #109：同分组产品曾各自独立成卡、无分组级合计；
   // 关系式断言（子分组头合计 = 名下各行市值之和），不硬绑定生产快照数字
-  // V4 定稿 + #114 修正：名目 chip 始终位于产品名之上（与大类同名除外），
+  // V4 定稿 + #114 修正：分组 chip 始终位于产品名之上（与大类同名除外），
   // chip 行合计恒显示（无论名下 1 行还是多行）；
   // data-testid="asset-group-header" 挂在所有 chip 行上
-  test('子分组头合计金额应等于名下各行市值之和（含单行名目）', async ({ page }) => {
+  // #128：分组数据源从 asset_name 换成维度 name（股票→region、债券/商品→segment）
+  test('子分组头合计金额应等于名下各行市值之和（含单行分组）', async ({ page }) => {
     await page.goto('/portfolio');
     const firstDetailLink = page.locator('a[href^="/portfolio/"]').first();
     if ((await firstDetailLink.count()) === 0) {
@@ -80,7 +81,7 @@ test.describe('持仓明细 asset_name 二级聚合（防 #109 / #114 复发）'
     const headerCount = await headers.count();
     test.skip(
       headerCount === 0,
-      '环境中无满足子分组 chip 渲染条件（名目与大类不同名）的数据'
+      '环境中无满足子分组 chip 渲染条件（组名与大类不同名）的数据'
     );
 
     // 金额均为「x,xxx.xx 元」格式，取文本内首个两位小数数字

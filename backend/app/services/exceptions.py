@@ -1,9 +1,8 @@
 """
 领域异常（Business Error）
 
-统一的业务异常载体，供 service 层抛出、router 全局处理器与 CLI 上下文分别映射：
+统一的业务异常载体，供 service 层抛出、router 全局处理器映射：
 - router：FastAPI 异常处理器 → JSONResponse(detail={"error": code, "message": message})
-- CLI：cli_context → output.error(code, message)
 
 service 层只抛本模块（或其子类）异常，不 import fastapi、不感知 HTTP。
 """
@@ -14,7 +13,7 @@ class BusinessError(Exception):
     """业务规则违反异常。
 
     Attributes:
-        code: 稳定的错误码（如 NON_TRADING_DAY），REST 与 CLI 共用
+        code: 稳定的错误码（如 NON_TRADING_DAY），REST 共用
         message: 人类可读描述
         http_status: REST 层映射的 HTTP 状态码（默认 422 业务校验失败）
         details: 额外结构化信息（可选）
