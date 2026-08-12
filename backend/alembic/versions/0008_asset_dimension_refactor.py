@@ -152,11 +152,10 @@ def _validate_backfill():
             f"{col} IS NOT NULL AND {col} NOT IN (SELECT code FROM asset_classification)",
         )
     # 仍有未迁移的旧码（IN_TRANSIT 等 asset_class_code 为 NULL 的不受影响）
+    old_codes = ", ".join(f"'{c}'" for c in _OLD_CLASS_CODES)
     violations += _fetch(
         "旧分类码未清退",
-        "asset_class_code IN ('STOCK_CN_LARGE','STOCK_CN_SMALL','STOCK_CN_VALUE','STOCK_CN_GROWTH',"
-        "'STOCK_CN_MIXED','STOCK_HK_LARGE','STOCK_HK_SMALL','STOCK_US','STOCK_EU','STOCK_JP',"
-        "'STOCK_GLOBAL','BOND_SHORT','BOND_LONG','BOND_MIXED','BOND_US','BOND_GLOBAL','GOLD','CASH')",
+        f"asset_class_code IN ({old_codes})",
     )
 
     if violations:
