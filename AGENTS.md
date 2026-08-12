@@ -216,7 +216,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 ## 6. CLI 工具
 
-`ir-cli` 是独立轻量 HTTP 客户端（typer + httpx），入口 `ir_cli.main:app`（`ir`），通过 HTTP 调用运行中的后端。命令清单以 `ir --help` / `ir schema` 为准。
+`ir-cli` 是独立轻量 HTTP 客户端（typer + httpx），入口 `ir_cli.main:app`（`ir`），通过 HTTP 调用运行中的后端。命令清单以 `ir --help` / `ir schema` 为准，完整使用手册见 `ir-cli/CLI_MANUAL.md`。
 
 ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output.fields`，`*`前缀=默认摘要字段、`?`后缀=可空）与 `--index` 索引模式（极简命令索引，再按 `ir schema <group>` 按需加载）；契约由 `ir-cli/scripts/gen_response_fields.py` 从 `backend/openapi.json` 生成，CI 做一致性校验。
 
