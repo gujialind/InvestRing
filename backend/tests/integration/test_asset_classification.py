@@ -20,8 +20,19 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine
 
-from app.constants.asset_dimensions import ASSET_DIMENSIONS, PRODUCT_DIMENSIONS
-from app.models.asset_classification import AssetClassification
+from app.constants.asset_dimensions import (
+    ASSET_DIMENSIONS,
+    DIMENSION_APPLICABILITY,
+    DIMENSION_RULES,
+    PRODUCT_DIMENSIONS,
+    RULE_DIMENSIONS,
+    RULES,
+)
+from app.models.asset_classification import (
+    AssetClassification,
+    AssetClassDimensionRule,
+    AssetDimensionApplicability,
+)
 
 
 MIGRATION_PATH = os.path.join(
@@ -255,3 +266,225 @@ class TestProductDimensionMap:
         for code in ("519062.OF", "270002.OF", "519697.OF"):
             assert PRODUCT_DIMENSIONS[code][2] == "STYLE_BALANCED"
         assert PRODUCT_DIMENSIONS["512400.SH"][2] == "STYLE_VALUE"
+
+
+# ============================================================================
+# issue #135：矩阵落库（asset_class_dimension_rule）+ 值级适用关联
+# （asset_dimension_applicability）+ is_active 软失效
+# ============================================================================
+
+MIGRATION_0009_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..",
+    "alembic", "versions", "0009_dimension_rules_and_applicability.py",
+)
+
+
+def _load_migration_0009():
+    spec = importlib.util.spec_from_file_location("migration_0009", MIGRATION_0009_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestApplicabilityConstants:
+    """常量自洽性（常驻测试，防常量漂移）"""
+
+    def test_every_non_asset_class_value_has_applicability(self):
+        dim_values = {code for code, dim, *_ in ASSET_DIMENSIONS if dim != "asset_class"}
+        assert dim_values == set(DIMENSION_APPLICABILITY), (
+            f"缺失: {dim_values - set(DIMENSION_APPLICABILITY)}；"
+            f"多余: {set(DIMENSION_APPLICABILITY) - dim_values}"
+        )
+
+    def test_applicability_targets_are_asset_class(self):
+        asset_classes = {code for code, dim, *_ in ASSET_DIMENSIONS if dim == "asset_class"}
+        for value, classes in DIMENSION_APPLICABILITY.items():
+            assert classes, f"{value} 适用大类为空"
+            for c in classes:
+                assert c in asset_classes, f"{value} 关联了非 asset_class 值 {c}"
+
+    def test_rules_reference_valid_values(self):
+        asset_classes = {code for code, dim, *_ in ASSET_DIMENSIONS if dim == "asset_class"}
+        for asset_class, rules in DIMENSION_RULES.items():
+            assert asset_class in asset_classes
+            for dimension, rule in rules.items():
+                assert dimension in RULE_DIMENSIONS
+                assert rule in RULES
+
+    def test_rules_respect_applicability(self):
+        """值关联的大类必须允许该值所属维度（无 nonsense 关联）"""
+        dim_of_value = {code: dim for code, dim, *_ in ASSET_DIMENSIONS}
+        for value, classes in DIMENSION_APPLICABILITY.items():
+            for c in classes:
+                assert dim_of_value[value] in DIMENSION_RULES.get(c, {}), (
+                    f"{value} 关联 {c}，但 {c} 禁止 {dim_of_value[value]} 维度"
+                )
+
+    def test_product_dimensions_pass_value_level(self):
+        """存量兼容（验收断言）：PRODUCT_DIMENSIONS 全部通过值级适用校验"""
+        for code, (asset, region, style, size, segment) in PRODUCT_DIMENSIONS.items():
+            for value in (region, style, size, segment):
+                if value is None:
+                    continue
+                assert asset in DIMENSION_APPLICABILITY[value], (
+                    f"{code}: {value} 不适用于 {asset}"
+                )
+
+
+class TestApplicabilitySeed:
+    """conftest 种子与常量一致（常驻测试）"""
+
+    def test_applicability_seed_matches_constants(self, test_db):
+        rows = test_db.query(AssetDimensionApplicability).all()
+        db_pairs = {(r.dimension_value_code, r.asset_class_code) for r in rows}
+        expected = {(v, c) for v, classes in DIMENSION_APPLICABILITY.items() for c in classes}
+        assert db_pairs == expected
+
+    def test_rules_seed_matches_constants(self, test_db):
+        rows = test_db.query(AssetClassDimensionRule).all()
+        db_rules = {(r.asset_class_code, r.dimension): r.rule for r in rows}
+        expected = {
+            (c, d): rule for c, rules in DIMENSION_RULES.items() for d, rule in rules.items()
+        }
+        assert db_rules == expected
+
+    def test_classification_seed_is_active_default(self, test_db):
+        rows = test_db.query(AssetClassification).all()
+        assert all(r.is_active for r in rows)
+
+
+def _create_pre0009_schema(engine, products):
+    """构造 0009 之前的结构（0008 完成态，仅相关列）并插入字典与产品"""
+    with engine.begin() as conn:
+        conn.execute(sa.text(
+            "CREATE TABLE asset_classification ("
+            " code VARCHAR(30) PRIMARY KEY,"
+            " dimension VARCHAR(20) NOT NULL,"
+            " name VARCHAR(50) NOT NULL,"
+            " sort_order INTEGER,"
+            " description TEXT"
+            ")"
+        ))
+        conn.execute(sa.text(
+            "CREATE TABLE product ("
+            " code VARCHAR(20) PRIMARY KEY,"
+            " market VARCHAR(20),"
+            " name VARCHAR(100) NOT NULL,"
+            " product_type VARCHAR(20) NOT NULL,"
+            " asset_class_code VARCHAR(30),"
+            " region_code VARCHAR(30),"
+            " style_code VARCHAR(30),"
+            " size_code VARCHAR(30),"
+            " segment_code VARCHAR(30)"
+            ")"
+        ))
+        for code, dimension, name, sort_order, description in ASSET_DIMENSIONS:
+            conn.execute(
+                sa.text(
+                    "INSERT INTO asset_classification (code, dimension, name, sort_order)"
+                    " VALUES (:code, :dimension, :name, :sort_order)"
+                ).bindparams(
+                    code=code, dimension=dimension, name=name, sort_order=sort_order,
+                )
+            )
+        for code, dims in products:
+            asset, region, style, size, segment = dims
+            conn.execute(
+                sa.text(
+                    "INSERT INTO product (code, market, name, product_type,"
+                    " asset_class_code, region_code, style_code, size_code, segment_code)"
+                    " VALUES (:code, 'CN_OTC', '测试产品', 'OEF',"
+                    " :asset, :region, :style, :size, :segment)"
+                ).bindparams(
+                    code=code, asset=asset, region=region,
+                    style=style, size=size, segment=segment,
+                )
+            )
+
+
+_SAMPLE_PRODUCTS_0009 = [
+    ("510300.SH", ("ASSET_STOCK", "REGION_CN", "STYLE_BALANCED", "SIZE_LARGE", "SEG_COMPOSITE")),
+    ("518880.SH", ("ASSET_COMMODITY", None, None, None, "SEG_GOLD")),
+    ("007823.OF", ("ASSET_BOND", "REGION_CN", None, None, "SEG_BOND_SHORT")),
+    ("CASH", ("ASSET_CASH", None, None, None, None)),
+    ("IN_TRANSIT_BUY", (None, None, None, None, None)),
+]
+
+
+class TestMigration0009:
+    """迁移 0009：两表 + is_active + 回填 + 校验（SQLite 方言）"""
+
+    def test_upgrade_full_flow(self):
+        migration = _load_migration_0009()
+        engine = create_engine("sqlite:///:memory:")
+        _create_pre0009_schema(engine, _SAMPLE_PRODUCTS_0009)
+
+        _run_upgrade(engine, migration)
+
+        # is_active 列存在且存量回填为 active
+        ac_cols = {c["name"] for c in sa.inspect(engine).get_columns("asset_classification")}
+        assert "is_active" in ac_cols
+        with engine.connect() as conn:
+            inactive = conn.execute(sa.text(
+                "SELECT COUNT(*) FROM asset_classification WHERE is_active = 0"
+            )).scalar()
+            app_rows = conn.execute(sa.text(
+                "SELECT dimension_value_code, asset_class_code FROM asset_dimension_applicability"
+            )).fetchall()
+            rule_rows = conn.execute(sa.text(
+                "SELECT asset_class_code, dimension, rule FROM asset_class_dimension_rule"
+            )).fetchall()
+        assert inactive == 0
+        assert {(r[0], r[1]) for r in app_rows} == {
+            (v, c) for v, classes in DIMENSION_APPLICABILITY.items() for c in classes
+        }
+        assert {(r[0], r[1]): r[2] for r in rule_rows} == {
+            (c, d): rule for c, rules in DIMENSION_RULES.items() for d, rule in rules.items()
+        }
+
+    def test_upgrade_idempotent(self):
+        migration = _load_migration_0009()
+        engine = create_engine("sqlite:///:memory:")
+        _create_pre0009_schema(engine, _SAMPLE_PRODUCTS_0009)
+
+        _run_upgrade(engine, migration)
+        _run_upgrade(engine, migration)
+
+        with engine.connect() as conn:
+            app_count = conn.execute(sa.text(
+                "SELECT COUNT(*) FROM asset_dimension_applicability"
+            )).scalar()
+            rule_count = conn.execute(sa.text(
+                "SELECT COUNT(*) FROM asset_class_dimension_rule"
+            )).scalar()
+        assert app_count == sum(len(c) for c in DIMENSION_APPLICABILITY.values())
+        assert rule_count == sum(len(r) for r in DIMENSION_RULES.values())
+
+    def test_value_level_violation_aborts(self):
+        """存量产品值级违例（股票挂 SEG_GOLD）→ raise 中止"""
+        migration = _load_migration_0009()
+        engine = create_engine("sqlite:///:memory:")
+        bad = _SAMPLE_PRODUCTS_0009 + [
+            ("BROKEN.OF", ("ASSET_STOCK", "REGION_CN", "STYLE_BALANCED", "SIZE_LARGE", "SEG_GOLD")),
+        ]
+        _create_pre0009_schema(engine, bad)
+
+        with pytest.raises(RuntimeError, match="0009"):
+            _run_upgrade(engine, migration)
+
+    def test_downgrade(self):
+        migration = _load_migration_0009()
+        engine = create_engine("sqlite:///:memory:")
+        _create_pre0009_schema(engine, _SAMPLE_PRODUCTS_0009)
+        _run_upgrade(engine, migration)
+
+        with engine.begin() as conn:
+            ctx = MigrationContext.configure(conn)
+            with Operations.context(ctx):
+                migration.downgrade()
+
+        tables = set(sa.inspect(engine).get_table_names())
+        assert "asset_dimension_applicability" not in tables
+        assert "asset_class_dimension_rule" not in tables
+        ac_cols = {c["name"] for c in sa.inspect(engine).get_columns("asset_classification")}
+        assert "is_active" not in ac_cols
