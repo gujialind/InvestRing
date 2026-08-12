@@ -9,7 +9,7 @@
 - sort_order：展示顺序。注意 asset_class 维度的 sort_order 同时是前端色板序位
   （大类颜色按 sort_order 从 CHART_COLORS 序位取色），变更即改色。
 
-维度适用矩阵（product_service 校验与迁移回填校验共用此约定）：
+维度适用矩阵的语义（#135 起落库为 DIMENSION_RULES 种子，此处仅留语义说明）：
 - asset_class：全部产品必填；
 - region：股票/债券必填，商品/现金 NULL；
 - style/size：仅股票，其余 NULL；
@@ -23,6 +23,14 @@ ASSET_ALTERNATIVE + SEG_REIT），不为假想需求预留空值——故当前�
   见 issue #128 评论：商品 vs 股票以跟踪标的为准；港股并入中国；中概互联类归中国）；
 - OLD_CLASS_FALLBACK：旧扁平 code → 维度值的通用映射，作为迁移对未列入
   PRODUCT_DIMENSIONS 的产品（如用户手工新增）的兜底回填。
+
+适用性关系（issue #135 矩阵落库）分两层，DB 为运行期事实来源、本模块为种子来源
+（迁移 0009、init_data.py、tests/conftest.py 三方同源消费）：
+- DIMENSION_RULES（维度级，表 asset_class_dimension_rule）：asset_class →
+  {dimension: rule}，rule ∈ required/optional，未登记的 dimension = forbidden；
+  未登记的大类 = 全 forbidden（现金型语义），新建大类配规则后运行期即可用；
+- DIMENSION_APPLICABILITY（值级，表 asset_dimension_applicability）：维度值 →
+  适用 asset_class 元组（多对多，如 REGION_CN 同时适用股票与债券）。
 """
 
 # (code, dimension, name, sort_order, description)
@@ -225,4 +233,68 @@ PRODUCT_DIMENSIONS: dict[str, tuple[str, str | None, str | None, str | None, str
     "007204.OF": ("ASSET_BOND", "REGION_US", None, None, "SEG_BOND_MIDLONG"),
     "1001767346": ("ASSET_BOND", "REGION_GLOBAL", None, None, "SEG_BOND_COMPOSITE"),
     "1001767344": ("ASSET_BOND", "REGION_GLOBAL", None, None, "SEG_BOND_COMPOSITE"),
+}
+
+# ============================================================================
+# 适用性关系（issue #135 矩阵落库）：DB 为运行期事实来源，以下为种子定义
+# ============================================================================
+
+# 可规则化维度（asset_class 自身不参与规则；dimension 名与 asset_classification.dimension 一致）
+RULE_DIMENSIONS = ("region", "style", "size", "segment")
+RULE_REQUIRED = "required"
+RULE_OPTIONAL = "optional"
+RULES = (RULE_REQUIRED, RULE_OPTIONAL)  # 无规则行 = forbidden
+
+# 维度级适用矩阵（表 asset_class_dimension_rule 的种子）：
+# asset_class → {dimension: rule}；未登记 dimension = forbidden；未登记大类 = 全 forbidden
+DIMENSION_RULES: dict[str, dict[str, str]] = {
+    "ASSET_STOCK": {
+        "region": RULE_REQUIRED, "style": RULE_REQUIRED,
+        "size": RULE_REQUIRED, "segment": RULE_OPTIONAL,
+    },
+    "ASSET_BOND": {"region": RULE_REQUIRED, "segment": RULE_REQUIRED},
+    "ASSET_COMMODITY": {"segment": RULE_OPTIONAL},
+    "ASSET_CASH": {},
+}
+
+# 值级适用关联（表 asset_dimension_applicability 的种子）：维度值 → 适用 asset_class
+# 元组（多对多）。asset_class 维度自身不参与关联；ASSET_CASH 无任何关联值。
+DIMENSION_APPLICABILITY: dict[str, tuple[str, ...]] = {
+    # ---- region：股票 + 债券 ----
+    "REGION_CN": ("ASSET_STOCK", "ASSET_BOND"),
+    "REGION_US": ("ASSET_STOCK", "ASSET_BOND"),
+    "REGION_EU": ("ASSET_STOCK", "ASSET_BOND"),
+    "REGION_SEA": ("ASSET_STOCK", "ASSET_BOND"),
+    "REGION_JP": ("ASSET_STOCK", "ASSET_BOND"),
+    "REGION_GLOBAL": ("ASSET_STOCK", "ASSET_BOND"),
+    # ---- style / size：仅股票 ----
+    "STYLE_GROWTH": ("ASSET_STOCK",),
+    "STYLE_VALUE": ("ASSET_STOCK",),
+    "STYLE_BALANCED": ("ASSET_STOCK",),
+    "SIZE_LARGE": ("ASSET_STOCK",),
+    "SIZE_SMALL": ("ASSET_STOCK",),
+    # ---- segment：综合 + 行业类 → 股票 ----
+    "SEG_COMPOSITE": ("ASSET_STOCK",),
+    "SEG_DIVIDEND": ("ASSET_STOCK",),
+    "SEG_BANK": ("ASSET_STOCK",),
+    "SEG_SECURITIES": ("ASSET_STOCK",),
+    "SEG_INSURANCE": ("ASSET_STOCK",),
+    "SEG_NONBANK": ("ASSET_STOCK",),
+    "SEG_FINREAL": ("ASSET_STOCK",),
+    "SEG_MEDICAL": ("ASSET_STOCK",),
+    "SEG_MEDIA": ("ASSET_STOCK",),
+    "SEG_NEWENERGY": ("ASSET_STOCK",),
+    "SEG_NONFERROUS": ("ASSET_STOCK",),
+    "SEG_TECH": ("ASSET_STOCK",),
+    "SEG_INTERNET": ("ASSET_STOCK",),
+    "SEG_CONSUMER": ("ASSET_STOCK",),
+    "SEG_ENVIRONMENT": ("ASSET_STOCK",),
+    "SEG_PENSION": ("ASSET_STOCK",),
+    "SEG_ENERGY": ("ASSET_STOCK",),
+    # ---- segment：债券期限 ----
+    "SEG_BOND_SHORT": ("ASSET_BOND",),
+    "SEG_BOND_MIDLONG": ("ASSET_BOND",),
+    "SEG_BOND_COMPOSITE": ("ASSET_BOND",),
+    # ---- segment：商品品种 ----
+    "SEG_GOLD": ("ASSET_COMMODITY",),
 }
