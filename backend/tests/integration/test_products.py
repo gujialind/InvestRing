@@ -191,6 +191,14 @@ class TestDimensionMatrixValidation:
         assert resp.status_code == 422
         assert resp.json()["detail"]["error"] == "INVALID_DIMENSION_TAGS"
 
+    def test_undefined_matrix_asset_class_422(self, client, admin_headers, test_db):
+        """字典新增大类值但适用矩阵未登记 → 422（而非 KeyError → 500，PR #130 评审 M1）"""
+        _seed_dims(test_db)
+        create_asset_classification(test_db, code="ASSET_ALTERNATIVE")
+        resp = self._post(client, admin_headers, asset_class_code="ASSET_ALTERNATIVE")
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_DIMENSION_TAGS"
+
     def test_valid_stock_ok(self, client, admin_headers, test_db):
         """合法股票组合 → 创建成功且维度落库"""
         _seed_dims(test_db)
