@@ -68,7 +68,8 @@ export default function ProductsContent() {
           market: editingProduct.market,
           data: {
             name: formData.name,
-            asset_class_code: formData.asset_class_code,
+            // Product 维度字段可空（#128），ProductUpdate 不接受 null → 收敛为 undefined
+            asset_class_code: formData.asset_class_code ?? undefined,
             confirm_days: formData.confirm_days,
             is_qdii: formData.is_qdii,
           },
