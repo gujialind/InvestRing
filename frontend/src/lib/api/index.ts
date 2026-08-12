@@ -10,6 +10,7 @@ export { subscriptionApi } from "./subscription";
 export { tradeApi } from "./trade";
 export { productApi } from "./product";
 export type { PriceDataPoint } from "./product";
+export { assetClassificationApi } from "./asset-classification";
 export { platformApi } from "./platform";
 export { systemApi } from "./system";
 export { snapshotApi } from "./snapshot";
@@ -40,3 +41,4 @@ export type {
 } from "@/types/log";
 export type { NotificationItem } from "@/types/notification";
 export type { TradingCalendarDay, DataSourceConfig } from "@/types/system";
+export type { AssetClassificationItem } from "@/types/asset-classification";

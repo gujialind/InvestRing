@@ -65,7 +65,7 @@ def _seed_sell_portfolio(db, pc, plat):
     create_position_snapshot(
         db, pc, "CASH", "", SNAP,
         cash_amount=0, unit_price=None, cost_price=None,
-        platform_code=plat, asset_type="cash",
+        platform_code=plat,
     )
     create_position_snapshot(
         db, pc, "022959.OF", "CN_OTC", SNAP,
@@ -230,7 +230,7 @@ class TestCashTransferPrecision:
         create_position_snapshot(
             db, pc, "CASH", "", SNAP,
             cash_amount=Decimal(cash), unit_price=None, cost_price=None,
-            platform_code="MYCF", asset_type="cash",
+            platform_code="MYCF",
         )
 
     def test_transfer_amount_quantized_to_two_decimals(self, test_db):
@@ -310,7 +310,7 @@ class TestRestInputQuantization:
         create_position_snapshot(
             db, pc, "CASH", "", SNAP,
             cash_amount=Decimal(cash), unit_price=None, cost_price=None,
-            platform_code=plat, asset_type="cash",
+            platform_code=plat,
         )
 
     def test_buy_four_decimal_input_quantized_passes_gate(self, client, admin_headers, test_db):

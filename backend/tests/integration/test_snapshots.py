@@ -27,7 +27,7 @@ def _setup_cash_snapshot(db, portfolio_code: str, snapshot_date: date, amount: f
         db, portfolio_code, "CASH", "",
         snapshot_date=snapshot_date,
         cash_amount=amount, unit_price=None, cost_price=None,
-        market_value=amount, platform_code="MYCF", asset_type="cash",
+        market_value=amount, platform_code="MYCF",
     )
     create_value_snapshot(
         db, portfolio_code, snapshot_date,
@@ -229,13 +229,13 @@ class TestRecalculateAtomicity:
         """NAV 缺失 → 预校验 422，三张快照表与重算前完全一致"""
         port = create_portfolio(test_db, code="ATOM_PRE", status="active")
         create_product(test_db, code="ATOMX.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         _setup_cash_snapshot(test_db, port.code, self.D0)
         # 最新持仓含无任何价格记录的基金 → price_data 预校验必失败
         create_position_snapshot(
             test_db, port.code, "ATOMX.OF", "CN_OTC",
             snapshot_date=self.D0, shares=100.0, market_value=100.0,
-            platform_code="MYCF", asset_type="stock",
+            platform_code="MYCF",
         )
         ids_before = self._snapshot_ids(test_db, port.code)
 
@@ -265,7 +265,7 @@ class TestRecalculateAtomicity:
         """
         port = create_portfolio(test_db, code="ATOM_MID", status="active")
         create_product(test_db, code="ATOMY.OF", market="CN_OTC",
-                       product_type="OEF", asset_class_code="STOCK_CN_LARGE")
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
         _setup_cash_snapshot(test_db, port.code, self.D0)
         _setup_cash_snapshot(test_db, port.code, self.NEXT_DAY)
         create_trade(

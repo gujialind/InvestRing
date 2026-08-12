@@ -1,33 +1,29 @@
 import type { Position } from "@/types/position";
+import type { AssetClassificationItem } from "@/types/asset-classification";
+import { assetClassColor, IN_TRANSIT_COLOR, OTHER_COLOR } from "@/lib/colors";
 import { largestRemainderPercents } from "@/lib/utils";
 
 /**
- * 资产大类聚合（issue #99）：饼图图例与持仓分区头共用的单一计算入口。
+ * 资产大类聚合（issue #128 字典驱动）：饼图图例与持仓分区头共用的单一计算入口。
  *
- * 大类口径：股票/债券/黄金/现金/在途/其他。
- * - IN_TRANSIT_BUY/SELL（asset_type=cash）抽出为独立「在途」类，不与现金混合；
- * - CASH 行及其余 asset_type=cash 行归「现金」；
- * - 基金行 asset_type 存的就是中文大类名（股票/债券/黄金），缺省归「其他」。
+ * 大类口径：asset_class 维度字典（股票/债券/商品/现金）+ 在途 + 其他。
+ * - IN_TRANSIT_BUY/SELL 抽出为独立「在途」伪大类，不与现金混合；
+ * - 基金/CASH 行按读侧派生的 asset_class_code 归大类（CASH 产品 → 现金）；
+ * - 派生缺失或字典未收录的行并入「其他」伪大类兜底，不丢行。
+ * 展示顺序与颜色由字典 sort_order 驱动；「在途」固定插现金后、「其他」垫底。
  */
 
 export const IN_TRANSIT_CODES = new Set(["IN_TRANSIT_BUY", "IN_TRANSIT_SELL"]);
 
-/** 大类色板（对齐预览稿）：股票 blue / 债券 violet / 黄金 amber / 现金 slate-400 / 在途 slate-300 */
-export const ASSET_TYPE_COLORS: Record<string, string> = {
-  股票: "#3b82f6",
-  债券: "#8b5cf6",
-  黄金: "#f59e0b",
-  现金: "#94a3b8",
-  在途: "#cbd5e1",
-  其他: "#64748b",
-};
-
-/** 大类展示顺序 */
-export const CATEGORY_ORDER = ["股票", "债券", "黄金", "现金", "在途", "其他"];
+/** 伪大类稳定键（非字典维度值，前端固定附加） */
+export const PSEUDO_IN_TRANSIT_CODE = "__IN_TRANSIT__";
+export const PSEUDO_OTHER_CODE = "__OTHER__";
 
 export interface AllocationItem {
-  /** 大类名（股票/债券/黄金/现金/在途/其他） */
+  /** 大类展示名（维度 name / 在途 / 其他） */
   key: string;
+  /** 大类稳定键（维度 code / 伪大类键） */
+  code: string;
   /** 市值合计（元） */
   value: number;
   /** 占比（%）：最大余数法，全部项加总恒为 100.0 */
@@ -40,11 +36,10 @@ export function positionAmount(p: Position): number {
   return p.market_value ?? p.cash_amount ?? 0;
 }
 
-/** 持仓行 → 资产大类 */
-export function categoryOf(p: Position): string {
-  if (IN_TRANSIT_CODES.has(p.product_code)) return "在途";
-  if (p.product_code === "CASH" || p.asset_type === "cash") return "现金";
-  return p.asset_type || "其他";
+/** 持仓行 → 大类稳定键：在途 > asset_class_code > 其他 */
+export function categoryCodeOf(p: Position): string {
+  if (IN_TRANSIT_CODES.has(p.product_code)) return PSEUDO_IN_TRANSIT_CODE;
+  return p.asset_class_code || PSEUDO_OTHER_CODE;
 }
 
 /**
@@ -55,24 +50,78 @@ export function buildRowPercents(positions: Position[]): number[] {
   return largestRemainderPercents(positions.map((p) => positionAmount(p)));
 }
 
-/** 按资产大类聚合持仓（大类占比 = 行级占比加总，与分区头/卡片严格自洽） */
-export function buildAllocation(positions: Position[]): AllocationItem[] {
+/**
+ * 按资产大类聚合持仓（大类占比 = 行级占比加总，与分区头/卡片严格自洽）。
+ * assetClasses：asset_class 维度字典（入参顺序不限，内部按 sort_order 排序）。
+ */
+export function buildAllocation(
+  positions: Position[],
+  assetClasses: AssetClassificationItem[]
+): AllocationItem[] {
   const rowPercents = buildRowPercents(positions);
-  const byCategory = new Map<string, { value: number; percent: number }>();
+  const byCode = new Map<string, { value: number; percent: number }>();
   positions.forEach((p, i) => {
-    const cat = categoryOf(p);
-    const cur = byCategory.get(cat) ?? { value: 0, percent: 0 };
+    const code = categoryCodeOf(p);
+    const cur = byCode.get(code) ?? { value: 0, percent: 0 };
     cur.value += positionAmount(p);
     cur.percent += rowPercents[i];
-    byCategory.set(cat, cur);
+    byCode.set(code, cur);
   });
-  const cats = [...byCategory.keys()].sort(
-    (a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b)
-  );
-  return cats.map((c) => ({
-    key: c,
-    value: byCategory.get(c)?.value ?? 0,
-    percent: byCategory.get(c)?.percent ?? 0,
-    color: ASSET_TYPE_COLORS[c] ?? ASSET_TYPE_COLORS["其他"],
-  }));
+
+  const items: AllocationItem[] = [];
+  const emitted = new Set<string>();
+
+  // 在途伪大类：先算好，固定插到现金大类之后（无现金行则随字典序末尾追加）
+  let inTransitItem: AllocationItem | null = null;
+  const inTransitAgg = byCode.get(PSEUDO_IN_TRANSIT_CODE);
+  if (inTransitAgg) {
+    emitted.add(PSEUDO_IN_TRANSIT_CODE);
+    inTransitItem = {
+      key: "在途",
+      code: PSEUDO_IN_TRANSIT_CODE,
+      value: inTransitAgg.value,
+      percent: inTransitAgg.percent,
+      color: IN_TRANSIT_COLOR,
+    };
+  }
+
+  for (const ac of [...assetClasses].sort((a, b) => a.sort_order - b.sort_order)) {
+    const agg = byCode.get(ac.code);
+    if (agg) {
+      emitted.add(ac.code);
+      items.push({
+        key: ac.name,
+        code: ac.code,
+        value: agg.value,
+        percent: agg.percent,
+        color: assetClassColor(ac.sort_order),
+      });
+    }
+    if (ac.code === "ASSET_CASH" && inTransitItem) {
+      items.push(inTransitItem);
+      inTransitItem = null;
+    }
+  }
+  if (inTransitItem) items.push(inTransitItem);
+
+  // 其他：显式兜底 code + 字典未收录 code 合并（不丢行），固定垫底
+  let otherValue = 0;
+  let otherPercent = 0;
+  let hasOther = false;
+  for (const [code, agg] of byCode) {
+    if (emitted.has(code)) continue;
+    hasOther = true;
+    otherValue += agg.value;
+    otherPercent += agg.percent;
+  }
+  if (hasOther) {
+    items.push({
+      key: "其他",
+      code: PSEUDO_OTHER_CODE,
+      value: otherValue,
+      percent: otherPercent,
+      color: OTHER_COLOR,
+    });
+  }
+  return items;
 }

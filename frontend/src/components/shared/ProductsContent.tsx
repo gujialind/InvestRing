@@ -68,7 +68,8 @@ export default function ProductsContent() {
           market: editingProduct.market,
           data: {
             name: formData.name,
-            asset_class_code: formData.asset_class_code,
+            // Product 维度字段可空（#128），ProductUpdate 不接受 null → 收敛为 undefined
+            asset_class_code: formData.asset_class_code ?? undefined,
             confirm_days: formData.confirm_days,
             is_qdii: formData.is_qdii,
           },
@@ -299,11 +300,11 @@ export default function ProductsContent() {
                   <TableCell>{product.is_qdii ? "是" : "否"}</TableCell>
                   <TableCell>
                     {product.data_source_status === "success" ? (
-                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <CheckCircle className="h-4 w-4 text-success" />
                     ) : product.data_source_status === "failed" ? (
-                      <XCircle className="h-4 w-4 text-red-500" />
+                      <XCircle className="h-4 w-4 text-destructive" />
                     ) : (
-                      <span className="text-yellow-500">待验证</span>
+                      <span className="text-warning">待验证</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right">

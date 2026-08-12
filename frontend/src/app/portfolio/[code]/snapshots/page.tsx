@@ -362,18 +362,18 @@ export default function PortfolioSnapshotsPage() {
                           : "default"
                       }
                       className={cn(
-                        check.status === "passed" && "border-green-500 bg-green-50",
-                        check.status === "warning" && "border-yellow-500 bg-yellow-50"
+                        check.status === "passed" && "border-success/40 bg-success-soft",
+                        check.status === "warning" && "border-warning/40 bg-warning-soft"
                       )}
                     >
                       {check.status === "passed" && (
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        <CheckCircle2 className="h-4 w-4 text-success" />
                       )}
                       {check.status === "failed" && (
                         <XCircle className="h-4 w-4" />
                       )}
                       {check.status === "warning" && (
-                        <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                        <AlertTriangle className="h-4 w-4 text-warning" />
                       )}
                       <AlertDescription>
                         <span className="font-medium">{check.check_type}</span>

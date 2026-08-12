@@ -17,6 +17,7 @@ import {
   usePortfolioPerformance,
 } from "@/hooks/usePortfolio";
 import { useRoleCheck } from "@/hooks/useAuth";
+import { useAssetClassifications } from "@/hooks/useAssetClassification";
 import NavCurve from "@/components/charts/NavCurve";
 import AssetAllocationPie from "@/components/charts/AssetAllocationPie";
 import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
@@ -39,6 +40,9 @@ function MobilePortfolioDetailInner() {
   const { data: positionsData, isLoading: positionsLoading } = usePositionList(code, {
     page_size: 100,
   });
+  // asset_class 维度字典（issue #128）：驱动饼图颜色/顺序与持仓分区
+  const { data: assetClassDict, isLoading: dictLoading } =
+    useAssetClassifications("asset_class");
   // 投资人列表仅 ?tab=investors 视图惰性查询（draft 也允许查看）
   const { data: investors, isLoading: investorsLoading } = usePortfolioInvestors(code, {
     enabled: showInvestors,
@@ -57,10 +61,12 @@ function MobilePortfolioDetailInner() {
   const { data: performance } = usePortfolioPerformance(code, !isDraftStatus);
 
   const positions = positionsData?.items || [];
+  const assetClasses = assetClassDict?.items || [];
   const isLoading =
     portfolioLoading ||
     snapshotLoading ||
     positionsLoading ||
+    dictLoading ||
     (showInvestors && investorsLoading);
 
   if (isLoading) {
@@ -84,7 +90,7 @@ function MobilePortfolioDetailInner() {
   }
 
   const isDraft = portfolio.status === "draft";
-  const allocation = buildAllocation(positions);
+  const allocation = buildAllocation(positions, assetClasses);
 
   /* 页尾「管理」列表项（低频入口，替换旧 Quick Links）；
      份额变动/快照管理暂无移动端路由，不在列表展示（桌面详情页有入口） */
@@ -175,7 +181,7 @@ function MobilePortfolioDetailInner() {
               </Card>
 
               {/* 分类持仓分区（含在途资金独立卡片） */}
-              <PositionSections positions={positions} />
+              <PositionSections positions={positions} assetClasses={assetClasses} />
 
               {/* NAV Chart */}
               {navHistory.length > 0 && (

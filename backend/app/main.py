@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.database import engine, Base, SessionLocal
-from app.routers import auth, investors, portfolios, products, platforms, trading_calendar, data_sources, market_data, subscriptions, trades, share_change_events, positions, logs, tasks, notifications, snapshots, cash_transfers, sync_jobs
+from app.routers import auth, investors, portfolios, products, platforms, trading_calendar, data_sources, market_data, subscriptions, trades, share_change_events, positions, logs, tasks, notifications, snapshots, cash_transfers, sync_jobs, asset_classifications
 from app.services.exceptions import BusinessError
 from app.init_tasks import init_scheduled_tasks
 
@@ -65,6 +65,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(investors.router, prefix="/api/investors", tags=["投资人管理"])
 app.include_router(portfolios.router, prefix="/api/portfolios", tags=["组合管理"])
 app.include_router(products.router, prefix="/api/products", tags=["产品管理"])
+app.include_router(asset_classifications.router, prefix="/api/asset-classifications", tags=["资产分类维度字典"])
 app.include_router(platforms.router, prefix="/api/platforms", tags=["平台管理"])
 app.include_router(trading_calendar.router, prefix="/api/trading-calendar", tags=["交易日历"])
 app.include_router(data_sources.router, prefix="/api/system/data-sources", tags=["数据源配置"])
