@@ -26,6 +26,8 @@ import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, Trendin
 import { Product, ProductCreate } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
 import { formatNav } from "@/lib/utils";
+import { DIMENSION_FIELDS, DIMENSION_LABELS, RULE_DIMENSIONS } from "@/lib/dimensions";
+import { useAssetClassifications } from "@/hooks/useAssetClassification";
 import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
 import {
   useProductList,
@@ -59,6 +61,49 @@ export default function ProductsContent() {
     is_qdii: false,
   });
 
+  // 维度字典驱动五维录入控件（issue #135）：选项按 applicable + is_active 过滤，
+  // 必填/禁用读顶层 dimension_rules；后端 validate_dimension_tags 为兜底
+  const { data: dictData } = useAssetClassifications();
+  const dictItems = dictData?.items ?? [];
+  const dimensionRules = dictData?.dimension_rules ?? {};
+  const assetClasses = dictItems.filter((i) => i.dimension === "asset_class" && i.is_active);
+  const currentClass = formData.asset_class_code || "";
+  const ruleOf = (dimension: string): "required" | "optional" | null =>
+    currentClass ? dimensionRules[currentClass]?.[dimension] ?? null : null;
+  /** 维度下拉选项：启用且适用当前大类；编辑回填的现值即使停用/不适用也保留显示 */
+  const dimensionOptions = (dimension: string) => {
+    const field = DIMENSION_FIELDS[dimension as keyof typeof DIMENSION_FIELDS];
+    const current = formData[field];
+    return dictItems.filter(
+      (i) =>
+        i.dimension === dimension &&
+        ((i.is_active && currentClass && i.applicable_asset_classes.includes(currentClass)) ||
+          (current != null && i.code === current))
+    );
+  };
+
+  /** 切换大类：禁用维度清空；不适用/停用值重置 */
+  const handleClassChange = (assetClass: string) => {
+    const next: Partial<Product> = { ...formData, asset_class_code: assetClass || undefined };
+    for (const dimension of RULE_DIMENSIONS) {
+      const field = DIMENSION_FIELDS[dimension];
+      const rule = assetClass ? dimensionRules[assetClass]?.[dimension] ?? null : null;
+      const current = next[field];
+      if (rule === null) {
+        next[field] = undefined;
+      } else if (current) {
+        const stillValid = dictItems.some(
+          (i) =>
+            i.code === current &&
+            i.is_active &&
+            i.applicable_asset_classes.includes(assetClass)
+        );
+        if (!stillValid) next[field] = undefined;
+      }
+    }
+    setFormData(next);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingProduct) {
@@ -68,8 +113,12 @@ export default function ProductsContent() {
           market: editingProduct.market,
           data: {
             name: formData.name,
-            // Product 维度字段可空（#128），ProductUpdate 不接受 null → 收敛为 undefined
-            asset_class_code: formData.asset_class_code ?? undefined,
+            // 维度字段空值发 null 显式清除（后端 exclude_unset 下 null 进入合并校验）
+            asset_class_code: formData.asset_class_code || null,
+            region_code: formData.region_code || null,
+            style_code: formData.style_code || null,
+            size_code: formData.size_code || null,
+            segment_code: formData.segment_code || null,
             confirm_days: formData.confirm_days,
             is_qdii: formData.is_qdii,
           },
@@ -83,7 +132,21 @@ export default function ProductsContent() {
         }
       );
     } else {
-      createProduct.mutate(formData as ProductCreate, {
+      // 空字符串维度字段不下发（后端按缺省 NULL 处理；market 缺省由后端归一为 ""）
+      const createPayload: ProductCreate = {
+        code: formData.code ?? "",
+        name: formData.name ?? "",
+        product_type: formData.product_type ?? "ETF",
+        confirm_days: formData.confirm_days,
+        is_qdii: formData.is_qdii,
+        ...(formData.market ? { market: formData.market } : {}),
+        ...(formData.asset_class_code ? { asset_class_code: formData.asset_class_code } : {}),
+        ...(formData.region_code ? { region_code: formData.region_code } : {}),
+        ...(formData.style_code ? { style_code: formData.style_code } : {}),
+        ...(formData.size_code ? { size_code: formData.size_code } : {}),
+        ...(formData.segment_code ? { segment_code: formData.segment_code } : {}),
+      };
+      createProduct.mutate(createPayload, {
         onSuccess: () => {
           setIsDialogOpen(false);
           resetForm();
@@ -176,7 +239,7 @@ export default function ProductsContent() {
               添加产品
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editingProduct ? "编辑产品" : "添加产品"}</DialogTitle>
               <DialogDescription>
@@ -234,6 +297,67 @@ export default function ProductsContent() {
                     <option value="CASH">现金</option>
                   </select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="asset_class_code">资产大类</Label>
+                  <select
+                    id="asset_class_code"
+                    value={formData.asset_class_code ?? ""}
+                    onChange={(e) => handleClassChange(e.target.value)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">无（现金/虚拟产品）</option>
+                    {assetClasses.map((ac) => (
+                      <option key={ac.code} value={ac.code}>
+                        {ac.name}
+                      </option>
+                    ))}
+                    {/* 现值已停用/不在启用列表时补占位项，避免下拉显示错位 */}
+                    {formData.asset_class_code &&
+                      !assetClasses.some((ac) => ac.code === formData.asset_class_code) && (
+                        <option value={formData.asset_class_code}>
+                          {dictItems.find((i) => i.code === formData.asset_class_code)?.name ??
+                            formData.asset_class_code}
+                          （已停用）
+                        </option>
+                      )}
+                  </select>
+                </div>
+                {RULE_DIMENSIONS.map((dimension) => {
+                  const rule = ruleOf(dimension);
+                  if (!rule) return null;
+                  const field = DIMENSION_FIELDS[dimension];
+                  const options = dimensionOptions(dimension);
+                  const current = formData[field];
+                  return (
+                    <div className="space-y-2" key={dimension}>
+                      <Label htmlFor={field}>
+                        {DIMENSION_LABELS[dimension]}
+                        {rule === "required" && <span className="text-destructive"> *</span>}
+                      </Label>
+                      <select
+                        id={field}
+                        value={current ?? ""}
+                        onChange={(e) =>
+                          setFormData({ ...formData, [field]: e.target.value || undefined })
+                        }
+                        required={rule === "required"}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <option value="">未设置</option>
+                        {options.map((item) => (
+                          <option key={item.code} value={item.code}>
+                            {item.name}
+                          </option>
+                        ))}
+                        {current && !options.some((i) => i.code === current) && (
+                          <option value={current}>
+                            {dictItems.find((i) => i.code === current)?.name ?? current}（已停用）
+                          </option>
+                        )}
+                      </select>
+                    </div>
+                  );
+                })}
                 <div className="space-y-2">
                   <Label htmlFor="confirm_days">确认天数</Label>
                   <Input
