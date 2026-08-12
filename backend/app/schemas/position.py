@@ -15,7 +15,6 @@ class PositionBase(BaseModel):
     market_value: Optional[float] = None
     cash_amount: Optional[float] = None
     frozen_amount: Optional[float] = None
-    asset_type: Optional[str] = None
     snapshot_date: date
 
 
@@ -43,10 +42,21 @@ class PositionResponse(PositionBase):
     product_name: Optional[str] = None
     profit_loss: Optional[float] = None
     profit_loss_percent: Optional[float] = None
-    # 读侧派生字段（issue #99）：asset_name 来自 asset_classification（聚合展示短名目）；
+    # 读侧派生字段（issue #128）：五维度标签 code+name 成对，来自 product 表
+    # join 维度字典（快照不存分类，portfolio_position.asset_type 列已删除）；
+    # CASH 行 asset_class=现金；IN_TRANSIT 行五维度全 NULL（前端按 product_code 判在途）
+    asset_class_code: Optional[str] = None
+    asset_class_name: Optional[str] = None
+    region_code: Optional[str] = None
+    region_name: Optional[str] = None
+    style_code: Optional[str] = None
+    style_name: Optional[str] = None
+    size_code: Optional[str] = None
+    size_name: Optional[str] = None
+    segment_code: Optional[str] = None
+    segment_name: Optional[str] = None
     # daily_profit 为当日收益（首个快照日 / IN_TRANSIT 在途行 → None）；
     # is_qdii 来自 product 表（QDII 按 T-1 净值估值，前端提示日收益滞后一天）
-    asset_name: Optional[str] = None
     daily_profit: Optional[float] = None
     is_qdii: Optional[bool] = None
     # platform_name 来自 platform 表（批量 enrich，防 N+1，issue #106）
