@@ -12,7 +12,7 @@ interface AssetAllocationPieProps {
 
 /**
  * 资产分布环形图（issue #99）：左侧 donut + 右侧图例（名称 + 占比%）。
- * 色板与持仓分区共用 ASSET_TYPE_COLORS（股票/债券/黄金/现金/在途）。
+ * 颜色/顺序由 asset_class 维度字典 sort_order 驱动（#128，见 lib/allocation.ts）。
  */
 export default function AssetAllocationPie({ items, height = 180 }: AssetAllocationPieProps) {
   if (!items.length) {

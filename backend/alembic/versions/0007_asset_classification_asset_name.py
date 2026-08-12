@@ -5,29 +5,50 @@ Revises: 0006
 Create Date: 2026-08-06
 
 1. 新增 asset_classification.asset_name 列（String(50)，可空）：
-   聚合展示短名目（UI 分区/图例用），与 description（说明性文本）语义分工
-   见 app/constants/asset_names.py。
+   聚合展示短名目（UI 分区/图例用），与 description（说明性文本）语义分工。
 
-2. 存量 18 条种子分类按 code 回填 asset_name：
-   映射单一事实来源为 app/constants/asset_names.py::ASSET_NAME_MAP，
-   与 scripts/init_data.py 种子共用，杜绝两处手写漂移。
+2. 存量 18 条种子分类按 code 回填 asset_name（映射内联于本文件）。
 
 幂等设计：生产/CI 的启动顺序是先 `Base.metadata.create_all`（按当前模型
 直接建出 asset_name 列），再从 base 执行 `alembic upgrade head`，因此迁移
 到达本版本时列可能已存在。upgrade()/downgrade() 均先通过 inspector 检查
 列存在性，仅在需要时执行 DDL（复用 0005 的 _existing_columns 模式）；
 回填仅更新 asset_name IS NULL 的行，重跑无副作用，也不覆盖人工改过的值。
+
+注意（#128）：原映射模块 app/constants/asset_names.py 已在维度重构中删除，
+映射表内联回本迁移——历史迁移必须自包含，不引用可能被后续重构删除的应用代码。
 """
 from alembic import op
 import sqlalchemy as sa
-
-from app.constants.asset_names import ASSET_NAME_MAP
 
 
 revision = '0007'
 down_revision = '0006'
 branch_labels = None
 depends_on = None
+
+
+# 原 app/constants/asset_names.py::ASSET_NAME_MAP（#98），#128 删除该模块后内联至此
+ASSET_NAME_MAP: dict[str, str] = {
+    "STOCK_CN_LARGE": "国内大盘",
+    "STOCK_CN_SMALL": "国内中小盘",
+    "STOCK_CN_VALUE": "国内价值",
+    "STOCK_CN_GROWTH": "国内成长",
+    "STOCK_CN_MIXED": "国内综合",
+    "STOCK_HK_LARGE": "港股大盘",
+    "STOCK_HK_SMALL": "港股中小盘",
+    "STOCK_US": "美股",
+    "STOCK_EU": "欧洲股票",
+    "STOCK_JP": "日本股票",
+    "STOCK_GLOBAL": "全球股票",
+    "BOND_SHORT": "短债",
+    "BOND_LONG": "中长债",
+    "BOND_MIXED": "综合债",
+    "BOND_US": "美债",
+    "BOND_GLOBAL": "全球债券",
+    "GOLD": "黄金",
+    "CASH": "现金",
+}
 
 
 def _existing_columns(table: str) -> set:

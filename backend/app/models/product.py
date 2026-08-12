@@ -9,7 +9,13 @@ class Product(Base):
     market = Column(String(20), primary_key=True, nullable=True)
     name = Column(String(100), nullable=False)
     product_type = Column(String(20), nullable=False)
+    # 正交维度标签（issue #128）：asset_class 必填；region 股票/债券必填；
+    # style/size 仅股票；segment 按大类解释（股票→行业/债券→期限/商品→品种）
     asset_class_code = Column(String(30), ForeignKey("asset_classification.code"))
+    region_code = Column(String(30), ForeignKey("asset_classification.code"))
+    style_code = Column(String(30), ForeignKey("asset_classification.code"))
+    size_code = Column(String(30), ForeignKey("asset_classification.code"))
+    segment_code = Column(String(30), ForeignKey("asset_classification.code"))
     confirm_days = Column(Integer)
     is_qdii = Column(Boolean, default=False)
     data_source = Column(String(20), default="tushare")

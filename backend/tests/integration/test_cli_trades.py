@@ -73,7 +73,7 @@ class TestCliPairedCashLeg:
     def test_cli_fund_buy_generates_paired_cash_leg(self, cli_db):
         create_portfolio(cli_db, code="CLI_P1", status="active")
         create_product(cli_db, code="ETF_CLI", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="STOCK_CN_LARGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
                        confirm_days=0)
         create_platform(cli_db, code="CLI_PLAT")
         ensure_trading_day(cli_db, date(2025, 10, 6), is_open=True)
