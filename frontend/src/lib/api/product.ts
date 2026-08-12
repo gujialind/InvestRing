@@ -25,7 +25,17 @@ function requireMarket(market: string | undefined, action: string): string {
 }
 
 export const productApi = {
-  list: (params?: { page?: number; page_size?: number; product_type?: string }) =>
+  // 维度筛选参数（issue #128）：asset_class/region/style/size/segment 五维 code
+  list: (params?: {
+    page?: number;
+    page_size?: number;
+    product_type?: string;
+    asset_class_code?: string;
+    region_code?: string;
+    style_code?: string;
+    size_code?: string;
+    segment_code?: string;
+  }) =>
     request<PaginatedResponse<Product>>({ method: "GET", url: "/products", params }),
 
   // 后端两个端点：/products/{code}/{market} 精确匹配；/products/{code} 自动解析（一码多市场时抛 MARKET_AMBIGUOUS）。
