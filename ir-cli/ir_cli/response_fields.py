@@ -58,5 +58,23 @@ RESPONSE_FIELDS: dict = {
             "shape": "list",
             "fields": "*portfolio_code:str,*investor_code:str,*platform_code:str,*sub_type:str,*amount:num?,*shares:num?,*unit_price:num?,*apply_date:date,*confirm_date:date?,*status:str,notes:str?,*id:int,created_at:datetime?,updated_at:datetime?"
         }
+    },
+    "asset-classification": {
+        "list": {
+            "shape": "list",
+            "fields": "*code:str,*dimension:str,*name:str,*sort_order:int,description:str?,*is_active:bool,*applicable_asset_classes:list",
+            "notes": {
+                "_": "含停用值(is_active=false)，前端消费方自行过滤；维度级规则矩阵不在列表项内，用 get 单条或 API 顶层 dimension_rules",
+                "sort_order": "asset_class 维度的序位即前端饼图/分区色板序位，变更即改色",
+                "applicable_asset_classes": "值级适用大类（asset_class 维度值恒为空 list），按大类色板序位排序"
+            }
+        },
+        "get": {
+            "shape": "object",
+            "fields": "code:str,dimension:str,name:str,sort_order:int,description:str?,is_active:bool,applicable_asset_classes:list,dimension_rules:obj",
+            "notes": {
+                "dimension_rules": "仅 asset_class 维度值有值：{dimension: rule}，rule ∈ required/optional，未出现的维度 = forbidden"
+            }
+        }
     }
 }
