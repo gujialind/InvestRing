@@ -200,6 +200,8 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 技术栈版本以 `frontend/package.json` 为准（Next.js + React + Tailwind + shadcn/ui + Zustand + react-query；E2E 用 Playwright）。
 
+> **前端视觉规范**（语义色/涨跌色/图表色/数字格式/字号，issue #127）见 `docs/design/visual-spec.md`——写 frontend/ 代码前必读（Claude Code 另经 `.claude/rules/visual-spec.md` path-scoped 自动加载）。
+
 ### 5.1 双端路由与 Middleware（约定）
 
 * 移动端 `/m/` 前缀、PC 端根路径；`src/middleware.ts` 按 User-Agent 自动重定向；未登录（无 `token` cookie）重定向到对应登录页。页面清单直接看 `frontend/src/app/**/page.tsx`；移动端多为薄壳页，套 `MobileLayout` 后渲染共享内容组件。
