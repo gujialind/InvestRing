@@ -56,27 +56,32 @@ def get_positions(
     items = query.offset((page - 1) * page_size).limit(page_size).all()
 
     # 读侧派生字段（全部批量查询，防 N+1）：
-    # 产品名称/分类、asset_name、盈亏/收益率、daily_profit（issue #99）
+    # 产品名称、五维度标签（code+name 成对）、盈亏/收益率、daily_profit（issue #99/#128）
     codes = {p.product_code for p in items}
     name_map = {}
-    asset_class_by_product = {}
+    dims_by_product = {}
     qdii_map = {}
-    class_codes = set()
+    dim_codes = set()
     if codes:
-        for prod in db.query(Product.code, Product.market, Product.name, Product.asset_class_code, Product.is_qdii).filter(Product.code.in_(codes)).all():
+        for prod in db.query(
+            Product.code, Product.market, Product.name, Product.is_qdii,
+            Product.asset_class_code, Product.region_code, Product.style_code,
+            Product.size_code, Product.segment_code,
+        ).filter(Product.code.in_(codes)).all():
             name_map[(prod.code, prod.market)] = prod.name
-            asset_class_by_product[(prod.code, prod.market)] = prod.asset_class_code
             qdii_map[(prod.code, prod.market)] = prod.is_qdii
-            if prod.asset_class_code:
-                class_codes.add(prod.asset_class_code)
+            dims = (prod.asset_class_code, prod.region_code, prod.style_code,
+                    prod.size_code, prod.segment_code)
+            dims_by_product[(prod.code, prod.market)] = dims
+            dim_codes.update(c for c in dims if c)
 
-    # asset_name：分类编码 → 聚合展示短名目（issue #98）
-    asset_name_by_class = {}
-    if class_codes:
+    # 维度值 code → 展示名（维度字典批量查询，issue #128）
+    dim_name_by_code = {}
+    if dim_codes:
         for ac_code, ac_name in db.query(
-            AssetClassification.code, AssetClassification.asset_name
-        ).filter(AssetClassification.code.in_(class_codes)).all():
-            asset_name_by_class[ac_code] = ac_name
+            AssetClassification.code, AssetClassification.name
+        ).filter(AssetClassification.code.in_(dim_codes)).all():
+            dim_name_by_code[ac_code] = ac_name
 
     # platform_name：平台编码 → 名称（批量 enrich，防 N+1，issue #106）
     platform_codes = {p.platform_code for p in items if p.platform_code}
@@ -99,8 +104,13 @@ def get_positions(
         key = (p.portfolio_code, p.product_code, p.market, p.platform_code)
         row["product_name"] = name_map.get((p.product_code, p.market))
         row["is_qdii"] = qdii_map.get((p.product_code, p.market))
-        class_code = asset_class_by_product.get((p.product_code, p.market))
-        row["asset_name"] = asset_name_by_class.get(class_code) if class_code else None
+        dims = dims_by_product.get((p.product_code, p.market))
+        if dims:
+            for field, code in zip(
+                ("asset_class", "region", "style", "size", "segment"), dims
+            ):
+                row[f"{field}_code"] = code
+                row[f"{field}_name"] = dim_name_by_code.get(code) if code else None
         row["platform_name"] = platform_name_map.get(p.platform_code) if p.platform_code else None
         row["daily_profit"] = daily_profits.get(key)
         if p.shares is not None and p.cost_price is not None and p.market_value is not None:

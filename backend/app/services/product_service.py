@@ -8,8 +8,78 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.asset_classification import AssetClassification
 from app.models.product import Product
 from app.services.exceptions import BusinessError, NotFoundError
+
+# 维度字段 → 字典 dimension（issue #128）
+DIMENSION_FIELDS = ("asset_class_code", "region_code", "style_code", "size_code", "segment_code")
+_DIMENSION_OF_FIELD = {
+    "asset_class_code": "asset_class",
+    "region_code": "region",
+    "style_code": "style",
+    "size_code": "size",
+    "segment_code": "segment",
+}
+
+
+def validate_dimension_tags(db: Session, dims: dict) -> None:
+    """校验五维度标签（create 传入值 / update 合并值）：
+
+    1. 每个非 NULL code 必须存在于维度字典且 dimension 匹配字段；
+    2. 适用矩阵：股票必填 region/style/size；债券必填 region+segment 且
+       style/size 为 NULL；商品/现金的 region/style/size 必须为 NULL；
+       asset_class 为 NULL（虚拟产品）时其余维度必须全 NULL。
+    非法组合抛 INVALID_DIMENSION_TAGS（422）。
+    """
+    for field in DIMENSION_FIELDS:
+        code = dims.get(field)
+        if code is None:
+            continue
+        ac = db.query(AssetClassification).filter(AssetClassification.code == code).first()
+        if not ac or ac.dimension != _DIMENSION_OF_FIELD[field]:
+            raise BusinessError(
+                "INVALID_DIMENSION_TAGS",
+                f"维度值 {code} 不存在或不属于 {_DIMENSION_OF_FIELD[field]} 维度",
+                details={"field": field, "code": code},
+            )
+
+    asset = dims.get("asset_class_code")
+    if asset is None:
+        extra = [f for f in DIMENSION_FIELDS if f != "asset_class_code" and dims.get(f)]
+        if extra:
+            raise BusinessError(
+                "INVALID_DIMENSION_TAGS",
+                "未指定 asset_class 时其余维度必须为空",
+                details={"fields": extra},
+            )
+        return
+
+    required = {
+        "ASSET_STOCK": ("region_code", "style_code", "size_code"),
+        "ASSET_BOND": ("region_code", "segment_code"),
+    }.get(asset, ())
+    missing = [f for f in required if not dims.get(f)]
+    if missing:
+        raise BusinessError(
+            "INVALID_DIMENSION_TAGS",
+            f"{asset} 缺少必填维度：{', '.join(missing)}",
+            details={"asset_class_code": asset, "missing": missing},
+        )
+
+    forbidden = {
+        "ASSET_STOCK": (),
+        "ASSET_BOND": ("style_code", "size_code"),
+        "ASSET_COMMODITY": ("region_code", "style_code", "size_code"),
+        "ASSET_CASH": ("region_code", "style_code", "size_code"),
+    }[asset]
+    present = [f for f in forbidden if dims.get(f)]
+    if present:
+        raise BusinessError(
+            "INVALID_DIMENSION_TAGS",
+            f"{asset} 不允许维度：{', '.join(present)}",
+            details={"asset_class_code": asset, "forbidden": present},
+        )
 
 
 def calculate_confirm_days(market: Optional[str], is_qdii: bool) -> int:

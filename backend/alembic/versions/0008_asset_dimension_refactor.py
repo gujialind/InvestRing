@@ -54,33 +54,38 @@ def _existing_columns(table: str) -> set:
 
 
 def _insert_dimension_values():
-    """双方言幂等插入维度值字典（复用 0006 的方言分支模式）"""
+    """双方言幂等插入维度值字典（复用 0006 的方言分支模式）。
+
+    存量库的 asset_classification 仍带旧 NOT NULL 列（asset_type/asset_category），
+    插入时需顺带提供占位值（这些列与旧行在步骤 6 一并删除，占位值无实际语义）。
+    """
     dialect = op.get_bind().dialect.name
+    legacy_cols = _existing_columns('asset_classification') & {
+        'asset_type', 'asset_category', 'asset_subcat', 'asset_name'}
     for code, dimension, name, sort_order, description in ASSET_DIMENSIONS:
+        cols = ["code", "dimension", "name", "sort_order", "description"]
+        params = {
+            "code": code, "dimension": dimension, "name": name,
+            "sort_order": sort_order, "description": description,
+        }
+        # 旧 NOT NULL 列占位（仅存量库；asset_type/asset_category 为 NOT NULL）
+        for legacy in sorted(legacy_cols):
+            cols.append(legacy)
+            params[legacy] = name if legacy in ("asset_type", "asset_name") else dimension
+
+        col_list = ", ".join(cols)
+        val_list = ", ".join(f":{c}" for c in cols)
         if dialect == "mysql":
-            op.execute(
-                sa.text(
-                    "INSERT INTO asset_classification (code, dimension, name, sort_order, description) "
-                    "VALUES (:code, :dimension, :name, :sort_order, :description) "
-                    "ON DUPLICATE KEY UPDATE "
-                    "dimension=VALUES(dimension), name=VALUES(name), "
-                    "sort_order=VALUES(sort_order), description=VALUES(description)"
-                ).bindparams(
-                    code=code, dimension=dimension, name=name,
-                    sort_order=sort_order, description=description,
-                )
-            )
+            op.execute(sa.text(
+                f"INSERT INTO asset_classification ({col_list}) VALUES ({val_list}) "
+                "ON DUPLICATE KEY UPDATE "
+                "dimension=VALUES(dimension), name=VALUES(name), "
+                "sort_order=VALUES(sort_order), description=VALUES(description)"
+            ).bindparams(**params))
         else:
-            op.execute(
-                sa.text(
-                    "INSERT OR IGNORE INTO asset_classification "
-                    "(code, dimension, name, sort_order, description) "
-                    "VALUES (:code, :dimension, :name, :sort_order, :description)"
-                ).bindparams(
-                    code=code, dimension=dimension, name=name,
-                    sort_order=sort_order, description=description,
-                )
-            )
+            op.execute(sa.text(
+                f"INSERT OR IGNORE INTO asset_classification ({col_list}) VALUES ({val_list})"
+            ).bindparams(**params))
 
 
 def _backfill_products():
@@ -172,21 +177,22 @@ def upgrade():
     # 2. 维度值字典（双方言幂等）
     _insert_dimension_values()
 
-    # 3. product 四个维度列 + FK（幂等）
+    # 3. product 四个维度列 + FK（幂等；batch 模式兼容 SQLite，MySQL 下即普通 ALTER）
     product_cols = _existing_columns('product')
     if 'region_code' not in product_cols:
-        for col in ("region_code", "style_code", "size_code", "segment_code"):
-            op.add_column('product', sa.Column(col, sa.String(30), nullable=True))
-            op.create_foreign_key(
-                f'fk_product_{col}', 'product', 'asset_classification', [col], ['code']
-            )
+        with op.batch_alter_table('product') as batch_op:
+            for col in ("region_code", "style_code", "size_code", "segment_code"):
+                batch_op.add_column(sa.Column(col, sa.String(30), nullable=True))
+                batch_op.create_foreign_key(
+                    f'fk_product_{col}', 'asset_classification', [col], ['code']
+                )
 
     # 4. 回填 → 5. 校验（失败中止，尚未删除任何旧数据）
     _backfill_products()
     _validate_backfill()
 
     # 6. 清退旧分类行 + 删旧列（SQLite 经 batch 模式兼容 DROP COLUMN）
-    op.execute(
+    op.get_bind().execute(
         sa.text("DELETE FROM asset_classification WHERE code IN :codes")
         .bindparams(sa.bindparam("codes", expanding=True)),
         {"codes": list(_OLD_CLASS_CODES)},
