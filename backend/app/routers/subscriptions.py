@@ -12,6 +12,7 @@ from app.services.subscription_service import (
     confirm_single_subscription,
     unconfirm_single_subscription,
     create_subscription as create_subscription_service,
+    list_subscriptions,
 )
 from app.schemas.subscription import SubscriptionCreate, SubscriptionUpdate, SubscriptionResponse
 from app.dependencies import get_current_user, get_current_admin
@@ -23,21 +24,35 @@ router = APIRouter()
 def get_subscriptions(
     portfolio_code: Optional[str] = None,
     investor_code: Optional[str] = None,
+    status: Optional[str] = None,
+    sub_type: Optional[str] = None,
+    platform_code: Optional[str] = None,
+    apply_date_start: Optional[date] = None,
+    apply_date_end: Optional[date] = None,
+    confirm_date_start: Optional[date] = None,
+    confirm_date_end: Optional[date] = None,
     page: Optional[int] = 1,
     page_size: Optional[int] = 20,
     db: Session = Depends(get_db),
     current_user: Investor = Depends(get_current_user),
 ):
-    query = db.query(Subscription)
-    if portfolio_code:
-        query = query.filter(Subscription.portfolio_code == portfolio_code)
-    if investor_code:
-        query = query.filter(Subscription.investor_code == investor_code)
-    # viewer 只能查看自己的记录
+    # viewer 只能查看自己的记录（权限归适配层，过滤归 service）
     if current_user.role != "admin":
-        query = query.filter(Subscription.investor_code == current_user.code)
-    total = query.count()
-    items = query.order_by(Subscription.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        investor_code = current_user.code
+    items, total = list_subscriptions(
+        db,
+        portfolio_code=portfolio_code,
+        investor_code=investor_code,
+        status=status,
+        sub_type=sub_type,
+        platform_code=platform_code,
+        apply_date_start=apply_date_start,
+        apply_date_end=apply_date_end,
+        confirm_date_start=confirm_date_start,
+        confirm_date_end=confirm_date_end,
+        page=page,
+        page_size=page_size,
+    )
     return {
         "items": items,
         "total": total,
