@@ -101,10 +101,19 @@ class _StubClient:
 
     def __init__(self):
         self.calls = []
+        self.writes = []
 
     def get(self, path, params=None):
         self.calls.append((path, params))
         return {"data": {"available_cash": 100.0}}
+
+    def post(self, path, json_data=None):
+        self.writes.append(("POST", path, json_data))
+        return {"data": json_data or {}}
+
+    def put(self, path, json_data=None):
+        self.writes.append(("PUT", path, json_data))
+        return {"data": json_data or {}}
 
 
 @pytest.fixture
@@ -186,3 +195,62 @@ class TestAvailableSharesDualChannel:
         doc = json.loads(result.stdout)
         assert doc["error"]["code"] == "VALIDATION_ERROR"
         assert "--product-code" in doc["error"]["message"]
+
+
+class TestPortfolioDisplayConfigParam:
+    """portfolio create/update 的 --display-config 参数（issue #144）"""
+
+    def test_update_invalid_json_reports_validation_error(self, stub_client):
+        result = _runner().invoke(
+            app, ["portfolio", "update", "PORT001", "--display-config", "{bad"]
+        )
+        assert result.exit_code == 1
+        doc = json.loads(result.stdout)
+        assert doc["error"]["code"] == "VALIDATION_ERROR"
+        assert "--display-config" in doc["error"]["message"]
+        assert stub_client.writes == []
+
+    def test_update_non_object_json_reports_validation_error(self, stub_client):
+        result = _runner().invoke(
+            app, ["portfolio", "update", "PORT001", "--display-config", '["style"]']
+        )
+        assert result.exit_code == 1
+        doc = json.loads(result.stdout)
+        assert doc["error"]["code"] == "VALIDATION_ERROR"
+        assert stub_client.writes == []
+
+    def test_update_valid_json_passthrough(self, stub_client):
+        result = _runner().invoke(
+            app,
+            ["portfolio", "update", "PORT001", "--display-config", '{"ASSET_STOCK": "style"}'],
+        )
+        assert result.exit_code == 0
+        method, path, body = stub_client.writes[0]
+        assert method == "PUT"
+        assert path == "/api/portfolios/PORT001"
+        assert body == {"display_config": {"ASSET_STOCK": "style"}}
+
+    def test_create_valid_json_passthrough(self, stub_client):
+        result = _runner().invoke(
+            app,
+            [
+                "portfolio", "create",
+                "--code", "P_NEW", "--name", "新组合",
+                "--display-config", '{"ASSET_BOND": "region"}',
+            ],
+        )
+        assert result.exit_code == 0
+        method, path, body = stub_client.writes[0]
+        assert method == "POST"
+        assert path == "/api/portfolios"
+        assert body["display_config"] == {"ASSET_BOND": "region"}
+
+    def test_update_clear_via_json_body(self, stub_client):
+        """清空配置走 --json 显式 null（resolve_body 过滤 None，逐项参数无法表达）"""
+        result = _runner().invoke(
+            app,
+            ["portfolio", "update", "PORT001", "--json", '{"display_config": null}'],
+        )
+        assert result.exit_code == 0
+        _, _, body = stub_client.writes[0]
+        assert body == {"display_config": None}
