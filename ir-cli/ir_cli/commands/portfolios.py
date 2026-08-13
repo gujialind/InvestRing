@@ -89,15 +89,14 @@ def context(code: str = typer.Argument(..., help="组合代码")):
     portfolio = client.get(f"/api/portfolios/{code}")["data"]
     snapshot_status = client.get(f"/api/snapshots/portfolios/{code}/status")["data"]
     available_cash = client.get(f"/api/positions/portfolio/{code}/available-cash")["data"]
-    # 后端 list 端点不支持 status 过滤，全量拉取后本地筛 pending（摘要字段输出）
-    subs = client.get_all("/api/subscriptions", params={"portfolio_code": code})["data"]
-    trades = client.get_all("/api/trades", params={"portfolio_code": code})["data"]
-    pending_subs = project_fields(
-        [s for s in subs if s.get("status") == "pending"], SUMMARY_FIELDS["subscription"]
-    )
-    pending_trades = project_fields(
-        [t for t in trades if t.get("status") == "pending"], SUMMARY_FIELDS["trade"]
-    )
+    subs = client.get_all(
+        "/api/subscriptions", params={"portfolio_code": code, "status": "pending"}
+    )["data"]
+    trades = client.get_all(
+        "/api/trades", params={"portfolio_code": code, "status": "pending"}
+    )["data"]
+    pending_subs = project_fields(subs, SUMMARY_FIELDS["subscription"])
+    pending_trades = project_fields(trades, SUMMARY_FIELDS["trade"])
     hints = None
     if pending_subs or pending_trades:
         hints = [
