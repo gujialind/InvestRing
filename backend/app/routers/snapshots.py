@@ -1,6 +1,6 @@
 """快照管理API路由"""
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
@@ -18,13 +18,17 @@ from app.schemas.snapshot import (
     SnapshotValidationResult,
     SnapshotGenerationResult,
     RecalculationResult,
+    SnapshotListItem,
+    SnapshotListResponse,
     SnapshotStatusResponse,
 )
 from app.services.exceptions import BusinessError
 from app.services.snapshot_service import (
     catch_up_snapshots,
+    compute_missing_snapshot_dates,
     generate_daily_snapshots,
     generate_next_snapshot,
+    list_portfolio_snapshots,
     recalculate_snapshots,
     validate_snapshot_dependencies,
 )
@@ -292,8 +296,15 @@ def get_snapshot_status(
         PortfolioValueSnapshot.portfolio_code == code
     ).count()
     
-    # 计算缺失的交易日（简化：这里只返回空列表，实际实现需要更复杂的逻辑）
-    missing_dates = []
+    # 首末快照日区间内缺失的交易日（#146）：区间无快照（无基线）时为空
+    missing_dates: List[str] = []
+    if latest and earliest:
+        missing_dates = [
+            d.isoformat()
+            for d in compute_missing_snapshot_dates(
+                db, code, earliest.snapshot_date, latest.snapshot_date
+            )
+        ]
     
     # issue #71：最新快照日 CASH 持仓负现金平台清单（正常为空）
     negative_cash_platforms = []
@@ -314,6 +325,40 @@ def get_snapshot_status(
         first_snapshot_date=earliest.snapshot_date if earliest else None,
         missing_dates=missing_dates,
         negative_cash_platforms=negative_cash_platforms,
+    )
+
+
+@router.get("/portfolios/{code}/list", response_model=SnapshotListResponse)
+def list_snapshots(
+    code: str,
+    start_date: Optional[date] = Query(None, description="起始日期(含) YYYY-MM-DD"),
+    end_date: Optional[date] = Query(None, description="结束日期(含) YYYY-MM-DD"),
+    limit: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: Investor = Depends(get_current_user),
+):
+    """
+    快照历史列表（#146）：snapshot_date 倒序，可选闭区间过滤。
+
+    total 为 limit 截断前的过滤后计数，total > len(items) 即被截断。
+
+    权限：所有用户（与 status 一致）
+    """
+    portfolio = db.query(Portfolio).filter(Portfolio.code == code).first()
+    if not portfolio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "PORTFOLIO_NOT_FOUND", "message": f"组合 {code} 不存在"},
+        )
+
+    result = list_portfolio_snapshots(
+        db, code, start_date=start_date, end_date=end_date, limit=limit
+    )
+    return SnapshotListResponse(
+        portfolio_code=code,
+        items=[SnapshotListItem.model_validate(row) for row in result["items"]],
+        total=result["total"],
+        limit=limit,
     )
 
 
