@@ -1,7 +1,8 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { tradeApi, subscriptionApi, getErrorMessage, ApiException } from "@/lib/api";
+import type { SubscriptionListParams, TradeListParams } from "@/lib/api";
 import { TradeCreate, TradeUpdate } from "@/types/trade";
 import { SubscriptionCreate } from "@/types/subscription";
 import { useUIStore } from "@/stores/uiStore";
@@ -11,18 +12,12 @@ const SUBSCRIPTION_QUERY_KEY = "subscriptions";
 
 // ==================== 调仓交易 Hooks ====================
 
-// 交易列表 Hook
-export function useTradeList(
-  params?: {
-    page?: number;
-    page_size?: number;
-    portfolio_code?: string;
-    status?: string;
-  }
-) {
+// 交易列表 Hook（placeholderData 保留旧数据：筛选/翻页局部刷新不闪烁，规范 §14）
+export function useTradeList(params?: TradeListParams) {
   return useQuery({
     queryKey: [TRADE_QUERY_KEY, "list", params],
     queryFn: () => tradeApi.list(params),
+    placeholderData: keepPreviousData,
     staleTime: 30 * 1000,
   });
 }
@@ -253,18 +248,12 @@ export function useBatchRebalance() {
 
 // ==================== 申购赎回 Hooks ====================
 
-// 申购赎回列表 Hook
-export function useSubscriptionList(
-  params?: {
-    page?: number;
-    page_size?: number;
-    portfolio_code?: string;
-    status?: string;
-  }
-) {
+// 申购赎回列表 Hook（placeholderData 同 useTradeList，规范 §14）
+export function useSubscriptionList(params?: SubscriptionListParams) {
   return useQuery({
     queryKey: [SUBSCRIPTION_QUERY_KEY, "list", params],
     queryFn: () => subscriptionApi.list(params),
+    placeholderData: keepPreviousData,
     staleTime: 30 * 1000,
   });
 }
