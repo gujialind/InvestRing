@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,18 @@ const CONFIRM_TEXT: Record<"confirm" | "cancel" | "unconfirm" | "delete", { titl
   delete: { title: "删除申请", desc: "删除后将影响后续快照数据，建议先取消确认再删除。是否继续？" },
 };
 
+/** 主次双行单元格（visual-spec §8）：name 主行 + code 次要小字；映射缺失时回退只显示 code */
+function NameCodeCell({ code, nameMap }: { code: string; nameMap: Map<string, string> }) {
+  const name = nameMap.get(code);
+  if (!name) return <>{code}</>;
+  return (
+    <>
+      <div className="text-sm">{name}</div>
+      <div className="text-xs text-muted-foreground">{code}</div>
+    </>
+  );
+}
+
 /**
  * 申购赎回页内容（桌面/移动共用）。
  * 抽离自原 app/portfolio/[code]/subscriptions/page.tsx，
@@ -98,6 +110,16 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
   const investors = investorsData?.items || [];
   const platforms = platformsData?.items || [];
   const isDraft = portfolio?.status === "draft";
+
+  // 表格 name 显示映射（issue #124）：复用已加载列表，零新增请求；依赖 react-query 稳定引用避免每渲染重建
+  const investorNameMap = useMemo(
+    () => new Map((investorsData?.items ?? []).map((inv) => [inv.code, inv.name])),
+    [investorsData?.items]
+  );
+  const platformNameMap = useMemo(
+    () => new Map((platformsData?.items ?? []).map((plat) => [plat.code, plat.name])),
+    [platformsData?.items]
+  );
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [subType, setSubType] = useState<"subscribe" | "redeem">("subscribe");
@@ -342,8 +364,12 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
               <TableBody>
                 {subscriptions.map((sub) => (
                   <TableRow key={sub.id}>
-                    <TableCell>{sub.investor_code}</TableCell>
-                    <TableCell>{sub.platform_code || "-"}</TableCell>
+                    <TableCell>
+                      <NameCodeCell code={sub.investor_code} nameMap={investorNameMap} />
+                    </TableCell>
+                    <TableCell>
+                      {sub.platform_code ? <NameCodeCell code={sub.platform_code} nameMap={platformNameMap} /> : "-"}
+                    </TableCell>
                     <TableCell>
                       {/* 方向标识无状态语义：neutral badge + 方向色圆点（lib/colors，#127） */}
                       <Badge variant="neutral">
