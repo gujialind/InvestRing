@@ -22,7 +22,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, TrendingUp, Eye } from "lucide-react";
+import Link from "next/link";
+import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, TrendingUp, Eye, Tags } from "lucide-react";
 import { Product, ProductCreate } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
 import { formatNav } from "@/lib/utils";
@@ -391,6 +392,14 @@ export default function ProductsContent() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* 移动端入口：分类矩阵管理页（PC 端走侧边栏「分类」） */}
+      <Link href="/m/asset-classifications" className="lg:hidden block">
+        <Button variant="outline" size="sm" className="w-full">
+          <Tags className="mr-2 h-4 w-4" />
+          资产分类管理
+        </Button>
+      </Link>
 
       <Card>
         <CardHeader>
