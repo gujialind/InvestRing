@@ -51,12 +51,15 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     Investor, Portfolio, Product, Platform,
-    AssetClassification, TradingCalendar, PriceRecord,
+    AssetClassification, AssetDimensionApplicability, AssetClassDimensionRule,
+    TradingCalendar, PriceRecord,
     PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
     Subscription, Trade, ShareChangeEvent,
     SyncJob, ManualMarketValue, Notification, IdempotencyCache,
 )
-from app.constants.asset_dimensions import ASSET_DIMENSIONS, PRODUCT_DIMENSIONS
+from app.constants.asset_dimensions import (
+    ASSET_DIMENSIONS, PRODUCT_DIMENSIONS, DIMENSION_APPLICABILITY, DIMENSION_RULES,
+)
 from app.utils.security import get_password_hash, create_access_token
 
 
@@ -128,6 +131,26 @@ def _seed_base_data(test_engine):
                     code=code, dimension=dimension, name=name,
                     sort_order=sort_order, description=description,
                 ))
+        db.commit()
+
+        # 1b. 适用关系（issue #135 矩阵落库）：值级关联 + 维度级规则，
+        #     与迁移 0009/init_data.py 同源（测试环境跳过 alembic，须在此种子）
+        for value, classes in DIMENSION_APPLICABILITY.items():
+            for asset_class in classes:
+                if not db.query(AssetDimensionApplicability).filter_by(
+                    dimension_value_code=value, asset_class_code=asset_class
+                ).first():
+                    db.add(AssetDimensionApplicability(
+                        dimension_value_code=value, asset_class_code=asset_class,
+                    ))
+        for asset_class, rules in DIMENSION_RULES.items():
+            for dimension, rule in rules.items():
+                if not db.query(AssetClassDimensionRule).filter_by(
+                    asset_class_code=asset_class, dimension=dimension
+                ).first():
+                    db.add(AssetClassDimensionRule(
+                        asset_class_code=asset_class, dimension=dimension, rule=rule,
+                    ))
         db.commit()
 
         # 2. 平台
