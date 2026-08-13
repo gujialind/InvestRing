@@ -1,11 +1,11 @@
 "use client";
 
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ArrowLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronRight, Settings2 } from "lucide-react";
 import Link from "next/link";
 import {
   usePortfolio,
@@ -24,7 +24,10 @@ import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
 import PerformanceMetrics from "@/components/shared/PerformanceMetrics";
 import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
 import PortfolioInvestorsList from "@/components/shared/PortfolioInvestorsList";
-import PositionSections from "@/components/shared/PositionSections";
+import PositionSections, {
+  type SubDimension,
+} from "@/components/shared/PositionSections";
+import DisplayConfigDialog from "@/components/shared/dialogs/DisplayConfigDialog";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import { buildAllocation } from "@/lib/allocation";
@@ -59,6 +62,9 @@ function MobilePortfolioDetailInner() {
   // 绩效指标：draft 组合无快照，不请求
   const isDraftStatus = portfolio?.status === "draft";
   const { data: performance } = usePortfolioPerformance(code, !isDraftStatus);
+
+  // 分组维度配置弹窗（issue #144，与桌面端共用 Dialog）
+  const [displayConfigOpen, setDisplayConfigOpen] = useState(false);
 
   const positions = positionsData?.items || [];
   const assetClasses = assetClassDict?.items || [];
@@ -180,8 +186,33 @@ function MobilePortfolioDetailInner() {
                 </CardContent>
               </Card>
 
-              {/* 分类持仓分区（含在途资金独立卡片） */}
-              <PositionSections positions={positions} assetClasses={assetClasses} />
+              {/* 分类持仓分区（含在途资金独立卡片）；
+                  二级分组维度优先取组合级 display_config（issue #144） */}
+              <PositionSections
+                positions={positions}
+                assetClasses={assetClasses}
+                subDimByClass={
+                  portfolio.display_config as Record<string, SubDimension> | null
+                }
+                action={
+                  isAdmin ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setDisplayConfigOpen(true)}
+                    >
+                      <Settings2 className="mr-1.5 h-4 w-4" />
+                      分组维度
+                    </Button>
+                  ) : undefined
+                }
+              />
+              <DisplayConfigDialog
+                open={displayConfigOpen}
+                onOpenChange={setDisplayConfigOpen}
+                portfolioCode={code}
+                currentConfig={portfolio.display_config}
+              />
 
               {/* NAV Chart */}
               {navHistory.length > 0 && (

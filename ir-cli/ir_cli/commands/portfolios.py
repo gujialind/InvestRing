@@ -1,4 +1,5 @@
 """组合管理命令组"""
+import json
 import typer
 from typing import Optional
 from ir_cli.client import APIClient
@@ -6,6 +7,26 @@ from ir_cli.output import error, success
 from ir_cli.utils import SUMMARY_FIELDS, build_body, project_fields, resolve_body, run_list
 
 app = typer.Typer(no_args_is_help=True)
+
+
+def _parse_display_config(value: Optional[str]) -> Optional[dict]:
+    """解析 --display-config JSON 字符串（issue #144）；非法即本地报错退出。
+
+    清空配置请走 --json '{"display_config": null}'（resolve_body 过滤 None，
+    逐项参数无法表达显式 null）。
+    """
+    if value is None:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as e:
+        error("VALIDATION_ERROR", f"--display-config 不是合法 JSON：{e}")
+    if not isinstance(parsed, dict):
+        error(
+            "VALIDATION_ERROR",
+            '--display-config 必须是 JSON 对象，如 \'{"ASSET_STOCK": "style"}\'',
+        )
+    return parsed
 
 
 @app.command("list")
@@ -27,6 +48,10 @@ def create(
     code: Optional[str] = typer.Option(None, "--code", help="组合代码(必填)"),
     name: Optional[str] = typer.Option(None, "--name", help="组合名称(必填)"),
     description: Optional[str] = typer.Option(None, "--description", help="描述"),
+    display_config: Optional[str] = typer.Option(
+        None, "--display-config",
+        help='持仓明细二级分组维度 JSON，如 \'{"ASSET_STOCK": "style"}\'（issue #144）',
+    ),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """创建组合"""
@@ -37,6 +62,7 @@ def create(
         code=code,
         name=name,
         description=description,
+        display_config=_parse_display_config(display_config),
     )
     result = client.post("/api/portfolios", json_data=body)
     success(data=result["data"])
@@ -92,11 +118,21 @@ def update(
     code: str = typer.Argument(..., help="组合代码"),
     name: Optional[str] = typer.Option(None, "--name", help="组合名称"),
     description: Optional[str] = typer.Option(None, "--description", help="描述"),
+    display_config: Optional[str] = typer.Option(
+        None, "--display-config",
+        help='持仓明细二级分组维度 JSON，如 \'{"ASSET_STOCK": "style"}\'；'
+        '清空配置请用 --json \'{"display_config": null}\'（issue #144）',
+    ),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
     """更新组合信息"""
     client = APIClient.from_config()
-    body = resolve_body(json_body, name=name, description=description)
+    body = resolve_body(
+        json_body,
+        name=name,
+        description=description,
+        display_config=_parse_display_config(display_config),
+    )
     if not body:
         error("VALIDATION_ERROR", "未提供任何更新字段")
     result = client.put(f"/api/portfolios/{code}", json_data=body)
