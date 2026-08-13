@@ -6168,6 +6168,104 @@
         }
       }
     },
+    "/api/snapshots/portfolios/{code}/list": {
+      "get": {
+        "tags": [
+          "快照管理"
+        ],
+        "summary": "List Snapshots",
+        "description": "快照历史列表（#146）：snapshot_date 倒序，可选闭区间过滤。\n\ntotal 为 limit 截断前的过滤后计数，total > len(items) 即被截断。\n\n权限：所有用户（与 status 一致）",
+        "operationId": "list_snapshots_api_snapshots_portfolios__code__list_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "起始日期(含) YYYY-MM-DD",
+              "title": "Start Date"
+            },
+            "description": "起始日期(含) YYYY-MM-DD"
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束日期(含) YYYY-MM-DD",
+              "title": "End Date"
+            },
+            "description": "结束日期(含) YYYY-MM-DD"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "default": 500,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/snapshots/{portfolio_code}/{snapshot_date}": {
       "delete": {
         "tags": [
@@ -10192,6 +10290,73 @@
         ],
         "title": "SnapshotGenerationResult",
         "description": "快照生成结果"
+      },
+      "SnapshotListItem": {
+        "properties": {
+          "snapshot_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Snapshot Date"
+          },
+          "unit_price": {
+            "type": "number",
+            "title": "Unit Price"
+          },
+          "total_shares": {
+            "type": "number",
+            "title": "Total Shares"
+          },
+          "total_value": {
+            "type": "number",
+            "title": "Total Value"
+          },
+          "in_transit_total": {
+            "type": "number",
+            "title": "In Transit Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_date",
+          "unit_price",
+          "total_shares",
+          "total_value",
+          "in_transit_total"
+        ],
+        "title": "SnapshotListItem",
+        "description": "快照历史列表项（#146）。涨跌不由后端给——前端按相邻行 unit_price 推导。"
+      },
+      "SnapshotListResponse": {
+        "properties": {
+          "portfolio_code": {
+            "type": "string",
+            "title": "Portfolio Code"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SnapshotListItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_code",
+          "items",
+          "total",
+          "limit"
+        ],
+        "title": "SnapshotListResponse",
+        "description": "快照历史列表响应。total = 过滤后全量计数（limit 截断前），防无声截断。"
       },
       "SnapshotRecalculateRequest": {
         "properties": {
