@@ -39,11 +39,12 @@ export interface ProductCreate {
 
 export interface ProductUpdate {
   name?: string;
-  asset_class_code?: string;
-  region_code?: string;
-  style_code?: string;
-  size_code?: string;
-  segment_code?: string;
+  // 维度字段允许显式 null（清空）：后端 exclude_unset 语义下 null 会进入合并校验
+  asset_class_code?: string | null;
+  region_code?: string | null;
+  style_code?: string | null;
+  size_code?: string | null;
+  segment_code?: string | null;
   confirm_days?: number;
   is_qdii?: boolean;
 }
