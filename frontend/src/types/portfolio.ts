@@ -7,6 +7,9 @@ export interface Portfolio {
   closed_at?: string;
   created_at?: string;
   updated_at?: string;
+  /** 持仓明细二级分组维度覆盖（issue #144）：{"ASSET_STOCK": "style"}；
+   * null/缺省 = 前端内置默认；仅存显式覆盖项 */
+  display_config?: Record<string, string> | null;
   // 以下字段由后端在列表接口中动态计算返回
   total_value?: number;
   cumulative_return?: number;
@@ -20,11 +23,14 @@ export interface PortfolioCreate {
   code: string;
   name: string;
   description?: string;
+  display_config?: Record<string, string> | null;
 }
 
 export interface PortfolioUpdate {
   name?: string;
   description?: string;
+  /** 显式传 null = 清空配置恢复默认；不传 = 不修改 */
+  display_config?: Record<string, string> | null;
 }
 
 export interface PortfolioValueSnapshot {

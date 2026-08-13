@@ -287,8 +287,12 @@ ir portfolio list [--status <状态>] [--page N] [--page-size N] [--all]
 创建组合（初始状态为 `draft`）。
 
 ```bash
-ir portfolio create --code <代码> --name <名称> [--description <描述>]
+ir portfolio create --code <代码> --name <名称> [--description <描述>] [--display-config <JSON>]
 ```
+
+| 参数 | 默认值 | 说明 |
+|------|:------:|------|
+| `--display-config` | — | 持仓明细二级分组维度 JSON 对象，如 `'{"ASSET_STOCK": "style"}'`（issue #144） |
 
 #### `ir portfolio get`
 
@@ -303,8 +307,12 @@ ir portfolio get <CODE>
 更新组合信息。
 
 ```bash
-ir portfolio update <CODE> [--name <名称>] [--description <描述>]
+ir portfolio update <CODE> [--name <名称>] [--description <描述>] [--display-config <JSON>]
 ```
+
+| 参数 | 默认值 | 说明 |
+|------|:------:|------|
+| `--display-config` | — | 持仓明细二级分组维度 JSON 对象，如 `'{"ASSET_STOCK": "style"}'`（issue #144）；清空配置请用 `--json '{"display_config": null}'` |
 
 #### `ir portfolio close`
 
