@@ -38,7 +38,11 @@ def create_portfolio(
     current_user=Depends(get_current_admin),
 ):
     new_portfolio = portfolio_service.create_portfolio(
-        db, code=portfolio.code, name=portfolio.name, description=portfolio.description
+        db,
+        code=portfolio.code,
+        name=portfolio.name,
+        description=portfolio.description,
+        display_config=portfolio.display_config,
     )
     db.commit()
     db.refresh(new_portfolio)
@@ -70,7 +74,16 @@ def update_portfolio(
 ):
     updates = portfolio.dict(exclude_unset=True)
     db_portfolio = portfolio_service.update_portfolio(
-        db, code=code, name=updates.get("name"), description=updates.get("description")
+        db,
+        code=code,
+        name=updates.get("name"),
+        description=updates.get("description"),
+        # display_config 区分「不传 = 不修改」与「显式 null = 清空」（issue #144）
+        display_config=(
+            updates["display_config"]
+            if "display_config" in updates
+            else portfolio_service.UNSET
+        ),
     )
     db.commit()
     db.refresh(db_portfolio)
