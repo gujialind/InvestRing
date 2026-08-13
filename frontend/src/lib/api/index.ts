@@ -16,6 +16,7 @@ export { assetClassificationApi } from "./asset-classification";
 export { platformApi } from "./platform";
 export { systemApi } from "./system";
 export { snapshotApi } from "./snapshot";
+export { syncJobApi } from "./syncJob";
 export { shareChangeEventApi } from "./share-change-event";
 export { logApi } from "./log";
 export { taskApi } from "./task";
@@ -34,6 +35,7 @@ export type {
   ShareChangeEventUpdate,
 } from "@/types/share-change-event";
 export type { SnapshotValidationCheck } from "@/types/snapshot";
+export type { SyncJob } from "@/types/syncJob";
 export type {
   LoginLog,
   AuditLog,

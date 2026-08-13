@@ -101,6 +101,26 @@ class RecalculationResult(BaseModel):
     results: List[RecalculationPortfolioResult]
 
 
+class SnapshotListItem(BaseModel):
+    """快照历史列表项（#146）。涨跌不由后端给——前端按相邻行 unit_price 推导。"""
+    snapshot_date: date
+    unit_price: float
+    total_shares: float
+    total_value: float
+    in_transit_total: float
+
+    class Config:
+        from_attributes = True
+
+
+class SnapshotListResponse(BaseModel):
+    """快照历史列表响应。total = 过滤后全量计数（limit 截断前），防无声截断。"""
+    portfolio_code: str
+    items: List[SnapshotListItem]
+    total: int
+    limit: int
+
+
 class SnapshotStatusResponse(BaseModel):
     """组合快照状态响应"""
     portfolio_code: str
