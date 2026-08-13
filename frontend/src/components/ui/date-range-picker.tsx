@@ -71,6 +71,11 @@ export function DateRangePicker({
   // 快捷项选中态：点击快捷项置位，手选区间后按 isSameDay 联动（一致保持/否则解除）
   const [quickKey, setQuickKey] = React.useState<string | null>(() => matchQuickOption(value))
 
+  // 外部重置 value（如筛选栏「重置」恢复默认区间）时同步快捷项选中态
+  React.useEffect(() => {
+    setQuickKey(matchQuickOption(value))
+  }, [value])
+
   const handleSelect = (range: DateRange | undefined) => {
     onChange?.(range)
     setQuickKey(matchQuickOption(range))
