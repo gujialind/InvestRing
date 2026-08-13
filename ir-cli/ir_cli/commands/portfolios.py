@@ -62,7 +62,10 @@ def create(
         code=code,
         name=name,
         description=description,
-        display_config=_parse_display_config(display_config),
+        # --json 直传优先：逐项参数仅在其缺省时解析，避免对被忽略的参数报错
+        display_config=(
+            _parse_display_config(display_config) if json_body is None else None
+        ),
     )
     result = client.post("/api/portfolios", json_data=body)
     success(data=result["data"])
@@ -131,7 +134,10 @@ def update(
         json_body,
         name=name,
         description=description,
-        display_config=_parse_display_config(display_config),
+        # --json 直传优先：逐项参数仅在其缺省时解析，避免对被忽略的参数报错
+        display_config=(
+            _parse_display_config(display_config) if json_body is None else None
+        ),
     )
     if not body:
         error("VALIDATION_ERROR", "未提供任何更新字段")

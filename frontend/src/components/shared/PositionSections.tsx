@@ -19,6 +19,7 @@ import {
   positionAmount,
 } from "@/lib/allocation";
 import { formatNumber, getReturnColorClass } from "@/lib/utils";
+import { resolveSubDim, type SubDimension } from "@/lib/dimensions";
 
 interface PositionSectionsProps {
   positions: Position[];
@@ -26,9 +27,9 @@ interface PositionSectionsProps {
   assetClasses: AssetClassificationItem[];
   /** 分区头右侧操作位（如桌面端「管理持仓」按钮） */
   action?: ReactNode;
-  /** 二级分组维度覆盖（issue #144，来自 portfolio.display_config）：
-   * 仅存显式覆盖项，缺键/未传/null fallback 内置 SUB_DIM_BY_CLASS */
-  subDimByClass?: Record<string, SubDimension | null> | null;
+  /** 组合级二级分组维度覆盖（issue #144，portfolio.display_config 契约原样传入）：
+   * 仅存显式覆盖项，缺键/未传/null 时经 resolveSubDim fallback 内置默认 */
+  displayConfig?: Record<string, string> | null;
 }
 
 function formatProfit(value: number | null | undefined): string {
@@ -144,17 +145,6 @@ function PositionCard({
 
 type Row = { position: Position; percent: number };
 
-/** 二级分组维度（内置默认按大类固定；组合级覆盖经 subDimByClass 传入，issue #144） */
-export type SubDimension = "region" | "style" | "size" | "segment";
-
-/** 大类 → 二级分组维度默认（issue #128）：股票→地域、债券/商品→细分、现金平铺 */
-export const SUB_DIM_BY_CLASS: Record<string, SubDimension | null> = {
-  ASSET_STOCK: "region",
-  ASSET_BOND: "segment",
-  ASSET_COMMODITY: "segment",
-  ASSET_CASH: null,
-};
-
 interface AssetGroup {
   name: string;
   rows: Row[];
@@ -199,7 +189,7 @@ function groupRowsByDimension(
   return groups;
 }
 
-export default function PositionSections({ positions, assetClasses, action, subDimByClass }: PositionSectionsProps) {
+export default function PositionSections({ positions, assetClasses, action, displayConfig }: PositionSectionsProps) {
   if (!positions.length) {
     return (
       <div className="py-8 text-center text-muted-foreground">暂无持仓记录</div>
@@ -217,7 +207,7 @@ export default function PositionSections({ positions, assetClasses, action, subD
   );
 
   // 分区顺序/颜色/二级分组维度全部由 asset_class 字典驱动（sort_order 排序）；
-  // 二级维度优先取组合级覆盖（issue #144），缺键 fallback 内置默认
+  // 二级维度优先取组合级 display_config 覆盖（issue #144），缺键 fallback 内置默认
   const knownCodes = new Set(assetClasses.map((a) => a.code));
   const sections: {
     name: string;
@@ -233,10 +223,7 @@ export default function PositionSections({ positions, assetClasses, action, subD
       sections.push({
         name: ac.name,
         color: assetClassColor(ac.sort_order),
-        subDim:
-          subDimByClass && ac.code in subDimByClass
-            ? subDimByClass[ac.code]
-            : SUB_DIM_BY_CLASS[ac.code] ?? null,
+        subDim: resolveSubDim(displayConfig, ac.code),
         rows: sectionRows,
       });
     }

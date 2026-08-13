@@ -25,9 +25,7 @@ import PortfolioStatsCards from "@/components/shared/PortfolioStatsCards";
 import PerformanceMetrics from "@/components/shared/PerformanceMetrics";
 import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
 import PortfolioInvestorsList from "@/components/shared/PortfolioInvestorsList";
-import PositionSections, {
-  type SubDimension,
-} from "@/components/shared/PositionSections";
+import PositionSections from "@/components/shared/PositionSections";
 import DisplayConfigDialog from "@/components/shared/dialogs/DisplayConfigDialog";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
@@ -220,9 +218,7 @@ function PortfolioDetailInner() {
                 <PositionSections
                   positions={positions}
                   assetClasses={assetClasses}
-                  subDimByClass={
-                    portfolio.display_config as Record<string, SubDimension> | null
-                  }
+                  displayConfig={portfolio.display_config}
                   action={
                     isAdmin ? (
                       <div className="flex gap-2">

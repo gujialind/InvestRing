@@ -20,7 +20,7 @@ from app.models.trade import Trade
 from app.services.exceptions import BusinessError, NotFoundError
 
 # display_config 哨兵：区分 PUT「不传 = 不修改」与「显式 null = 清空」（issue #144）
-_UNSET = object()
+UNSET = object()
 
 
 def _get_portfolio_or_404(db: Session, code: str) -> Portfolio:
@@ -30,10 +30,13 @@ def _get_portfolio_or_404(db: Session, code: str) -> Portfolio:
     return portfolio
 
 
-def validate_display_config(db: Session, config: Optional[dict]) -> None:
-    """校验持仓明细二级分组维度配置（issue #144）。
+def validate_display_config(db: Session, config: Optional[dict]) -> Optional[dict]:
+    """校验并归一持仓明细二级分组维度配置（issue #144）。
 
-    规则（失败抛 INVALID_DISPLAY_CONFIG 422）：
+    返回归一后的配置：空 dict 归一为 None（语义等同默认，保持「仅存显式
+    覆盖项」单一表示，DB 不出现 {} 与 NULL 双表示）。
+
+    校验规则（失败抛 INVALID_DISPLAY_CONFIG 422）：
     - key 必须是字典中 dimension==asset_class 的维度值（不校验 is_active，
       停用大类无持仓时配置无副作用）；
     - value 必须在该大类的 asset_class_dimension_rule 登记（required/optional
@@ -41,9 +44,11 @@ def validate_display_config(db: Session, config: Optional[dict]) -> None:
       规则矩阵新登记维度运行期即可配（#135 理念）。
     """
     if config is None:
-        return
+        return None
     if not isinstance(config, dict):
         raise BusinessError("INVALID_DISPLAY_CONFIG", "display_config 必须是对象")
+    if not config:
+        return None
     class_codes = {
         row.code
         for row in db.query(AssetClassification.code).filter(
@@ -66,6 +71,7 @@ def validate_display_config(db: Session, config: Optional[dict]) -> None:
                 f"大类 {class_code} 不可按维度 {dimension} 二级分组"
                 + ("（该大类无维度规则行）" if not allowed else "（未在规则矩阵登记）"),
             )
+    return config
 
 
 def list_portfolios(
@@ -240,13 +246,12 @@ def create_portfolio(
     """创建组合（初始状态 draft）。不 commit。"""
     if db.query(Portfolio).filter(Portfolio.code == code).first():
         raise BusinessError("ALREADY_EXISTS", f"组合 {code} 已存在", http_status=400)
-    validate_display_config(db, display_config)
     portfolio = Portfolio(
         code=code,
         name=name,
         description=description,
         status="draft",
-        display_config=display_config,
+        display_config=validate_display_config(db, display_config),
     )
     db.add(portfolio)
     return portfolio
@@ -258,11 +263,11 @@ def update_portfolio(
     code: str,
     name: Optional[str] = None,
     description: Optional[str] = None,
-    display_config=_UNSET,
+    display_config=UNSET,
 ) -> Portfolio:
     """更新组合信息。不 commit。
 
-    display_config 哨兵语义（issue #144）：_UNSET = 不修改；None = 清空恢复
+    display_config 哨兵语义（issue #144）：UNSET = 不修改；None = 清空恢复
     默认；dict = 校验后覆盖（router 以 "display_config" in updates 区分）。
     """
     portfolio = _get_portfolio_or_404(db, code)
@@ -270,10 +275,9 @@ def update_portfolio(
         portfolio.name = name
     if description is not None:
         portfolio.description = description
-    if display_config is not _UNSET:
-        validate_display_config(db, display_config)
-        # JSON 列赋新对象（避免 in-place 突变不触发脏检测）
-        portfolio.display_config = display_config
+    if display_config is not UNSET:
+        # 校验并归一（空 dict → None）；JSON 列赋新对象（避免 in-place 突变不触发脏检测）
+        portfolio.display_config = validate_display_config(db, display_config)
     return portfolio
 
 
