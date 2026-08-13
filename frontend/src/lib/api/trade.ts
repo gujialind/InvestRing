@@ -2,8 +2,27 @@ import { request } from "./client";
 import { Trade, TradeCreate, TradeUpdate } from "@/types/trade";
 import { PaginatedResponse } from "@/types/common";
 
+/**
+ * 调仓列表查询参数（#126 服务端筛选）。
+ * axios 会丢弃 undefined 值，空筛选自然不传参。
+ */
+export interface TradeListParams {
+  page?: number;
+  page_size?: number;
+  portfolio_code?: string;
+  status?: string;
+  trade_type?: string;
+  product_code?: string;
+  market?: string;
+  platform_code?: string;
+  trade_date_start?: string;
+  trade_date_end?: string;
+  confirm_date_start?: string;
+  confirm_date_end?: string;
+}
+
 export const tradeApi = {
-  list: (params?: { page?: number; page_size?: number; portfolio_code?: string; status?: string }) =>
+  list: (params?: TradeListParams) =>
     request<PaginatedResponse<Trade>>({ method: "GET", url: "/trades", params }),
 
   get: (id: number) =>

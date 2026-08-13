@@ -21,6 +21,7 @@ from app.services.trade_service import (
     create_trade as create_trade_service,
     cancel_trade as cancel_trade_service,
     unconfirm_trade as unconfirm_trade_service,
+    list_trades,
 )
 from app.services.trading_utils import get_next_trading_day
 from app.utils.quantize import quantize_amount
@@ -34,16 +35,35 @@ _AMOUNT_FIELDS = {"amount", "actual_amount", "fee"}
 @router.get("")
 def get_trades(
     portfolio_code: Optional[str] = None,
+    status: Optional[str] = None,
+    trade_type: Optional[str] = None,
+    product_code: Optional[str] = None,
+    market: Optional[str] = None,
+    platform_code: Optional[str] = None,
+    trade_date_start: Optional[date] = None,
+    trade_date_end: Optional[date] = None,
+    confirm_date_start: Optional[date] = None,
+    confirm_date_end: Optional[date] = None,
     page: Optional[int] = 1,
     page_size: Optional[int] = 20,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(Trade)
-    if portfolio_code:
-        query = query.filter(Trade.portfolio_code == portfolio_code)
-    total = query.count()
-    items = query.order_by(Trade.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    items, total = list_trades(
+        db,
+        portfolio_code=portfolio_code,
+        status=status,
+        trade_type=trade_type,
+        product_code=product_code,
+        market=market,
+        platform_code=platform_code,
+        trade_date_start=trade_date_start,
+        trade_date_end=trade_date_end,
+        confirm_date_start=confirm_date_start,
+        confirm_date_end=confirm_date_end,
+        page=page,
+        page_size=page_size,
+    )
     return {
         "items": items,
         "total": total,
