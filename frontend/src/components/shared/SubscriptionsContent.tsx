@@ -66,6 +66,7 @@ import { useInvestorAvailableShares } from "@/hooks/usePosition";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import PaginationBar from "@/components/shared/PaginationBar";
+import NameCodeCell from "@/components/shared/NameCodeCell";
 
 interface SubscriptionsContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -86,18 +87,6 @@ const CONFIRM_TEXT: Record<"confirm" | "cancel" | "unconfirm" | "delete", { titl
   unconfirm: { title: "取消确认", desc: "取消后可以修改或删除。是否继续？" },
   delete: { title: "删除申请", desc: "删除后将影响后续快照数据，建议先取消确认再删除。是否继续？" },
 };
-
-/** 主次双行单元格（visual-spec §8）：name 主行 + code 次要小字；映射缺失时回退只显示 code */
-function NameCodeCell({ code, nameMap }: { code: string; nameMap: Map<string, string> }) {
-  const name = nameMap.get(code);
-  if (!name) return <>{code}</>;
-  return (
-    <>
-      <div className="text-sm">{name}</div>
-      <div className="text-xs text-muted-foreground">{code}</div>
-    </>
-  );
-}
 
 /** 默认申购日期区间 = 快捷项「最近1年」（#125 决策⑤，区间语义与 DateRangePicker 快捷项一致） */
 function defaultApplyRange(): DateRange {
