@@ -1505,7 +1505,7 @@
           "资产分类维度字典"
         ],
         "summary": "List Asset Classifications",
-        "description": "维度值字典只读端点（issue #128）。\n\n前端大类颜色/展示顺序由此驱动（asset_class 维度的 sort_order 即色板序位）；\n管理面 CRUD 归 #111，本期只读。返回按 dimension+sort_order 排序的全量维度值。",
+        "description": "维度值字典只读端点（issue #128；#135 扩展适用关系与 is_active）。\n\n前端大类颜色/展示顺序由此驱动（asset_class 维度的 sort_order 即色板序位）；\n管理面 CRUD 归 #135。返回按 dimension+sort_order+code 排序的全量维度值\n（含停用值，消费方按 is_active 自行过滤）；每项附 applicable_asset_classes\n（值级适用大类，asset_class 维度值恒为空 list）；顶层 dimension_rules 为\n维度级适用矩阵（缺省维度 = forbidden），驱动产品表单必填/禁用与管理页。",
         "operationId": "list_asset_classifications_api_asset_classifications_get",
         "security": [
           {
@@ -1535,7 +1535,158 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AssetClassificationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "资产分类维度字典"
+        ],
+        "summary": "Create Asset Classification",
+        "description": "新建维度值（管理面，issue #135）。\n\ncode 前缀须与 dimension 匹配（ASSET_/REGION_/STYLE_/SIZE_/SEG_，全大写）；\n非 asset_class 维度必须指定 ≥1 适用大类，且关联目标规则允许该维度；\ndimension=asset_class 时可带 dimension_rules（缺省 = 现金型全 forbidden，\n配规则后产品立即可用）。无删除端点，后悔药走 is_active 软失效。",
+        "operationId": "create_asset_classification_api_asset_classifications_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetClassificationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetClassificationDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/asset-classifications/{code}": {
+      "get": {
+        "tags": [
+          "资产分类维度字典"
+        ],
+        "summary": "Get Asset Classification",
+        "description": "单条详情（CLI get / 管理页编辑回填用）；asset_class 维度值附 dimension_rules。",
+        "operationId": "get_asset_classification_api_asset_classifications__code__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetClassificationDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "资产分类维度字典"
+        ],
+        "summary": "Update Asset Classification",
+        "description": "更新维度值（管理面，issue #135）。\n\n可改 name/sort_order/description/is_active/applicable_asset_classes/\ndimension_rules；code、dimension 不可改。关联与规则为全量替换语义：\n关联移除有引用保护（DIMENSION_VALUE_IN_USE）、不可减到 0；规则收紧\n（→required/→forbidden）有存量冲突保护（DIMENSION_RULE_CONFLICT）。\n编辑 asset_class 的 sort_order 即变更前端饼图/分区色板序位（改色）。",
+        "operationId": "update_asset_classification_api_asset_classifications__code__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetClassificationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetClassificationDetail"
+                }
               }
             }
           },
@@ -6254,6 +6405,300 @@
   },
   "components": {
     "schemas": {
+      "AssetClassificationCreate": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "dimension": {
+            "type": "string",
+            "title": "Dimension"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "sort_order": {
+            "type": "integer",
+            "title": "Sort Order",
+            "default": 0
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "applicable_asset_classes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicable Asset Classes"
+          },
+          "dimension_rules": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dimension Rules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "dimension",
+          "name"
+        ],
+        "title": "AssetClassificationCreate",
+        "description": "新建维度值（#135）。code 前缀须与 dimension 匹配（ASSET_/REGION_/STYLE_/\nSIZE_/SEG_，全大写）；非 asset_class 维度必须指定 ≥1 适用大类；\ndimension=asset_class 时可带 dimension_rules（缺省 = 现金型全 forbidden）。"
+      },
+      "AssetClassificationDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "dimension": {
+            "type": "string",
+            "title": "Dimension"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "sort_order": {
+            "type": "integer",
+            "title": "Sort Order"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "applicable_asset_classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Applicable Asset Classes"
+          },
+          "dimension_rules": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Dimension Rules",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "dimension",
+          "name",
+          "sort_order",
+          "is_active",
+          "applicable_asset_classes"
+        ],
+        "title": "AssetClassificationDetail",
+        "description": "单条详情：asset_class 维度值附其维度规则（其余维度恒空 dict）"
+      },
+      "AssetClassificationItem": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "dimension": {
+            "type": "string",
+            "title": "Dimension"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "sort_order": {
+            "type": "integer",
+            "title": "Sort Order"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "applicable_asset_classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Applicable Asset Classes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "dimension",
+          "name",
+          "sort_order",
+          "is_active",
+          "applicable_asset_classes"
+        ],
+        "title": "AssetClassificationItem",
+        "description": "维度值字典项（issue #128；#135 扩展 is_active 与值级适用大类）"
+      },
+      "AssetClassificationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssetClassificationItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "dimension_rules": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Dimension Rules"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "dimension_rules",
+          "total"
+        ],
+        "title": "AssetClassificationListResponse",
+        "description": "维度字典全量响应。dimension_rules 为维度级适用矩阵（#135 矩阵落库）：\n{asset_class: {dimension: rule}}，rule ∈ required/optional，未出现的\n(大类, 维度) = forbidden；未出现的大类 = 全 forbidden（现金型语义）。"
+      },
+      "AssetClassificationUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "applicable_asset_classes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicable Asset Classes"
+          },
+          "dimension_rules": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dimension Rules"
+          }
+        },
+        "type": "object",
+        "title": "AssetClassificationUpdate",
+        "description": "更新维度值（#135）。code/dimension 不可改（被 product 五列 FK 与维度匹配\n语义引用），故不在本模型中。applicable_asset_classes / dimension_rules 为\n全量替换语义（None = 不动）。"
+      },
       "CashPositionUpdate": {
         "properties": {
           "cash_amount": {

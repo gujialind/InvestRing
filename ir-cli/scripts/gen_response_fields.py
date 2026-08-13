@@ -38,6 +38,8 @@ COMMAND_SCHEMA_MAP = [
     ("snapshot", "status", "SnapshotStatusResponse", "object", None),
     ("trade", "list", "TradeResponse", "list", "trade"),
     ("sub", "list", "SubscriptionResponse", "list", "subscription"),
+    ("asset-classification", "list", "AssetClassificationItem", "list", "asset_classification"),
+    ("asset-classification", "get", "AssetClassificationDetail", "object", None),
 ]
 
 # 人工标注层：openapi 无法表达的业务语义（键为 "group.sub" 或 "group.sub.field"）
@@ -54,6 +56,10 @@ NOTES_OVERRIDES = {
     "portfolio.performance.annualized_volatility": "日收益率标准差按252交易日年化（收益率则按365日历日，口径不同）",
     "portfolio.performance.annualization_reliable": "false表示持有期<90天，年化指标属大幅外推（MWR可能达数百%），勿直接引用",
     "portfolio.performance.nav_series_consistent": "两种TWR算法一致性自检；false说明快照断层或净值异常，指标不可信",
+    "asset-classification.list": "含停用值(is_active=false)，前端消费方自行过滤；维度级规则矩阵不在列表项内，用 get 单条或 API 顶层 dimension_rules",
+    "asset-classification.list.applicable_asset_classes": "值级适用大类（asset_class 维度值恒为空 list），按大类色板序位排序",
+    "asset-classification.list.sort_order": "asset_class 维度的序位即前端饼图/分区色板序位，变更即改色",
+    "asset-classification.get.dimension_rules": "仅 asset_class 维度值有值：{dimension: rule}，rule ∈ required/optional，未出现的维度 = forbidden",
 }
 
 # openapi 类型 → 缩写
