@@ -120,6 +120,10 @@ ir schema trade              # 仅输出指定命令组
 | `CANNOT_CANCEL_EXCHANGE` | 场内交易不可取消 |
 | `SNAPSHOT_DEPENDENCY` | 快照已依赖该记录，无法取消确认 |
 | `SNAPSHOT_NOT_CONTINUOUS` | 快照日期不连续 |
+| `INVALID_DIMENSION_TAGS` | 产品维度标签非法（不存在/已停用/违反维度规则/值级不适用，`details` 含 field/code/applicable_asset_classes 等） |
+| `INVALID_CLASSIFICATION` | 维度字典值非法（code 前缀/dimension 不匹配、空适用关联、nonsense 关联等） |
+| `DIMENSION_VALUE_IN_USE` | 维度值关联仍被产品引用，不可移除（`details.products` 列引用产品） |
+| `DIMENSION_RULE_CONFLICT` | 维度规则收紧与存量产品冲突（`details.products` 列冲突产品） |
 | `CONFIRM_REQUIRED` | 需要显式确认（如 `--yes`） |
 | `AUTH_REQUIRED` | 未登录或 token 已过期 |
 | `INTERNAL_ERROR` | 系统内部错误 |
@@ -1278,7 +1282,50 @@ ir notification read-all
 
 ---
 
-### 4.18 `ir config` — 本地配置管理
+### 4.18 `ir asset-classification` — 资产分类维度字典管理
+
+五维正交维度字典（asset_class/region/style/size/segment）的查看与维护（issue #135）。无 delete 命令，后悔药用 `update --inactive` 软失效（存量引用不阻断）。
+
+#### `ir asset-classification list`
+
+获取维度值字典（含停用值，`is_active` 字段标识；维度级规则矩阵见 `get` 单条的 `dimension_rules`）。
+
+```bash
+ir asset-classification list [--dimension <维度>] [--fields <字段>] [--full]
+```
+
+#### `ir asset-classification get`
+
+查看维度值详情；asset_class 维度值附 `dimension_rules`（`{dimension: rule}`，rule ∈ required/optional，未出现的维度 = forbidden）。
+
+```bash
+ir asset-classification get <CODE>
+```
+
+#### `ir asset-classification create`
+
+新建维度值。code 须全大写且前缀匹配维度（ASSET_/REGION_/STYLE_/SIZE_/SEG_）；非 asset_class 维度必须 `--applicable` 指定 ≥1 适用大类（目标大类规则须允许该维度）；asset_class 维度可重复 `--rule` 配维度规则（缺省 = 现金型全禁止，配好后产品立即可用）。
+
+```bash
+ir asset-classification create --code <代码> --dimension <维度> --name <名称> \
+  [--sort-order N] [--description <描述>] \
+  [--applicable ASSET_STOCK,ASSET_BOND] \
+  [--rule region=required --rule segment=optional]
+```
+
+#### `ir asset-classification update`
+
+更新维度值（code/dimension 不可改）。`--applicable` 与 `--rule` 为**全量替换**语义：移除被产品引用的关联报 `DIMENSION_VALUE_IN_USE`（details 列产品）；关联不可减到 0；规则收紧（→required 需存量该维度全非空，删规则行 = forbidden 需全空）冲突报 `DIMENSION_RULE_CONFLICT`。编辑 asset_class 的 `--sort-order` 即变更前端饼图/分区色板序位（改色）。
+
+```bash
+ir asset-classification update <CODE> [--name <名称>] [--sort-order N] \
+  [--description <描述>] [--active/--inactive] \
+  [--applicable ASSET_STOCK,ASSET_BOND] [--rule region=required ...]
+```
+
+---
+
+### 4.19 `ir config` — 本地配置管理
 
 纯本地操作，读写 `~/.ir/config` 文件。
 
@@ -1304,7 +1351,7 @@ ir config show
 
 ---
 
-### 4.19 `ir schema` — CLI 机读结构
+### 4.20 `ir schema` — CLI 机读结构
 
 输出全 CLI 机读 JSON 结构，供 AI agent 一次性了解全部指令。
 

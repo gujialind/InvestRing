@@ -3,7 +3,11 @@ from app.models.portfolio import Portfolio
 from app.models.investor_holding import InvestorHolding
 from app.models.platform import Platform
 from app.models.product import Product
-from app.models.asset_classification import AssetClassification
+from app.models.asset_classification import (
+    AssetClassification,
+    AssetDimensionApplicability,
+    AssetClassDimensionRule,
+)
 from app.models.portfolio_position import PortfolioPosition
 from app.models.subscription import Subscription
 from app.models.trade import Trade
@@ -29,6 +33,8 @@ __all__ = [
     "Platform",
     "Product",
     "AssetClassification",
+    "AssetDimensionApplicability",
+    "AssetClassDimensionRule",
     "PortfolioPosition",
     "Subscription",
     "Trade",

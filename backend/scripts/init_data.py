@@ -18,8 +18,12 @@ from app.database import Base, engine
 from app.models.scheduled_task import ScheduledTask
 from app.models.portfolio import Portfolio
 from app.models.product import Product
-from app.models.asset_classification import AssetClassification
-from app.constants.asset_dimensions import ASSET_DIMENSIONS, PRODUCT_DIMENSIONS
+from app.models.asset_classification import (
+    AssetClassification, AssetDimensionApplicability, AssetClassDimensionRule,
+)
+from app.constants.asset_dimensions import (
+    ASSET_DIMENSIONS, PRODUCT_DIMENSIONS, DIMENSION_APPLICABILITY, DIMENSION_RULES,
+)
 from app.models.platform import Platform
 from app.models.investor import Investor
 
@@ -261,10 +265,11 @@ def init_products(session):
     session.commit()
 
 def init_asset_classification(session):
-    """初始化资产分类维度值字典（issue #128 正交维度重构）
+    """初始化资产分类维度值字典（issue #128 正交维度重构）与适用关系（#135 矩阵落库）
 
-    维度值单一事实来源为 app/constants/asset_dimensions.py::ASSET_DIMENSIONS
-    （与迁移 0008、tests/conftest.py 共用）。已存在维度值不覆盖（管理面归 #111）。
+    维度值与适用关系的单一事实来源为 app/constants/asset_dimensions.py
+    （与迁移 0008/0009、tests/conftest.py 共用）。已存在记录不覆盖
+    （管理面 CRUD 归 #135，运行期改动以 DB 为准）。
     """
     for code, dimension, name, sort_order, description in ASSET_DIMENSIONS:
         existing = session.query(AssetClassification).filter(AssetClassification.code == code).first()
@@ -276,6 +281,30 @@ def init_asset_classification(session):
             print(f"添加维度值: {code} ({dimension}/{name})")
         else:
             print(f"维度值已存在: {code}")
+
+    # 值级适用关联（#135）：常量新增值时同步补插，已存在不覆盖
+    for value, classes in DIMENSION_APPLICABILITY.items():
+        for asset_class in classes:
+            existing = session.query(AssetDimensionApplicability).filter_by(
+                dimension_value_code=value, asset_class_code=asset_class,
+            ).first()
+            if not existing:
+                session.add(AssetDimensionApplicability(
+                    dimension_value_code=value, asset_class_code=asset_class,
+                ))
+                print(f"添加适用关联: {value} -> {asset_class}")
+
+    # 维度级规则（#135 矩阵落库）
+    for asset_class, rules in DIMENSION_RULES.items():
+        for dimension, rule in rules.items():
+            existing = session.query(AssetClassDimensionRule).filter_by(
+                asset_class_code=asset_class, dimension=dimension,
+            ).first()
+            if not existing:
+                session.add(AssetClassDimensionRule(
+                    asset_class_code=asset_class, dimension=dimension, rule=rule,
+                ))
+                print(f"添加维度规则: {asset_class}.{dimension} = {rule}")
 
     session.commit()
 
