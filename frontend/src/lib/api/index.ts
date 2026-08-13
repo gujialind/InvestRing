@@ -41,4 +41,11 @@ export type {
 } from "@/types/log";
 export type { NotificationItem } from "@/types/notification";
 export type { TradingCalendarDay, DataSourceConfig } from "@/types/system";
-export type { AssetClassificationItem } from "@/types/asset-classification";
+export type {
+  AssetClassificationItem,
+  AssetClassificationDetail,
+  AssetClassificationListResponse,
+  AssetClassificationCreate,
+  AssetClassificationUpdate,
+  DimensionRule,
+} from "@/types/asset-classification";
