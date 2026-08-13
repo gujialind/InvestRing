@@ -6,8 +6,26 @@ import {
 } from "@/types/subscription";
 import { PaginatedResponse } from "@/types/common";
 
+/**
+ * 申赎列表查询参数（#125 服务端筛选）。
+ * axios 会丢弃 undefined 值，空筛选自然不传参。
+ */
+export interface SubscriptionListParams {
+  page?: number;
+  page_size?: number;
+  portfolio_code?: string;
+  status?: string;
+  sub_type?: string;
+  investor_code?: string;
+  platform_code?: string;
+  apply_date_start?: string;
+  apply_date_end?: string;
+  confirm_date_start?: string;
+  confirm_date_end?: string;
+}
+
 export const subscriptionApi = {
-  list: (params?: { page?: number; page_size?: number; portfolio_code?: string; status?: string }) =>
+  list: (params?: SubscriptionListParams) =>
     request<PaginatedResponse<Subscription>>({ method: "GET", url: "/subscriptions", params }),
 
   get: (id: number) =>

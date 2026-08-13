@@ -318,3 +318,73 @@ def create_subscription(
 
     db.add(new_sub)
     return new_sub
+
+
+def list_subscriptions(
+    db: Session,
+    *,
+    portfolio_code: Optional[str] = None,
+    investor_code: Optional[str] = None,
+    status: Optional[str] = None,
+    sub_type: Optional[str] = None,
+    platform_code: Optional[str] = None,
+    apply_date_start: Optional[date] = None,
+    apply_date_end: Optional[date] = None,
+    confirm_date_start: Optional[date] = None,
+    confirm_date_end: Optional[date] = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Subscription], int]:
+    """申购赎回列表查询（服务端筛选 + 分页，issue #125）。
+
+    - 日期区间均为闭区间；同组 start > end 抛 INVALID_DATE_RANGE（422）。
+    - pending 记录的 confirm_date 为**预计确认日**（创建时按 T+1 设定、unconfirm
+      时重算保持非空），确认日期区间筛选对 pending 命中预计值。
+    - 排序：apply_date DESC, id DESC（同日期内新记录在前）。
+    - viewer 限制由 router 叠加（非 admin 强制 investor_code=current_user.code），
+      本函数不感知权限。
+
+    Returns:
+        (items, total)：当前页记录与过滤后总数（分页前）。
+    """
+    if apply_date_start and apply_date_end and apply_date_start > apply_date_end:
+        raise BusinessError(
+            "INVALID_DATE_RANGE",
+            f"start_date ({apply_date_start}) 不能晚于 end_date ({apply_date_end})",
+            http_status=422,
+        )
+    if confirm_date_start and confirm_date_end and confirm_date_start > confirm_date_end:
+        raise BusinessError(
+            "INVALID_DATE_RANGE",
+            f"start_date ({confirm_date_start}) 不能晚于 end_date ({confirm_date_end})",
+            http_status=422,
+        )
+
+    query = db.query(Subscription)
+    if portfolio_code:
+        query = query.filter(Subscription.portfolio_code == portfolio_code)
+    if investor_code:
+        query = query.filter(Subscription.investor_code == investor_code)
+    if status:
+        query = query.filter(Subscription.status == status)
+    if sub_type:
+        query = query.filter(Subscription.sub_type == sub_type)
+    if platform_code:
+        query = query.filter(Subscription.platform_code == platform_code)
+    if apply_date_start:
+        query = query.filter(Subscription.apply_date >= apply_date_start)
+    if apply_date_end:
+        query = query.filter(Subscription.apply_date <= apply_date_end)
+    if confirm_date_start:
+        query = query.filter(Subscription.confirm_date >= confirm_date_start)
+    if confirm_date_end:
+        query = query.filter(Subscription.confirm_date <= confirm_date_end)
+
+    total = query.count()
+    items = (
+        query.order_by(Subscription.apply_date.desc(), Subscription.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total

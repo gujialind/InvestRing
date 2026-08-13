@@ -7,13 +7,16 @@ export { authApi } from "./auth";
 export { investorApi } from "./investor";
 export { portfolioApi, positionApi } from "./portfolio";
 export { subscriptionApi } from "./subscription";
+export type { SubscriptionListParams } from "./subscription";
 export { tradeApi } from "./trade";
+export type { TradeListParams } from "./trade";
 export { productApi } from "./product";
 export type { PriceDataPoint } from "./product";
 export { assetClassificationApi } from "./asset-classification";
 export { platformApi } from "./platform";
 export { systemApi } from "./system";
 export { snapshotApi } from "./snapshot";
+export { syncJobApi } from "./syncJob";
 export { shareChangeEventApi } from "./share-change-event";
 export { logApi } from "./log";
 export { taskApi } from "./task";
@@ -32,6 +35,7 @@ export type {
   ShareChangeEventUpdate,
 } from "@/types/share-change-event";
 export type { SnapshotValidationCheck } from "@/types/snapshot";
+export type { SyncJob } from "@/types/syncJob";
 export type {
   LoginLog,
   AuditLog,

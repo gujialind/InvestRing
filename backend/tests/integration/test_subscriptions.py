@@ -9,7 +9,7 @@ from decimal import Decimal
 from tests.factories import (
     create_portfolio, create_investor, create_subscription,
     create_investor_holding, create_value_snapshot, ensure_trading_day,
-    create_trade,
+    create_trade, create_platform,
 )
 from app.models.subscription import Subscription
 from app.models.trade import Trade
@@ -312,3 +312,140 @@ class TestUnconfirmSubscriptionSnapshotProtection:
             Trade.transfer_group == f"sub_{sub.id}"
         ).count()
         assert remaining == 0
+
+
+class TestListSubscriptionFilters:
+    """申赎列表筛选/排序（issue #125）"""
+
+    def test_filter_by_status(self, client, admin_headers, test_db):
+        """三种状态各造 1 条，分别过滤只回目标状态"""
+        create_portfolio(test_db, code="LS_P1", status="active")
+        create_investor(test_db, code="LS_I1")
+        create_subscription(test_db, "LS_P1", "LS_I1", status="pending",
+                            apply_date=date(2025, 9, 1))
+        create_subscription(test_db, "LS_P1", "LS_I1", status="confirmed",
+                            apply_date=date(2025, 9, 2), confirm_date=date(2025, 9, 3))
+        create_subscription(test_db, "LS_P1", "LS_I1", status="cancelled",
+                            apply_date=date(2025, 9, 3))
+
+        for st in ("pending", "confirmed", "cancelled"):
+            resp = client.get(f"/api/subscriptions?status={st}", headers=admin_headers)
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["total"] == 1
+            assert all(item["status"] == st for item in data["items"])
+
+    def test_filter_by_sub_type_and_platform(self, client, admin_headers, test_db):
+        """sub_type + platform_code 组合过滤取交集"""
+        create_portfolio(test_db, code="LS_P2", status="active")
+        create_investor(test_db, code="LS_I2")
+        create_platform(test_db, code="LS_PLAT")
+        create_subscription(test_db, "LS_P2", "LS_I2", sub_type="redeem", shares=100,
+                            platform_code="LS_PLAT", apply_date=date(2025, 9, 1))
+        create_subscription(test_db, "LS_P2", "LS_I2", sub_type="redeem", shares=100,
+                            platform_code="MYCF", apply_date=date(2025, 9, 1))
+        create_subscription(test_db, "LS_P2", "LS_I2", sub_type="subscribe",
+                            platform_code="LS_PLAT", apply_date=date(2025, 9, 1))
+
+        resp = client.get(
+            "/api/subscriptions?sub_type=redeem&platform_code=LS_PLAT",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["sub_type"] == "redeem"
+        assert data["items"][0]["platform_code"] == "LS_PLAT"
+
+    def test_filter_apply_date_range_closed(self, client, admin_headers, test_db):
+        """申请日期区间为闭区间：边界日记录包含"""
+        create_portfolio(test_db, code="LS_P3", status="active")
+        create_investor(test_db, code="LS_I3")
+        create_subscription(test_db, "LS_P3", "LS_I3", apply_date=date(2025, 9, 1))
+        create_subscription(test_db, "LS_P3", "LS_I3", apply_date=date(2025, 9, 5))
+        create_subscription(test_db, "LS_P3", "LS_I3", apply_date=date(2025, 9, 10))
+
+        resp = client.get(
+            "/api/subscriptions?apply_date_start=2025-09-01&apply_date_end=2025-09-05",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        dates = sorted(item["apply_date"] for item in data["items"])
+        assert dates == ["2025-09-01", "2025-09-05"]
+
+    def test_filter_confirm_date_includes_pending_expected(self, client, admin_headers, test_db):
+        """pending 记录按预计确认日命中确认日期区间（决策②）"""
+        create_portfolio(test_db, code="LS_P4", status="active")
+        create_investor(test_db, code="LS_I4")
+        # pending：confirm_date 为预计确认日（创建时按 T+1 设定、保持非空）
+        create_subscription(test_db, "LS_P4", "LS_I4", status="pending",
+                            apply_date=date(2025, 9, 1), confirm_date=date(2025, 9, 2))
+        create_subscription(test_db, "LS_P4", "LS_I4", status="confirmed",
+                            apply_date=date(2025, 9, 3), confirm_date=date(2025, 9, 4))
+
+        resp = client.get(
+            "/api/subscriptions?confirm_date_start=2025-09-02&confirm_date_end=2025-09-02",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["status"] == "pending"
+        assert data["items"][0]["confirm_date"] == "2025-09-02"
+
+    def test_inverted_range_returns_422(self, client, admin_headers, test_db):
+        """start > end 返回 422 INVALID_DATE_RANGE（apply/confirm 两组同理）"""
+        resp = client.get(
+            "/api/subscriptions?apply_date_start=2025-09-10&apply_date_end=2025-09-01",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_DATE_RANGE"
+
+        resp = client.get(
+            "/api/subscriptions?confirm_date_start=2025-09-10&confirm_date_end=2025-09-01",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_DATE_RANGE"
+
+    def test_sort_apply_date_desc(self, client, admin_headers, test_db):
+        """排序 apply_date DESC, id DESC（同日期新记录在前）"""
+        create_portfolio(test_db, code="LS_P5", status="active")
+        create_investor(test_db, code="LS_I5")
+        s1 = create_subscription(test_db, "LS_P5", "LS_I5", apply_date=date(2025, 9, 1))
+        s2 = create_subscription(test_db, "LS_P5", "LS_I5", apply_date=date(2025, 9, 10))
+        s3 = create_subscription(test_db, "LS_P5", "LS_I5", apply_date=date(2025, 9, 10))
+        s4 = create_subscription(test_db, "LS_P5", "LS_I5", apply_date=date(2025, 9, 5))
+
+        resp = client.get("/api/subscriptions", headers=admin_headers)
+        assert resp.status_code == 200
+        ids = [item["id"] for item in resp.json()["items"]]
+        assert ids == [s3.id, s2.id, s4.id, s1.id]
+
+    def test_viewer_restriction_with_filters(self, client, viewer_headers, test_db):
+        """viewer 带 status 过滤仍只见自己记录；显式传他人 investor_code 被覆盖"""
+        create_portfolio(test_db, code="LS_P6", status="active")
+        create_investor(test_db, code="LS_I6")
+        create_subscription(test_db, "LS_P6", "VIEWER", status="pending",
+                            apply_date=date(2025, 9, 1))
+        create_subscription(test_db, "LS_P6", "LS_I6", status="pending",
+                            apply_date=date(2025, 9, 1))
+
+        resp = client.get("/api/subscriptions?status=pending", headers=viewer_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["investor_code"] == "VIEWER"
+
+        # 显式传他人 investor_code 被 router 强制覆盖
+        resp = client.get(
+            "/api/subscriptions?status=pending&investor_code=LS_I6",
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["investor_code"] == "VIEWER"
