@@ -18,6 +18,24 @@ RESPONSE_FIELDS: dict = {
         }
     },
     "portfolio": {
+        "create": {
+            "shape": "object",
+            "fields": "code:str,name:str,description:str?,status:str,started_at:datetime?,closed_at:datetime?,created_at:datetime?,updated_at:datetime?,display_config:obj?,total_value:num?,total_profit:num?"
+        },
+        "get": {
+            "shape": "object",
+            "fields": "code:str,name:str,description:str?,status:str,started_at:datetime?,closed_at:datetime?,created_at:datetime?,updated_at:datetime?,display_config:obj?,total_value:num?,total_profit:num?",
+            "notes": {
+                "display_config": "持仓明细二级分组维度覆盖{'ASSET_STOCK': 'style'}；null=未配置=前端内置默认；仅存显式覆盖项，清空传null"
+            }
+        },
+        "update": {
+            "shape": "object",
+            "fields": "code:str,name:str,description:str?,status:str,started_at:datetime?,closed_at:datetime?,created_at:datetime?,updated_at:datetime?,display_config:obj?,total_value:num?,total_profit:num?",
+            "notes": {
+                "display_config": "显式传null=清空配置；不传=不修改（exclude_unset 语义）"
+            }
+        },
         "nav-history": {
             "shape": "list",
             "fields": "snapshot_date:date,unit_price:num?,total_value:num?,total_shares:num?",

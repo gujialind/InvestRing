@@ -6,7 +6,7 @@ import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, RefreshCw, Settings2 } from "lucide-react";
 import Link from "next/link";
 import {
   usePortfolio,
@@ -26,6 +26,7 @@ import PerformanceMetrics from "@/components/shared/PerformanceMetrics";
 import PortfolioActionButtons from "@/components/shared/PortfolioActionButtons";
 import PortfolioInvestorsList from "@/components/shared/PortfolioInvestorsList";
 import PositionSections from "@/components/shared/PositionSections";
+import DisplayConfigDialog from "@/components/shared/dialogs/DisplayConfigDialog";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import { buildAllocation } from "@/lib/allocation";
@@ -83,6 +84,9 @@ function PortfolioDetailInner() {
   // 绩效指标（后端计算）：draft 组合无快照，不请求
   const isDraftStatus = portfolio?.status === "draft";
   const { data: performance } = usePortfolioPerformance(code, !isDraftStatus);
+
+  // 分组维度配置弹窗（issue #144）
+  const [displayConfigOpen, setDisplayConfigOpen] = useState(false);
 
   const positions = positionsData?.items || [];
   const assetClasses = assetClassDict?.items || [];
@@ -209,20 +213,38 @@ function PortfolioDetailInner() {
                   </CardContent>
                 </Card>
 
-                {/* 3. 分类持仓分区（含在途资金独立卡片） */}
+                {/* 3. 分类持仓分区（含在途资金独立卡片）；
+                    二级分组维度优先取组合级 display_config（issue #144） */}
                 <PositionSections
                   positions={positions}
                   assetClasses={assetClasses}
+                  displayConfig={portfolio.display_config}
                   action={
                     isAdmin ? (
-                      <Link href={`/portfolio/${code}/positions`}>
-                        <Button variant="outline" size="sm">
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                          管理持仓
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setDisplayConfigOpen(true)}
+                        >
+                          <Settings2 className="mr-2 h-4 w-4" />
+                          分组维度
                         </Button>
-                      </Link>
+                        <Link href={`/portfolio/${code}/positions`}>
+                          <Button variant="outline" size="sm">
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            管理持仓
+                          </Button>
+                        </Link>
+                      </div>
                     ) : undefined
                   }
+                />
+                <DisplayConfigDialog
+                  open={displayConfigOpen}
+                  onOpenChange={setDisplayConfigOpen}
+                  portfolioCode={code}
+                  currentConfig={portfolio.display_config}
                 />
 
                 {/* 4. 净值走势 + 区间 chips */}

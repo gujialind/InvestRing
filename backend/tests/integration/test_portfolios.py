@@ -289,3 +289,164 @@ class TestPortfolioInvestorsEndpoint:
         """组合不存在返回 404"""
         resp = client.get("/api/portfolios/NO_SUCH/investors", headers=admin_headers)
         assert resp.status_code == 404
+
+
+class TestPortfolioDisplayConfig:
+    """组合级 display_config（issue #144）：持仓明细二级分组维度配置"""
+
+    def test_create_with_display_config(self, client, admin_headers):
+        """创建时携带配置，GET 往返一致"""
+        resp = client.post(
+            "/api/portfolios",
+            json={
+                "code": "P_DC_C",
+                "name": "配置组合",
+                "display_config": {"ASSET_STOCK": "style"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["display_config"] == {"ASSET_STOCK": "style"}
+        detail = client.get("/api/portfolios/P_DC_C", headers=admin_headers)
+        assert detail.json()["display_config"] == {"ASSET_STOCK": "style"}
+
+    def test_put_display_config_roundtrip(self, client, admin_headers, test_db):
+        """PUT 配置后 GET 返回一致"""
+        create_portfolio(test_db, code="P_DC_U")
+        resp = client.put(
+            "/api/portfolios/P_DC_U",
+            json={"display_config": {"ASSET_STOCK": "style", "ASSET_BOND": "region"}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["display_config"] == {
+            "ASSET_STOCK": "style",
+            "ASSET_BOND": "region",
+        }
+
+    def test_put_null_clears_display_config(self, client, admin_headers, test_db):
+        """显式传 null = 清空配置恢复默认"""
+        create_portfolio(test_db, code="P_DC_N")
+        client.put(
+            "/api/portfolios/P_DC_N",
+            json={"display_config": {"ASSET_STOCK": "style"}},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/portfolios/P_DC_N",
+            json={"display_config": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["display_config"] is None
+
+    def test_put_empty_dict_normalized_to_null(self, client, admin_headers, test_db):
+        """空对象 {} 归一为 NULL（与「未配置」保持单一表示）"""
+        create_portfolio(test_db, code="P_DC_E")
+        client.put(
+            "/api/portfolios/P_DC_E",
+            json={"display_config": {"ASSET_STOCK": "style"}},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/portfolios/P_DC_E",
+            json={"display_config": {}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["display_config"] is None
+        detail = client.get("/api/portfolios/P_DC_E", headers=admin_headers)
+        assert detail.json()["display_config"] is None
+
+    def test_create_empty_dict_normalized_to_null(self, client, admin_headers):
+        """创建时传 {} 同样归一为 NULL"""
+        resp = client.post(
+            "/api/portfolios",
+            json={"code": "P_DC_EC", "name": "空配置组合", "display_config": {}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["display_config"] is None
+
+    def test_put_without_display_config_keeps_existing(
+        self, client, admin_headers, test_db
+    ):
+        """不传 display_config 的 PUT 不改动既有配置（exclude_unset 语义）"""
+        create_portfolio(test_db, code="P_DC_K")
+        client.put(
+            "/api/portfolios/P_DC_K",
+            json={"display_config": {"ASSET_STOCK": "size"}},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/portfolios/P_DC_K",
+            json={"name": "改名不动配置"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "改名不动配置"
+        assert resp.json()["display_config"] == {"ASSET_STOCK": "size"}
+
+    def test_put_name_and_display_config_combined(self, client, admin_headers, test_db):
+        """name + display_config 组合更新同时生效"""
+        create_portfolio(test_db, code="P_DC_M")
+        resp = client.put(
+            "/api/portfolios/P_DC_M",
+            json={"name": "组合更新", "display_config": {"ASSET_STOCK": "style"}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "组合更新"
+        assert resp.json()["display_config"] == {"ASSET_STOCK": "style"}
+
+    @pytest.mark.parametrize(
+        "bad_config",
+        [
+            {"ASSET_STOCK": "duration"},       # 值未在规则矩阵登记
+            {"ASSET_BOND": "style"},           # 债券无 style 规则行
+            {"REGION_CN": "region"},           # key 非 asset_class 维度值
+            {"NO_SUCH_CLASS": "region"},       # key 不存在
+            {"ASSET_CASH": "region"},          # 现金大类无规则行，任何配置拒绝
+        ],
+    )
+    def test_put_invalid_display_config_422(
+        self, client, admin_headers, test_db, bad_config
+    ):
+        """非法配置返回 422 INVALID_DISPLAY_CONFIG"""
+        create_portfolio(test_db, code="P_DC_BAD")
+        resp = client.put(
+            "/api/portfolios/P_DC_BAD",
+            json={"display_config": bad_config},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_DISPLAY_CONFIG"
+
+    def test_create_invalid_display_config_422(self, client, admin_headers):
+        """创建时非法配置 422，且组合未落库"""
+        resp = client.post(
+            "/api/portfolios",
+            json={
+                "code": "P_DC_BAD_C",
+                "name": "非法配置",
+                "display_config": {"ASSET_CASH": "region"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_DISPLAY_CONFIG"
+        gone = client.get("/api/portfolios/P_DC_BAD_C", headers=admin_headers)
+        assert gone.status_code == 404
+
+    def test_list_items_carry_display_config(self, client, admin_headers, test_db):
+        """列表接口继承自动带出 display_config（已确认决策）"""
+        create_portfolio(test_db, code="P_DC_L")
+        client.put(
+            "/api/portfolios/P_DC_L",
+            json={"display_config": {"ASSET_STOCK": "style"}},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/portfolios", headers=admin_headers)
+        assert resp.status_code == 200
+        item = next(i for i in resp.json()["items"] if i["code"] == "P_DC_L")
+        assert item["display_config"] == {"ASSET_STOCK": "style"}
