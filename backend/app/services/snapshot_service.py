@@ -551,6 +551,74 @@ def generate_next_snapshot(
     }
 
 
+def list_portfolio_snapshots(
+    db: Session,
+    portfolio_code: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """快照历史列表：snapshot_date 倒序，可选闭区间过滤（#146）。
+
+    start_date > end_date → BusinessError INVALID_DATE_RANGE(422)
+    （与 market_data_service.get_nav_coverage 同模式）。
+    返回 {"items": [PortfolioValueSnapshot...], "total": int}，
+    total 为 limit 截断前的过滤后计数（total > len(items) 即被截断）。
+    不 commit、不抛 HTTPException（分层约定 §4.1）。
+    """
+    if start_date and end_date and start_date > end_date:
+        raise BusinessError(
+            "INVALID_DATE_RANGE",
+            f"start_date ({start_date}) 不能晚于 end_date ({end_date})",
+            http_status=422,
+        )
+
+    query = db.query(PortfolioValueSnapshot).filter(
+        PortfolioValueSnapshot.portfolio_code == portfolio_code
+    )
+    if start_date:
+        query = query.filter(PortfolioValueSnapshot.snapshot_date >= start_date)
+    if end_date:
+        query = query.filter(PortfolioValueSnapshot.snapshot_date <= end_date)
+
+    total = query.count()
+    items = query.order_by(
+        PortfolioValueSnapshot.snapshot_date.desc()
+    ).limit(limit).all()
+    return {"items": items, "total": total}
+
+
+def compute_missing_snapshot_dates(
+    db: Session,
+    portfolio_code: str,
+    first_date: date,
+    last_date: date,
+) -> List[date]:
+    """首末快照日闭区间内 is_open=true 但无快照的交易日（升序）（#146）。
+
+    集合差模式同 get_nav_coverage：trading_calendar 区间交易日集 − 区间快照日期集。
+    语义边界：只统计 [first, last] 区间内部空洞；最新快照日之后尚未生成的日子
+    不算 missing（属 catch-up 语义），首日之前同理。
+    """
+    trading_days = {
+        row[0]
+        for row in db.query(TradingCalendar.calendar_date).filter(
+            TradingCalendar.calendar_date >= first_date,
+            TradingCalendar.calendar_date <= last_date,
+            TradingCalendar.is_open.is_(True),
+        ).all()
+    }
+    snapshot_days = {
+        row[0]
+        for row in db.query(PortfolioValueSnapshot.snapshot_date).filter(
+            PortfolioValueSnapshot.portfolio_code == portfolio_code,
+            PortfolioValueSnapshot.snapshot_date >= first_date,
+            PortfolioValueSnapshot.snapshot_date <= last_date,
+        ).all()
+    }
+    return sorted(trading_days - snapshot_days)
+
+
 def validate_snapshot_dependencies(
     db: Session,
     portfolio_code: str,
