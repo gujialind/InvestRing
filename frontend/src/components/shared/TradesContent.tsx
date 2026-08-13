@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -34,13 +42,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatNumber, formatNav, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatNav, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TRADE_DIRECTION_COLORS } from "@/lib/colors";
-import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo } from "lucide-react";
+import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo, Filter } from "lucide-react";
 import Link from "next/link";
+import type { DateRange } from "react-day-picker";
+import { isSameDay, subYears } from "date-fns";
 import { ApiException } from "@/lib/api";
-import type { TradeCreate } from "@/types/trade";
+import type { TradeListParams } from "@/lib/api";
+import type { Trade, TradeCreate } from "@/types/trade";
+import { cashOrphanLabel, cashSubMeta, groupTradeRows } from "@/lib/tradePairs";
 import {
   useTradeList,
   useCreateTrade,
@@ -53,6 +65,8 @@ import { useProductList } from "@/hooks/useProduct";
 import { usePlatformList } from "@/hooks/usePlatform";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
+import PaginationBar from "@/components/shared/PaginationBar";
+import NameCodeCell from "@/components/shared/NameCodeCell";
 
 interface TradesContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -74,6 +88,18 @@ const CONFIRM_TEXT: Record<ConfirmState extends infer S ? S extends { action: st
   delete: { title: "删除交易", desc: "删除后将影响后续快照数据，建议先取消确认再删除。是否继续？" },
 };
 
+/** 默认交易日期区间 = 快捷项「最近1年」（#126 决策⑤，区间语义与 DateRangePicker 快捷项一致） */
+function defaultTradeRange(): DateRange {
+  return { from: subYears(new Date(), 1), to: new Date() };
+}
+
+/** 与默认区间一致（isSameDay 双端比较）→ 视为「无筛选」默认态，用于重置按钮显隐与空态文案 */
+function isDefaultTradeRange(range: DateRange | undefined): boolean {
+  if (!range?.from || !range.to) return false;
+  const d = defaultTradeRange();
+  return !!d.from && !!d.to && isSameDay(range.from, d.from) && isSameDay(range.to, d.to);
+}
+
 /**
  * 调仓交易页内容（桌面/移动共用）。
  * 抽离自原 app/portfolio/[code]/trades/page.tsx，用 AlertDialog 替换原生 confirm/alert。
@@ -83,7 +109,33 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const params = useParams();
   const code = params.code as string;
 
-  const { data, isLoading } = useTradeList({ portfolio_code: code, page_size: 100 });
+  // 筛选状态（#126 服务端筛选）：tradeRange 默认最近 1 年（决策⑤，惰性初始化避免每渲染重算）
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [tradeTypeFilter, setTradeTypeFilter] = useState<string | undefined>(undefined);
+  const [productFilter, setProductFilter] = useState<{ code: string; market: string } | undefined>(undefined);
+  const [platformFilter, setPlatformFilter] = useState<string | undefined>(undefined);
+  const [tradeRange, setTradeRange] = useState<DateRange | undefined>(() => defaultTradeRange());
+  const [confirmRange, setConfirmRange] = useState<DateRange | undefined>(undefined);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  // 空筛选字段为 undefined，axios 不传参；产品选中时 market 精确匹配（CASH 的 "" 也生效）
+  const listParams: TradeListParams = {
+    portfolio_code: code,
+    page,
+    page_size: pageSize,
+    status: statusFilter,
+    trade_type: tradeTypeFilter,
+    product_code: productFilter?.code,
+    market: productFilter?.market,
+    platform_code: platformFilter,
+    trade_date_start: tradeRange?.from ? toDateOnly(tradeRange.from) : undefined,
+    trade_date_end: tradeRange?.to ? toDateOnly(tradeRange.to) : undefined,
+    confirm_date_start: confirmRange?.from ? toDateOnly(confirmRange.from) : undefined,
+    confirm_date_end: confirmRange?.to ? toDateOnly(confirmRange.to) : undefined,
+  };
+  const { data, isLoading, isFetching } = useTradeList(listParams);
   const createTrade = useCreateTrade();
   const confirmTrade = useConfirmTrade();
   const cancelTrade = useCancelTrade();
@@ -93,8 +145,51 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const { data: platformsData } = usePlatformList({ page_size: 100 });
 
   const trades = data?.items || [];
+  const total = data?.total ?? 0;
   const products = productsData?.items || [];
   const platforms = platformsData?.items || [];
+
+  // 结对视图行（#126 决策⑧）：保持后端排序序，同组相邻时配对腿自然成对
+  const tradeRows = groupTradeRows(trades);
+
+  // 平台 name 映射（#124 模式）：平台列主次双行 + 现金子行「现金扣款/到账 · 平台名」复用
+  const platformNameMap = useMemo(
+    () => new Map((platformsData?.items ?? []).map((plat) => [plat.code, plat.name])),
+    [platformsData?.items]
+  );
+  // 一码多市场（LOF）计数：产品筛选下拉单行文案加市场后缀（规范 §8：下拉单行 name (code · 市场名)）
+  const productCodeCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    (productsData?.items ?? []).forEach((p) => m.set(p.code, (m.get(p.code) ?? 0) + 1));
+    return m;
+  }, [productsData?.items]);
+
+  // 非默认筛选判定（默认集 = 仅 tradeRange 为最近 1 年）：驱动「重置」按钮显隐与空态文案
+  const hasNonDefaultFilter =
+    statusFilter !== undefined ||
+    tradeTypeFilter !== undefined ||
+    productFilter !== undefined ||
+    platformFilter !== undefined ||
+    confirmRange !== undefined ||
+    tradeRange === undefined ||
+    !isDefaultTradeRange(tradeRange);
+  const activeFilterCount =
+    (statusFilter ? 1 : 0) +
+    (tradeTypeFilter ? 1 : 0) +
+    (productFilter ? 1 : 0) +
+    (platformFilter ? 1 : 0) +
+    (confirmRange ? 1 : 0) +
+    (tradeRange === undefined || !isDefaultTradeRange(tradeRange) ? 1 : 0);
+
+  const resetFilters = () => {
+    setStatusFilter(undefined);
+    setTradeTypeFilter(undefined);
+    setProductFilter(undefined);
+    setPlatformFilter(undefined);
+    setTradeRange(defaultTradeRange());
+    setConfirmRange(undefined);
+    setPage(1);
+  };
 
   const getProductName = (productCode: string, market?: string) => {
     const product = products.find((p) => p.code === productCode && p.market === market);
@@ -158,6 +253,251 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     else if (action === "unconfirm") unconfirmTrade.mutate(id);
     else if (action === "delete") deleteTradeMutation.mutate(id);
     setConfirmState(null);
+  };
+
+  // 筛选栏控件（visual-spec §9）：顺序 = 交易日期区间 → 确认日期区间 → 状态 → 产品 → 平台 → 类型；
+  // 控件统一 h-9，下拉全部走 ui/select；「全部 X」用 "all" 哨兵（Radix SelectItem 不允许空串值）
+  const rangeWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[240px]";
+  const selectWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[150px]";
+  const productSelectWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[220px]";
+  const filterControls = (
+    <>
+      <DateRangePicker
+        value={tradeRange}
+        onChange={(r) => {
+          setTradeRange(r);
+          setPage(1);
+        }}
+        placeholder="交易日期"
+        numberOfMonths={variant === "mobile" ? 1 : 2}
+        className={rangeWidth}
+      />
+      <DateRangePicker
+        value={confirmRange}
+        onChange={(r) => {
+          setConfirmRange(r);
+          setPage(1);
+        }}
+        placeholder="确认日期"
+        numberOfMonths={variant === "mobile" ? 1 : 2}
+        className={rangeWidth}
+      />
+      <Select
+        value={statusFilter ?? "all"}
+        onValueChange={(v) => {
+          setStatusFilter(v === "all" ? undefined : v);
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="全部状态" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部状态</SelectItem>
+          <SelectItem value="pending">待确认</SelectItem>
+          <SelectItem value="confirmed">已确认</SelectItem>
+          <SelectItem value="cancelled">已取消</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select
+        value={productFilter ? `${productFilter.code}|${productFilter.market}` : "all"}
+        onValueChange={(v) => {
+          if (v === "all") {
+            setProductFilter(undefined);
+          } else {
+            const sep = v.indexOf("|");
+            setProductFilter({ code: v.slice(0, sep), market: v.slice(sep + 1) });
+          }
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={productSelectWidth}>
+          <SelectValue placeholder="全部产品" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部产品</SelectItem>
+          {products.map((p) => (
+            <SelectItem key={`${p.code}|${p.market ?? ""}`} value={`${p.code}|${p.market ?? ""}`}>
+              {(productCodeCounts.get(p.code) ?? 0) > 1
+                ? `${p.name} (${p.code} · ${formatMarketName(p.market)})`
+                : `${p.name} (${p.code})`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={platformFilter ?? "all"}
+        onValueChange={(v) => {
+          setPlatformFilter(v === "all" ? undefined : v);
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="全部平台" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部平台</SelectItem>
+          {platforms.map((plat) => (
+            <SelectItem key={plat.code} value={plat.code}>
+              {plat.name} ({plat.code})
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={tradeTypeFilter ?? "all"}
+        onValueChange={(v) => {
+          setTradeTypeFilter(v === "all" ? undefined : v);
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="全部类型" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部类型</SelectItem>
+          <SelectItem value="buy">买入</SelectItem>
+          <SelectItem value="sell">卖出</SelectItem>
+        </SelectContent>
+      </Select>
+      {hasNonDefaultFilter && (
+        <Button variant="ghost" size="sm" className="h-9" onClick={resetFilters}>
+          重置
+        </Button>
+      )}
+    </>
+  );
+
+  // 主行（普通单行 / 结对主行共用）；结对主行去下边框使主+子视觉成组（规范 §8 结对行）
+  const renderMainRow = (trade: Trade, isPairMain: boolean) => (
+    <TableRow key={trade.id} className={isPairMain ? "border-b-0" : undefined}>
+      <TableCell>
+        {/* CASH 孤儿单行：产品列改显示业务来源（§5.8 简化口径）；结对主行/基金单行维持产品名+code 双行 */}
+        {trade.product_code === "CASH" && !isPairMain ? (
+          <span className="text-sm">{cashOrphanLabel(trade)}</span>
+        ) : (
+          <div>
+            <p className="font-medium">{getProductName(trade.product_code, trade.market)}</p>
+            <p className="text-xs text-muted-foreground">{trade.product_code}</p>
+          </div>
+        )}
+      </TableCell>
+      <TableCell>{formatMarketName(trade.market)}</TableCell>
+      <TableCell>
+        {trade.platform_code ? <NameCodeCell code={trade.platform_code} nameMap={platformNameMap} /> : "-"}
+      </TableCell>
+      <TableCell>
+        {/* 方向标识无状态语义：neutral badge + 方向色圆点（lib/colors，#127） */}
+        <Badge variant="neutral">
+          <span
+            className="mr-1.5 h-1.5 w-1.5 rounded-full"
+            style={{ background: TRADE_DIRECTION_COLORS[trade.trade_type === "buy" ? "buy" : "sell"] }}
+          />
+          {trade.trade_type === "buy" ? "买入" : "卖出"}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-right">
+        {trade.amount ? formatCurrency(trade.amount) : formatNumber(trade.shares || 0)}
+      </TableCell>
+      <TableCell className="text-right">{formatNav(trade.price)}</TableCell>
+      <TableCell>{trade.trade_date}</TableCell>
+      <TableCell>
+        {/* 决策②：pending 的 confirm_date 是预计确认日，主次双行标注「预计」 */}
+        {trade.confirm_date ? (
+          trade.status === "pending" ? (
+            <>
+              <div className="text-sm">{trade.confirm_date}</div>
+              <div className="text-xs text-muted-foreground">预计</div>
+            </>
+          ) : (
+            trade.confirm_date
+          )
+        ) : (
+          "-"
+        )}
+      </TableCell>
+      <TableCell>
+        <Badge variant={getStatusBadgeVariant(trade.status)}>
+          {trade.status === "confirmed" ? "已确认" : trade.status === "pending" ? "待确认" : "已取消"}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-right">
+        {trade.status === "pending" && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmState({ action: "confirm", id: trade.id })}
+              disabled={confirmTrade.isPending}
+            >
+              <CheckCircle className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmState({ action: "cancel", id: trade.id })}
+              disabled={cancelTrade.isPending}
+            >
+              <XCircle className="h-4 w-4" />
+            </Button>
+          </>
+        )}
+        {trade.status === "confirmed" && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmState({ action: "unconfirm", id: trade.id })}
+              title="取消确认"
+            >
+              <Undo className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setEditHint(true)} title="修改">
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmState({ action: "delete", id: trade.id })}
+              title="删除"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+
+  // 现金子行（规范 §8）：首列 pl-8、整行 bg-muted/50、内容 text-xs；金额 text-foreground 手工 +/- 前缀
+  // （资金流向非涨跌语义，禁用 gain/loss token）；操作列空、不单独响应 hover
+  const renderCashSubRow = (main: Trade, sub: Trade) => {
+    const meta = cashSubMeta(main);
+    const platformName = sub.platform_code ? platformNameMap.get(sub.platform_code) : undefined;
+    return (
+      <TableRow key={`cash-${sub.id}`} className="bg-muted/50 hover:bg-muted/50">
+        <TableCell className="pl-8">
+          <span className="text-xs text-muted-foreground">
+            {meta.label}
+            {platformName ? ` · ${platformName}` : ""}
+          </span>
+        </TableCell>
+        <TableCell />
+        <TableCell />
+        <TableCell />
+        <TableCell className="text-right">
+          <span className="text-xs text-foreground">
+            {meta.sign}
+            {formatCurrency(sub.amount ?? 0)}
+          </span>
+        </TableCell>
+        <TableCell />
+        <TableCell />
+        <TableCell />
+        <TableCell />
+        <TableCell className="text-right" />
+      </TableRow>
+    );
   };
 
   if (isLoading) return <LoadingState />;
@@ -331,8 +671,29 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           <CardDescription>买入和卖出记录</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className={variant === "mobile" ? "overflow-x-auto" : ""}>
-            <Table>
+          {/* 筛选栏（规范 §9：表格卡片内顶部）；移动端为折叠面板 + 激活计数 Badge */}
+          {variant === "mobile" ? (
+            <div className="mb-3 space-y-2">
+              <Button variant="outline" size="sm" className="h-9" onClick={() => setFilterOpen((v) => !v)}>
+                <Filter className="mr-2 h-4 w-4" />
+                筛选
+                {activeFilterCount > 0 && (
+                  <Badge variant="default" className="ml-2">
+                    {activeFilterCount}
+                  </Badge>
+                )}
+              </Button>
+              {filterOpen && <div className="grid grid-cols-1 gap-2">{filterControls}</div>}
+            </div>
+          ) : (
+            <div className="mb-3 flex flex-wrap items-center gap-2">{filterControls}</div>
+          )}
+          {/* 规范 §14：筛选/翻页局部刷新保留旧数据，表格半透明 + 右上角小 spinner */}
+          <div className="relative">
+            {isFetching && (
+              <Loader2 className="absolute right-2 top-2 z-10 h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+            <Table className={cn(isFetching && "opacity-50")}>
               <TableHeader>
                 <TableRow>
                   <TableHead>产品</TableHead>
@@ -348,88 +709,44 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {trades.map((trade) => (
-                  <TableRow key={trade.id}>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{getProductName(trade.product_code, trade.market)}</p>
-                        <p className="text-sm text-muted-foreground">{trade.product_code}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>{formatMarketName(trade.market)}</TableCell>
-                    <TableCell>{trade.platform_code || "-"}</TableCell>
-                    <TableCell>
-                      {/* 方向标识无状态语义：neutral badge + 方向色圆点（lib/colors，#127） */}
-                      <Badge variant="neutral">
-                        <span
-                          className="mr-1.5 h-1.5 w-1.5 rounded-full"
-                          style={{ background: TRADE_DIRECTION_COLORS[trade.trade_type === "buy" ? "buy" : "sell"] }}
-                        />
-                        {trade.trade_type === "buy" ? "买入" : "卖出"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {trade.amount ? formatCurrency(trade.amount) : formatNumber(trade.shares || 0)}
-                    </TableCell>
-                    <TableCell className="text-right">{formatNav(trade.price)}</TableCell>
-                    <TableCell>{trade.trade_date}</TableCell>
-                    <TableCell>{trade.confirm_date || "-"}</TableCell>
-                    <TableCell>
-                      <Badge variant={getStatusBadgeVariant(trade.status)}>
-                        {trade.status === "confirmed" ? "已确认" : trade.status === "pending" ? "待确认" : "已取消"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {trade.status === "pending" && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmState({ action: "confirm", id: trade.id })}
-                            disabled={confirmTrade.isPending}
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmState({ action: "cancel", id: trade.id })}
-                            disabled={cancelTrade.isPending}
-                          >
-                            <XCircle className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
-                      {trade.status === "confirmed" && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmState({ action: "unconfirm", id: trade.id })}
-                            title="取消确认"
-                          >
-                            <Undo className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => setEditHint(true)} title="修改">
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmState({ action: "delete", id: trade.id })}
-                            title="删除"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {tradeRows.map((row) =>
+                  row.kind === "pair" ? (
+                    <Fragment key={row.main.id}>
+                      {renderMainRow(row.main, true)}
+                      {renderCashSubRow(row.main, row.sub)}
+                    </Fragment>
+                  ) : (
+                    renderMainRow(row.trade, false)
+                  )
+                )}
               </TableBody>
             </Table>
           </div>
-          {trades.length === 0 && <EmptyState message="暂无交易记录" />}
+          {/* 空态：默认筛选集下为空 = 暂无记录；非默认筛选下为空 = 引导重置（规范 §8 变体②） */}
+          {trades.length === 0 &&
+            (hasNonDefaultFilter ? (
+              <EmptyState
+                message="无符合筛选条件的记录"
+                action={
+                  <Button variant="ghost" size="sm" onClick={resetFilters}>
+                    重置筛选
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState message="暂无交易记录" />
+            ))}
+          <PaginationBar
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            variant={variant}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
         </CardContent>
       </Card>
 
