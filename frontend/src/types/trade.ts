@@ -13,6 +13,8 @@ export interface Trade {
   trade_date: string;
   confirm_date?: string;
   status: string;
+  /** 业务分组（#126 决策⑨）：rebal_*=调仓配对、sub_*=申赎现金腿、12位hex=现金转移；仅用于结对展示，页面不展示该编码 */
+  transfer_group?: string;
   notes?: string;
   created_at?: string;
   updated_at?: string;

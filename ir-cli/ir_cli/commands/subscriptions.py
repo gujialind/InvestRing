@@ -18,15 +18,30 @@ SNAPSHOT_HINT = "确认后需生成确认日快照才计入投资人份额: ir s
 def list_subs(
     portfolio_code: Optional[str] = typer.Option(None, "--portfolio-code", help="组合代码"),
     investor_code: Optional[str] = typer.Option(None, "--investor-code", help="投资人代码"),
+    status: Optional[str] = typer.Option(None, "--status", help="状态(pending/confirmed/cancelled)"),
+    sub_type: Optional[str] = typer.Option(None, "--type", help="类型(subscribe/redeem)"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="交易平台代码"),
+    apply_date_start: Optional[str] = typer.Option(None, "--apply-date-start", help="申请日期起(YYYY-MM-DD, 闭区间)"),
+    apply_date_end: Optional[str] = typer.Option(None, "--apply-date-end", help="申请日期止(YYYY-MM-DD, 闭区间)"),
+    confirm_date_start: Optional[str] = typer.Option(None, "--confirm-date-start", help="确认日期起(YYYY-MM-DD, 闭区间)"),
+    confirm_date_end: Optional[str] = typer.Option(None, "--confirm-date-end", help="确认日期止(YYYY-MM-DD, 闭区间)"),
     page: int = typer.Option(1, "--page", help="页码"),
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
     all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
     fields: Optional[str] = typer.Option(None, "--fields", help="仅输出指定字段(逗号分隔)"),
     full: bool = typer.Option(False, "--full", help="输出全字段（默认仅摘要字段）"),
 ):
-    """获取申赎列表（默认输出摘要字段，--full 全字段）"""
+    """获取申赎列表（默认输出摘要字段，--full 全字段）
+
+    确认日期筛选对 pending 记录命中预计确认日（创建时按 T+1 设定）。
+    """
     client = APIClient.from_config()
-    params = build_body(portfolio_code=portfolio_code, investor_code=investor_code)
+    params = build_body(
+        portfolio_code=portfolio_code, investor_code=investor_code,
+        status=status, sub_type=sub_type, platform_code=platform_code,
+        apply_date_start=apply_date_start, apply_date_end=apply_date_end,
+        confirm_date_start=confirm_date_start, confirm_date_end=confirm_date_end,
+    )
     run_list(
         client, "/api/subscriptions", params,
         page=page, page_size=page_size, all_pages=all_pages,

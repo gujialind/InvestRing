@@ -458,8 +458,18 @@ ir position delete-cash --portfolio-code <组合代码> --platform-code <平台>
 获取申购赎回列表。
 
 ```bash
-ir sub list [--portfolio-code <组合>] [--investor-code <投资人>] [--page N] [--page-size N] [--all]
+ir sub list [--portfolio-code <组合>] [--investor-code <投资人>] [--status <状态>] [--type <类型>] \
+  [--platform-code <平台>] [--apply-date-start YYYY-MM-DD] [--apply-date-end YYYY-MM-DD] \
+  [--confirm-date-start YYYY-MM-DD] [--confirm-date-end YYYY-MM-DD] [--page N] [--page-size N] [--all]
 ```
+
+| 参数 | 说明 |
+|------|------|
+| `--status` | 状态过滤（`pending`/`confirmed`/`cancelled`） |
+| `--type` | 类型过滤（`subscribe`/`redeem`） |
+| `--platform-code` | 交易平台过滤 |
+| `--apply-date-start` / `--apply-date-end` | 申请日期区间（闭区间；`start > end` 返回 422） |
+| `--confirm-date-start` / `--confirm-date-end` | 确认日期区间（闭区间；对 pending 记录命中**预计确认日**） |
 
 #### `ir sub create`
 
@@ -539,8 +549,21 @@ ir sub unconfirm <ID>
 获取调仓交易列表。
 
 ```bash
-ir trade list [--portfolio-code <组合>] [--page N] [--page-size N] [--all]
+ir trade list [--portfolio-code <组合>] [--status <状态>] [--type <类型>] \
+  [--product-code <产品>] [--market <市场>] [--platform-code <平台>] \
+  [--trade-date-start YYYY-MM-DD] [--trade-date-end YYYY-MM-DD] \
+  [--confirm-date-start YYYY-MM-DD] [--confirm-date-end YYYY-MM-DD] [--page N] [--page-size N] [--all]
 ```
+
+| 参数 | 说明 |
+|------|------|
+| `--status` | 状态过滤（`pending`/`confirmed`/`cancelled`） |
+| `--type` | 类型过滤（`buy`/`sell`） |
+| `--product-code` | 产品过滤（单独使用时跨市场全匹配，LOF 一码多市场均命中） |
+| `--market` | 市场过滤（与 `--product-code` 组合为精确过滤） |
+| `--platform-code` | 交易平台过滤 |
+| `--trade-date-start` / `--trade-date-end` | 交易日期区间（闭区间；`start > end` 返回 422） |
+| `--confirm-date-start` / `--confirm-date-end` | 确认日期区间（闭区间；对 pending 记录命中**预计确认日**） |
 
 #### `ir trade create`
 

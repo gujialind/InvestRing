@@ -684,3 +684,76 @@ def unconfirm_trade(db: Session, trade: Trade) -> Trade:
             )
     sync_transfer_group(db, trade, "pending")
     return trade
+
+
+def list_trades(
+    db: Session,
+    *,
+    portfolio_code: Optional[str] = None,
+    status: Optional[str] = None,
+    trade_type: Optional[str] = None,
+    product_code: Optional[str] = None,
+    market: Optional[str] = None,
+    platform_code: Optional[str] = None,
+    trade_date_start: Optional[date] = None,
+    trade_date_end: Optional[date] = None,
+    confirm_date_start: Optional[date] = None,
+    confirm_date_end: Optional[date] = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Trade], int]:
+    """调仓交易列表查询（服务端筛选 + 分页，issue #126）。
+
+    - 日期区间均为闭区间；同组 start > end 抛 INVALID_DATE_RANGE（422）。
+    - product_code 与 market 独立可选：都给则精确过滤（LOF 一码多市场场景）；
+      只给 product_code 则跨市场全匹配。
+    - 排序：trade_date DESC, transfer_group, id DESC——transfer_group 入排序键
+      使同组两腿大概率同页相邻（同组两腿同事务插入 id 连续，此为双保险）。
+    - trades 无 viewer 过滤（组合级操作，保持现状语义，不在本 PR 引入权限变化）。
+
+    Returns:
+        (items, total)：当前页记录与过滤后总数（分页前）。
+    """
+    if trade_date_start and trade_date_end and trade_date_start > trade_date_end:
+        raise BusinessError(
+            "INVALID_DATE_RANGE",
+            f"start_date ({trade_date_start}) 不能晚于 end_date ({trade_date_end})",
+            http_status=422,
+        )
+    if confirm_date_start and confirm_date_end and confirm_date_start > confirm_date_end:
+        raise BusinessError(
+            "INVALID_DATE_RANGE",
+            f"start_date ({confirm_date_start}) 不能晚于 end_date ({confirm_date_end})",
+            http_status=422,
+        )
+
+    query = db.query(Trade)
+    if portfolio_code:
+        query = query.filter(Trade.portfolio_code == portfolio_code)
+    if status:
+        query = query.filter(Trade.status == status)
+    if trade_type:
+        query = query.filter(Trade.trade_type == trade_type)
+    if product_code:
+        query = query.filter(Trade.product_code == product_code)
+    if market is not None:
+        query = query.filter(Trade.market == market)
+    if platform_code:
+        query = query.filter(Trade.platform_code == platform_code)
+    if trade_date_start:
+        query = query.filter(Trade.trade_date >= trade_date_start)
+    if trade_date_end:
+        query = query.filter(Trade.trade_date <= trade_date_end)
+    if confirm_date_start:
+        query = query.filter(Trade.confirm_date >= confirm_date_start)
+    if confirm_date_end:
+        query = query.filter(Trade.confirm_date <= confirm_date_end)
+
+    total = query.count()
+    items = (
+        query.order_by(Trade.trade_date.desc(), Trade.transfer_group, Trade.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total
