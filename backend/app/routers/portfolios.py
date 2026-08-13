@@ -82,7 +82,7 @@ def update_portfolio(
         display_config=(
             updates["display_config"]
             if "display_config" in updates
-            else portfolio_service._UNSET
+            else portfolio_service.UNSET
         ),
     )
     db.commit()

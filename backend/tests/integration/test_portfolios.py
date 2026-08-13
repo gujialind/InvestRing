@@ -340,6 +340,34 @@ class TestPortfolioDisplayConfig:
         assert resp.status_code == 200
         assert resp.json()["display_config"] is None
 
+    def test_put_empty_dict_normalized_to_null(self, client, admin_headers, test_db):
+        """空对象 {} 归一为 NULL（与「未配置」保持单一表示）"""
+        create_portfolio(test_db, code="P_DC_E")
+        client.put(
+            "/api/portfolios/P_DC_E",
+            json={"display_config": {"ASSET_STOCK": "style"}},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/portfolios/P_DC_E",
+            json={"display_config": {}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["display_config"] is None
+        detail = client.get("/api/portfolios/P_DC_E", headers=admin_headers)
+        assert detail.json()["display_config"] is None
+
+    def test_create_empty_dict_normalized_to_null(self, client, admin_headers):
+        """创建时传 {} 同样归一为 NULL"""
+        resp = client.post(
+            "/api/portfolios",
+            json={"code": "P_DC_EC", "name": "空配置组合", "display_config": {}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["display_config"] is None
+
     def test_put_without_display_config_keeps_existing(
         self, client, admin_headers, test_db
     ):
