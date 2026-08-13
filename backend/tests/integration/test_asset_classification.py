@@ -488,3 +488,298 @@ class TestMigration0009:
         assert "asset_class_dimension_rule" not in tables
         ac_cols = {c["name"] for c in sa.inspect(engine).get_columns("asset_classification")}
         assert "is_active" not in ac_cols
+
+
+# ============================================================================
+# issue #135 PR-2：字典管理 API（POST/PUT/GET 单条）
+# ============================================================================
+from tests.factories import create_product  # noqa: E402
+
+_API = "/api/asset-classifications"
+
+
+class TestClassificationGetOne:
+    def test_get_not_found_404(self, client, admin_headers):
+        resp = client.get(f"{_API}/NOPE_XX", headers=admin_headers)
+        assert resp.status_code == 404
+
+    def test_get_asset_class_returns_rules(self, client, admin_headers):
+        resp = client.get(f"{_API}/ASSET_STOCK", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["dimension_rules"] == {
+            "region": "required", "style": "required",
+            "size": "required", "segment": "optional",
+        }
+        assert data["applicable_asset_classes"] == []
+
+    def test_get_value_returns_applicability(self, client, admin_headers):
+        resp = client.get(f"{_API}/SEG_GOLD", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applicable_asset_classes"] == ["ASSET_COMMODITY"]
+        assert data["dimension_rules"] == {}
+
+
+class TestClassificationCreate:
+    def test_create_region_value_ok(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "REGION_ANT", "dimension": "region", "name": "南极洲",
+            "sort_order": 7, "applicable_asset_classes": ["ASSET_STOCK", "ASSET_BOND"],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_active"] is True
+        assert data["applicable_asset_classes"] == ["ASSET_STOCK", "ASSET_BOND"]
+        # 列表端可见
+        items = {i["code"]: i for i in client.get(
+            _API, headers=admin_headers).json()["items"]}
+        assert items["REGION_ANT"]["name"] == "南极洲"
+
+    def test_create_asset_class_with_rules_ok(self, client, admin_headers):
+        """新建大类带规则：运行期闭环可用（无需发版）"""
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "ASSET_REIT", "dimension": "asset_class", "name": "REITs",
+            "dimension_rules": {"region": "required", "segment": "optional"},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["dimension_rules"] == {"region": "required", "segment": "optional"}
+        assert data["applicable_asset_classes"] == []
+
+    def test_create_asset_class_default_cash_like(self, client, admin_headers):
+        """新建大类不带规则 = 现金型全 forbidden（无规则行）"""
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "ASSET_ALTERNATIVE", "dimension": "asset_class", "name": "另类",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["dimension_rules"] == {}
+
+    def test_create_prefix_mismatch_422(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "REGION_XX", "dimension": "style", "name": "错前缀",
+            "applicable_asset_classes": ["ASSET_STOCK"],
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_create_lowercase_code_422(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "REGION_jp", "dimension": "region", "name": "小写",
+            "applicable_asset_classes": ["ASSET_STOCK"],
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_create_invalid_dimension_422(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "ASSET_X", "dimension": "country", "name": "坏维度",
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_create_duplicate_400(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "REGION_CN", "dimension": "region", "name": "重复",
+            "applicable_asset_classes": ["ASSET_STOCK"],
+        })
+        assert resp.status_code == 400
+        assert resp.json()["detail"]["error"] == "ALREADY_EXISTS"
+
+    def test_create_non_asset_class_requires_applicable_422(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "REGION_ANT", "dimension": "region", "name": "南极洲",
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_create_applicable_target_not_asset_class_422(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "REGION_ANT", "dimension": "region", "name": "南极洲",
+            "applicable_asset_classes": ["REGION_CN"],
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_create_nonsense_applicability_422(self, client, admin_headers):
+        """segment 值挂到全禁 segment 的大类（ASSET_CASH 无规则行）→ 拒绝"""
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "SEG_WHISKY", "dimension": "segment", "name": "威士忌",
+            "applicable_asset_classes": ["ASSET_CASH"],
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_create_asset_class_with_applicable_422(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "ASSET_REIT", "dimension": "asset_class", "name": "REITs",
+            "applicable_asset_classes": ["ASSET_STOCK"],
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_create_non_asset_class_with_rules_422(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "REGION_ANT", "dimension": "region", "name": "南极洲",
+            "applicable_asset_classes": ["ASSET_STOCK"],
+            "dimension_rules": {"region": "required"},
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_create_invalid_rule_422(self, client, admin_headers):
+        resp = client.post(_API, headers=admin_headers, json={
+            "code": "ASSET_REIT", "dimension": "asset_class", "name": "REITs",
+            "dimension_rules": {"region": "mandatory"},
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_viewer_cannot_create_403(self, client, viewer_headers):
+        resp = client.post(_API, headers=viewer_headers, json={
+            "code": "REGION_ANT", "dimension": "region", "name": "南极洲",
+            "applicable_asset_classes": ["ASSET_STOCK"],
+        })
+        assert resp.status_code == 403
+
+
+class TestClassificationUpdate:
+    def test_update_scalar_fields_ok(self, client, admin_headers):
+        resp = client.put(f"{_API}/STYLE_VALUE", headers=admin_headers, json={
+            "name": "价值型", "sort_order": 9, "description": "深度价值", "is_active": False,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "价值型"
+        assert data["sort_order"] == 9
+        assert data["description"] == "深度价值"
+        assert data["is_active"] is False
+        # 软失效后列表仍返回该值（消费方自行过滤）
+        items = {i["code"]: i for i in client.get(
+            _API, headers=admin_headers).json()["items"]}
+        assert items["STYLE_VALUE"]["is_active"] is False
+
+    def test_update_not_found_404(self, client, admin_headers):
+        resp = client.put(f"{_API}/NOPE_XX", headers=admin_headers,
+                          json={"name": "x"})
+        assert resp.status_code == 404
+
+    def test_update_applicability_replace_ok(self, client, admin_headers):
+        client.post(_API, headers=admin_headers, json={
+            "code": "REGION_ANT", "dimension": "region", "name": "南极洲",
+            "applicable_asset_classes": ["ASSET_STOCK", "ASSET_BOND"],
+        })
+        resp = client.put(f"{_API}/REGION_ANT", headers=admin_headers,
+                          json={"applicable_asset_classes": ["ASSET_BOND"]})
+        assert resp.status_code == 200
+        assert resp.json()["applicable_asset_classes"] == ["ASSET_BOND"]
+
+    def test_update_remove_in_use_applicability_422(self, client, admin_headers):
+        """引用保护：种子产品 510300.SH/000300.OF 引用 (REGION_CN, ASSET_STOCK)"""
+        resp = client.put(f"{_API}/REGION_CN", headers=admin_headers,
+                          json={"applicable_asset_classes": ["ASSET_BOND"]})
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "DIMENSION_VALUE_IN_USE"
+        assert detail["details"]["asset_class_code"] == "ASSET_STOCK"
+        assert detail["details"]["products"] == ["000300.OF", "510300.SH"]
+        # 关联未被改动
+        data = client.get(f"{_API}/REGION_CN", headers=admin_headers).json()
+        assert data["applicable_asset_classes"] == ["ASSET_STOCK", "ASSET_BOND"]
+
+    def test_update_applicability_to_empty_422(self, client, admin_headers):
+        resp = client.put(f"{_API}/REGION_CN", headers=admin_headers,
+                          json={"applicable_asset_classes": []})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_update_applicability_nonsense_422(self, client, admin_headers):
+        resp = client.put(f"{_API}/STYLE_VALUE", headers=admin_headers,
+                          json={"applicable_asset_classes": ["ASSET_COMMODITY"]})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_update_rules_relax_ok(self, client, admin_headers):
+        """放宽自由：required → optional 无冲突校验"""
+        resp = client.put(f"{_API}/ASSET_STOCK", headers=admin_headers, json={
+            "dimension_rules": {
+                "region": "required", "style": "required",
+                "size": "optional", "segment": "optional",
+            },
+        })
+        assert resp.status_code == 200
+        assert resp.json()["dimension_rules"]["size"] == "optional"
+
+    def test_update_rules_tighten_required_conflict_422(self, client, admin_headers, test_db):
+        """→required 需存量产品该维度全非空"""
+        client.post(_API, headers=admin_headers, json={
+            "code": "ASSET_REIT", "dimension": "asset_class", "name": "REITs",
+            "dimension_rules": {"segment": "optional"},
+        })
+        create_product(test_db, code="508000.SH", market="CN_EXCHANGE",
+                       asset_class_code="ASSET_REIT", region_code=None,
+                       style_code=None, size_code=None, segment_code=None)
+        resp = client.put(f"{_API}/ASSET_REIT", headers=admin_headers,
+                          json={"dimension_rules": {"segment": "required"}})
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "DIMENSION_RULE_CONFLICT"
+        assert detail["details"]["products"] == ["508000.SH"]
+
+    def test_update_rules_tighten_forbidden_conflict_422(self, client, admin_headers, test_db):
+        """→forbidden（删规则行）需存量产品该维度全空"""
+        client.post(_API, headers=admin_headers, json={
+            "code": "ASSET_REIT", "dimension": "asset_class", "name": "REITs",
+            "dimension_rules": {"segment": "optional"},
+        })
+        create_product(test_db, code="508001.SH", market="CN_EXCHANGE",
+                       asset_class_code="ASSET_REIT", region_code=None,
+                       style_code=None, size_code=None, segment_code="SEG_GOLD")
+        resp = client.put(f"{_API}/ASSET_REIT", headers=admin_headers,
+                          json={"dimension_rules": {}})
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "DIMENSION_RULE_CONFLICT"
+        assert detail["details"]["rule"] == "forbidden"
+        assert detail["details"]["products"] == ["508001.SH"]
+
+    def test_update_rules_forbidden_keeps_dormant_links(self, client, admin_headers):
+        """forbidden 化不级联删值关联（dormant），规则回转自动复活"""
+        client.post(_API, headers=admin_headers, json={
+            "code": "ASSET_FOF", "dimension": "asset_class", "name": "FOF",
+            "dimension_rules": {"segment": "optional"},
+        })
+        client.post(_API, headers=admin_headers, json={
+            "code": "SEG_FOF", "dimension": "segment", "name": "FOF份额",
+            "applicable_asset_classes": ["ASSET_FOF"],
+        })
+        resp = client.put(f"{_API}/ASSET_FOF", headers=admin_headers,
+                          json={"dimension_rules": {}})
+        assert resp.status_code == 200
+        assert resp.json()["dimension_rules"] == {}
+        # 关联保留（dormant）
+        data = client.get(f"{_API}/SEG_FOF", headers=admin_headers).json()
+        assert data["applicable_asset_classes"] == ["ASSET_FOF"]
+        # 规则回转后关联自动复活可用
+        resp = client.put(f"{_API}/ASSET_FOF", headers=admin_headers,
+                          json={"dimension_rules": {"segment": "optional"}})
+        assert resp.status_code == 200
+        assert resp.json()["dimension_rules"] == {"segment": "optional"}
+
+    def test_update_rules_on_non_asset_class_422(self, client, admin_headers):
+        resp = client.put(f"{_API}/REGION_CN", headers=admin_headers,
+                          json={"dimension_rules": {"region": "required"}})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_update_applicability_on_asset_class_422(self, client, admin_headers):
+        resp = client.put(f"{_API}/ASSET_STOCK", headers=admin_headers,
+                          json={"applicable_asset_classes": ["ASSET_BOND"]})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"
+
+    def test_update_invalid_rule_422(self, client, admin_headers):
+        resp = client.put(f"{_API}/ASSET_STOCK", headers=admin_headers,
+                          json={"dimension_rules": {"country": "required"}})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CLASSIFICATION"

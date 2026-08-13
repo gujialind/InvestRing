@@ -38,6 +38,7 @@ SUMMARY_FIELDS = {
     "log_login": "id,investor_code,action,status,ip_address,failure_reason,created_at",
     "log_audit": "id,investor_code,action,resource_type,resource_id,resource_name,created_at",
     "log_error": "id,error_type,error_code,error_message,request_path,created_at",
+    "asset_classification": "code,dimension,name,sort_order,is_active,applicable_asset_classes",
 }
 
 
