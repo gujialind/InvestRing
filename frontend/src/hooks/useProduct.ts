@@ -2,13 +2,14 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { productApi, getErrorMessage } from "@/lib/api";
+import type { ProductListParams } from "@/lib/api";
 import { ProductCreate, ProductUpdate } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
 
 const PRODUCT_QUERY_KEY = "products";
 
-// 产品列表 Hook
-export function useProductList(params?: { page?: number; page_size?: number; product_type?: string }) {
+// 产品列表 Hook（参数全集见 ProductListParams，queryKey 带 params 自动按条件刷新）
+export function useProductList(params?: ProductListParams) {
   return useQuery({
     queryKey: [PRODUCT_QUERY_KEY, "list", params],
     queryFn: () => productApi.list(params),

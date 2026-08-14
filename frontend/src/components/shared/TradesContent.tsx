@@ -67,6 +67,7 @@ import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import PaginationBar from "@/components/shared/PaginationBar";
 import NameCodeCell from "@/components/shared/NameCodeCell";
+import ProductFilterDialog, { ProductSelection } from "@/components/shared/ProductFilterDialog";
 
 interface TradesContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -112,7 +113,8 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   // 筛选状态（#126 服务端筛选）：tradeRange 默认最近 1 年（决策⑤，惰性初始化避免每渲染重算）
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [tradeTypeFilter, setTradeTypeFilter] = useState<string | undefined>(undefined);
-  const [productFilter, setProductFilter] = useState<{ code: string; market: string } | undefined>(undefined);
+  // 产品多选筛选（#155）：undefined = 全部产品；元素为 {code, market}（market 可空串）
+  const [productFilters, setProductFilters] = useState<ProductSelection[] | undefined>(undefined);
   const [platformFilter, setPlatformFilter] = useState<string | undefined>(undefined);
   const [tradeRange, setTradeRange] = useState<DateRange | undefined>(() => defaultTradeRange());
   const [confirmRange, setConfirmRange] = useState<DateRange | undefined>(undefined);
@@ -120,15 +122,17 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const [pageSize, setPageSize] = useState(20);
   const [filterOpen, setFilterOpen] = useState(false);
 
-  // 空筛选字段为 undefined，axios 不传参；产品选中时 market 精确匹配（CASH 的 "" 也生效）
+  // 空筛选字段为 undefined，axios 不传参；产品多选拼 `code|market` 逗号分隔（market 段可空，
+  // 如 `CASH|`），与后端 products 参数契约一致（#155，与 product_code/market 互斥不同传）
   const listParams: TradeListParams = {
     portfolio_code: code,
     page,
     page_size: pageSize,
     status: statusFilter,
     trade_type: tradeTypeFilter,
-    product_code: productFilter?.code,
-    market: productFilter?.market,
+    products: productFilters?.length
+      ? productFilters.map((p) => `${p.code}|${p.market}`).join(",")
+      : undefined,
     platform_code: platformFilter,
     trade_date_start: tradeRange?.from ? toDateOnly(tradeRange.from) : undefined,
     trade_date_end: tradeRange?.to ? toDateOnly(tradeRange.to) : undefined,
@@ -157,18 +161,11 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     () => new Map((platformsData?.items ?? []).map((plat) => [plat.code, plat.name])),
     [platformsData?.items]
   );
-  // 一码多市场（LOF）计数：产品筛选下拉单行文案加市场后缀（规范 §8：下拉单行 name (code · 市场名)）
-  const productCodeCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    (productsData?.items ?? []).forEach((p) => m.set(p.code, (m.get(p.code) ?? 0) + 1));
-    return m;
-  }, [productsData?.items]);
-
   // 非默认筛选判定（默认集 = 仅 tradeRange 为最近 1 年）：驱动「重置」按钮显隐与空态文案
   const hasNonDefaultFilter =
     statusFilter !== undefined ||
     tradeTypeFilter !== undefined ||
-    productFilter !== undefined ||
+    productFilters !== undefined ||
     platformFilter !== undefined ||
     confirmRange !== undefined ||
     tradeRange === undefined ||
@@ -176,7 +173,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const activeFilterCount =
     (statusFilter ? 1 : 0) +
     (tradeTypeFilter ? 1 : 0) +
-    (productFilter ? 1 : 0) +
+    (productFilters?.length ? 1 : 0) +
     (platformFilter ? 1 : 0) +
     (confirmRange ? 1 : 0) +
     (tradeRange === undefined || !isDefaultTradeRange(tradeRange) ? 1 : 0);
@@ -184,7 +181,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const resetFilters = () => {
     setStatusFilter(undefined);
     setTradeTypeFilter(undefined);
-    setProductFilter(undefined);
+    setProductFilters(undefined);
     setPlatformFilter(undefined);
     setTradeRange(defaultTradeRange());
     setConfirmRange(undefined);
@@ -256,7 +253,8 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   };
 
   // 筛选栏控件（visual-spec §9）：顺序 = 交易日期区间 → 确认日期区间 → 状态 → 产品 → 平台 → 类型；
-  // 控件统一 h-9，下拉全部走 ui/select；「全部 X」用 "all" 哨兵（Radix SelectItem 不允许空串值）
+  // 控件统一 h-9，下拉全部走 ui/select（「全部 X」用 "all" 哨兵，Radix SelectItem 不允许空串值）；
+  // 产品为 ProductFilterDialog 多选弹窗触发按钮（#155），outline 风格同筛选栏
   const rangeWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[240px]";
   const selectWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[150px]";
   const productSelectWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[220px]";
@@ -299,32 +297,27 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           <SelectItem value="cancelled">已取消</SelectItem>
         </SelectContent>
       </Select>
-      <Select
-        value={productFilter ? `${productFilter.code}|${productFilter.market}` : "all"}
-        onValueChange={(v) => {
-          if (v === "all") {
-            setProductFilter(undefined);
-          } else {
-            const sep = v.indexOf("|");
-            setProductFilter({ code: v.slice(0, sep), market: v.slice(sep + 1) });
-          }
+      <ProductFilterDialog
+        variant={variant}
+        value={productFilters ?? []}
+        onConfirm={(selection) => {
+          // 空选择归一为 undefined（= 全部产品），与非默认筛选判定口径一致
+          setProductFilters(selection.length ? selection : undefined);
           setPage(1);
         }}
       >
-        <SelectTrigger className={productSelectWidth}>
-          <SelectValue placeholder="全部产品" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部产品</SelectItem>
-          {products.map((p) => (
-            <SelectItem key={`${p.code}|${p.market ?? ""}`} value={`${p.code}|${p.market ?? ""}`}>
-              {(productCodeCounts.get(p.code) ?? 0) > 1
-                ? `${p.name} (${p.code} · ${formatMarketName(p.market)})`
-                : `${p.name} (${p.code})`}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(
+            productSelectWidth,
+            "justify-start font-normal",
+            !productFilters?.length && "text-muted-foreground"
+          )}
+        >
+          {productFilters?.length ? `产品 · 已选 ${productFilters.length}` : "全部产品"}
+        </Button>
+      </ProductFilterDialog>
       <Select
         value={platformFilter ?? "all"}
         onValueChange={(v) => {
