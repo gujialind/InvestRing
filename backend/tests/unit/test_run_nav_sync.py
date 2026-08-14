@@ -1,11 +1,12 @@
 """
-run_nav_sync 重写测试（P5.4）
+run_nav_sync / run_snapshot_generate 测试（P5.4，#156 任务剥离）
 
 验证：
 - target_date = yesterday(T)（D3）
 - 增量起点 = MAX(date)+1
-- 快照不被 failed_products 门控
+- run_nav_sync 不再串联快照生成（无 snapshots_generated 键、不调 _generate_snapshots_for_date）
 - 无 ShareChangeEvent 写入（D1 跳过分红检测）
+- run_snapshot_generate 仅处理 active 且开启 auto_snapshot_enabled 的组合
 - auto_confirm_after_snapshot 被调用
 """
 import pytest
@@ -17,7 +18,9 @@ from app.models.nav_sync_detail import NavSyncDetail
 from app.models.price_record import PriceRecord
 from app.models.product import Product
 from app.models.share_change_event import ShareChangeEvent
-from app.services.task_runner import run_nav_sync, _generate_snapshots_for_date
+from app.services.task_runner import (
+    run_nav_sync, run_snapshot_generate, _generate_snapshots_for_date,
+)
 
 
 class TestTargetDateYesterday:
@@ -85,17 +88,18 @@ class TestNoShareChangeEvent:
 
 
 class TestSnapshotNotGatedByFailures:
-    """快照不被 failed_products 门控"""
+    """#156：快照生成自 run_nav_sync 剥离，不再串联调用"""
 
     @patch("app.services.market_data_service.sync_product_prices")
     @patch("app.services.task_runner._generate_snapshots_for_date")
-    def test_snapshot_attempted_even_with_failures(self, mock_snap, mock_sync, test_db):
-        """有产品失败也调用 _generate_snapshots_for_date"""
+    def test_snapshot_not_attempted_even_with_failures(self, mock_snap, mock_sync, test_db):
+        """run_nav_sync 不再调用 _generate_snapshots_for_date，返回 dict 无 snapshots_generated 键"""
         mock_sync.return_value = {"success": False, "synced_count": 0, "message": "API 错误", "source": "tushare"}
 
-        run_nav_sync(test_db, log_id=None)
+        result = run_nav_sync(test_db, log_id=None)
 
-        mock_snap.assert_called_once()
+        mock_snap.assert_not_called()
+        assert "snapshots_generated" not in result
 
 
 class TestAutoConfirmCalled:
@@ -117,7 +121,8 @@ class TestAutoConfirmCalled:
             cal.is_open = True
         test_db.commit()
 
-        port = Portfolio(code="AUTO_CONFIRM_PORT", name="测试", status="active")
+        port = Portfolio(code="AUTO_CONFIRM_PORT", name="测试", status="active",
+                         auto_snapshot_enabled=True)
         test_db.add(port)
         test_db.commit()
 
@@ -138,7 +143,8 @@ class TestBackfillLoop:
             create_portfolio, create_value_snapshot, ensure_trading_day,
         )
 
-        create_portfolio(test_db, code="BACKFILL_PORT", status="active")
+        create_portfolio(test_db, code="BACKFILL_PORT", status="active",
+                         auto_snapshot_enabled=True)
         ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
         ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
         ensure_trading_day(test_db, date(2025, 9, 3), is_open=True)
@@ -163,7 +169,8 @@ class TestBackfillLoop:
             create_portfolio, create_value_snapshot, ensure_trading_day,
         )
 
-        create_portfolio(test_db, code="BACKFILL_FAIL", status="active")
+        create_portfolio(test_db, code="BACKFILL_FAIL", status="active",
+                         auto_snapshot_enabled=True)
         ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
         ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
         ensure_trading_day(test_db, date(2025, 9, 3), is_open=True)
@@ -178,5 +185,68 @@ class TestBackfillLoop:
         count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
 
         # 首日 09-02 失败即 break，不继续 09-03
+        assert count == 0
+        assert mock_gen.call_count == 1
+
+
+class TestRunSnapshotGenerate:
+    """#156：独立快照生成任务（run_snapshot_generate）与组合开关过滤"""
+
+    @patch("app.services.snapshot_service.auto_confirm_after_snapshot")
+    @patch("app.services.snapshot_service.generate_daily_snapshots")
+    def test_only_enabled_active_portfolios_processed(self, mock_gen, mock_auto, test_db):
+        """仅 active + auto_snapshot_enabled=True 的组合被处理（active+关 / draft+开 均跳过）"""
+        from tests.factories import create_portfolio, ensure_trading_day
+
+        create_portfolio(test_db, code="SNAP_ON", status="active",
+                         auto_snapshot_enabled=True)
+        create_portfolio(test_db, code="SNAP_OFF", status="active",
+                         auto_snapshot_enabled=False)
+        create_portfolio(test_db, code="SNAP_DRAFT", status="draft",
+                         auto_snapshot_enabled=True)
+        ensure_trading_day(test_db, date(2025, 9, 3), is_open=True)
+
+        count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
+
+        assert count == 1
+        portfolio_codes = [c.kwargs["portfolio_code"] for c in mock_gen.call_args_list]
+        assert portfolio_codes == ["SNAP_ON"]
+
+    @patch("app.services.task_runner._generate_snapshots_for_date")
+    def test_target_date_is_yesterday(self, mock_snap, test_db):
+        """run_snapshot_generate 以昨天为 target_date 调回补，返回结构含两者"""
+        mock_snap.return_value = 0
+
+        result = run_snapshot_generate(test_db, log_id=None)
+
+        yesterday = datetime.now().date() - timedelta(days=1)
+        assert result["target_date"] == yesterday.isoformat()
+        assert result["snapshots_generated"] == 0
+        mock_snap.assert_called_once()
+        assert mock_snap.call_args.args[1] == yesterday
+
+    @patch("app.services.snapshot_service.auto_confirm_after_snapshot")
+    @patch("app.services.snapshot_service.generate_daily_snapshots")
+    def test_fail_fast_preserved_for_enabled_portfolio(self, mock_gen, mock_auto, test_db):
+        """开启开关的组合仍保留 #35 fail-fast：单日失败即停止回补"""
+        from tests.factories import (
+            create_portfolio, create_value_snapshot, ensure_trading_day,
+        )
+
+        create_portfolio(test_db, code="SNAP_FAIL", status="active",
+                         auto_snapshot_enabled=True)
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 3), is_open=True)
+        create_value_snapshot(
+            test_db, portfolio_code="SNAP_FAIL",
+            snapshot_date=date(2025, 9, 1),
+            total_value=10000.0, total_shares=10000.0, unit_price=1.0,
+        )
+
+        mock_gen.side_effect = ValueError("依赖数据校验失败")
+
+        count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
+
         assert count == 0
         assert mock_gen.call_count == 1

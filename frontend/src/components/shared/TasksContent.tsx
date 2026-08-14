@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -12,10 +13,31 @@ import {
 } from "@/components/ui/table";
 import { Play, Pause, RotateCcw, Loader2 } from "lucide-react";
 import { useTaskList, useTaskExecutions, useRunTask, useEnableTask, useDisableTask } from "@/hooks/useTask";
+import { usePortfolioList, useUpdatePortfolio } from "@/hooks/usePortfolio";
 import { formatDate, getStatusBadgeVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
 import { useState } from "react";
+import type { Portfolio } from "@/types/portfolio";
+
+// 组合自动快照开关行（#156）：每行独立的 useUpdatePortfolio 链路，须为独立组件以合规调用 hook
+function PortfolioAutoSnapshotRow({ portfolio }: { portfolio: Portfolio }) {
+  const updatePortfolio = useUpdatePortfolio(portfolio.code);
+  return (
+    <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">{portfolio.name}</div>
+        <div className="text-xs text-muted-foreground">{portfolio.code}</div>
+      </div>
+      <Switch
+        checked={portfolio.auto_snapshot_enabled}
+        disabled={updatePortfolio.isPending}
+        onCheckedChange={(next) => updatePortfolio.mutate({ auto_snapshot_enabled: next })}
+        aria-label={`${portfolio.name} 自动生成快照`}
+      />
+    </div>
+  );
+}
 
 export default function TasksContent() {
   const { data: tasksData, isLoading } = useTaskList();
@@ -23,6 +45,13 @@ export default function TasksContent() {
 
   const { data: executionsData, isLoading: execLoading } = useTaskExecutions();
   const executions = executionsData?.items || [];
+
+  // 组合自动快照开关列表（#156）：仅列活跃组合
+  const { data: portfoliosData, isLoading: portfoliosLoading } = usePortfolioList({
+    status: "active",
+    page_size: 100,
+  });
+  const portfolios = portfoliosData?.items || [];
 
   const runTask = useRunTask();
   const enableTask = useEnableTask();
@@ -57,6 +86,31 @@ export default function TasksContent() {
           管理定时任务和手动触发
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>组合自动快照</CardTitle>
+          <CardDescription>
+            开启后每个交易日由定时任务自动补齐该组合快照；关闭不影响手动生成
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {portfoliosLoading ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              加载中...
+            </div>
+          ) : portfolios.length === 0 ? (
+            <div className="text-xs text-muted-foreground">暂无活跃组合</div>
+          ) : (
+            <div className="divide-y">
+              {portfolios.map((p) => (
+                <PortfolioAutoSnapshotRow key={p.code} portfolio={p} />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
