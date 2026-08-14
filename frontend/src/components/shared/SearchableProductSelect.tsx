@@ -17,6 +17,8 @@ interface SearchableProductSelectProps {
   value: ProductSelection | null;
   onChange: (v: ProductSelection | null) => void;
   placeholder?: string;
+  /** 触发按钮 id，供外层 Label htmlFor 关联（可访问性） */
+  id?: string;
 }
 
 /**
@@ -27,6 +29,7 @@ export default function SearchableProductSelect({
   value,
   onChange,
   placeholder = "请选择产品",
+  id,
 }: SearchableProductSelectProps) {
   const [open, setOpen] = useState(false);
 
@@ -81,6 +84,7 @@ export default function SearchableProductSelect({
       <PopoverTrigger asChild>
         <button
           type="button"
+          id={id}
           className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-left text-sm font-normal ring-offset-background transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <span className={cn("truncate", !value && "text-muted-foreground")}>{label}</span>
