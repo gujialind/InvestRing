@@ -155,8 +155,9 @@ function Calendar({
       }}
       classNames={{
         root: cn("w-fit", defaultClassNames.root),
-        months: cn("relative flex flex-col gap-4", defaultClassNames.months),
-        month: cn("flex w-full flex-col gap-4", defaultClassNames.month),
+        months: cn("relative flex flex-col gap-4 sm:flex-row sm:flex-wrap", defaultClassNames.months),
+        // sm:w-auto：月份默认 w-full 会占满整行，导致 sm:flex-row + flex-wrap 下双月仍各自换行回落纵排（#161）
+        month: cn("flex w-full flex-col gap-4 sm:w-auto", defaultClassNames.month),
         nav: cn(
           "pointer-events-none absolute inset-x-0 top-0 z-10 flex h-9 items-center justify-between px-1",
           defaultClassNames.nav

@@ -85,7 +85,7 @@ interface SnapshotsContentProps {
   variant?: "desktop" | "mobile";
 }
 
-/** 默认快照区间 = 快捷项「最近1年」（#152 决策，与调仓/申赎页 #125/#126 决策⑤一致） */
+/** 默认快照区间 = 快捷项「近1年」（#152 决策，与调仓/申赎页 #125/#126 决策⑤一致） */
 function defaultSnapshotRange(): DateRange {
   return { from: subYears(new Date(), 1), to: new Date() };
 }
