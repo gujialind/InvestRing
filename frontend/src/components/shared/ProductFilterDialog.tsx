@@ -21,13 +21,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Product } from "@/types/product";
 import { useProductList } from "@/hooks/useProduct";
 import { useAssetClassifications } from "@/hooks/useAssetClassification";
 import { DIMENSION_LABELS, RULE_DIMENSIONS } from "@/lib/dimensions";
 import { cn, formatMarketName } from "@/lib/utils";
-import ProductFormDialog from "@/components/shared/ProductFormDialog";
 
 /** 产品筛选选中项：code + market（market 为空串对应现金类等无市场产品） */
 export interface ProductSelection {
@@ -75,7 +74,6 @@ export default function ProductFilterDialog({
   children,
 }: ProductFilterDialogProps) {
   const [open, setOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Map<string, ProductSelection>>(new Map());
 
   // 关键字防抖 300ms（规范 §9 文本输入类）
@@ -192,15 +190,14 @@ export default function ProductFilterDialog({
   const selectWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[128px]";
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger asChild>{children}</DialogTrigger>
-        <DialogContent
-          className={cn(
-            "max-h-[90vh] overflow-y-auto",
-            variant === "desktop" && "max-w-2xl"
-          )}
-        >
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent
+        className={cn(
+          "max-h-[90vh] overflow-y-auto",
+          variant === "desktop" && "max-w-2xl"
+        )}
+      >
           <DialogHeader>
             <DialogTitle>筛选产品</DialogTitle>
             <DialogDescription>按条件过滤后勾选产品，确定后生效</DialogDescription>
@@ -310,26 +307,18 @@ export default function ProductFilterDialog({
                 >
                   取消全选
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9"
-                  onClick={() => setCreateOpen(true)}
-                >
-                  <Plus className="mr-1 h-4 w-4" />
-                  新增产品
-                </Button>
               </div>
             </div>
 
-            {/* 结果列表：局部刷新保留旧数据 + 右上角小 spinner（规范 §14） */}
+            {/* 结果列表：固定高度，加载/空态/有结果同高，条件切换不跳变（#163）；
+                局部刷新保留旧数据 + 右上角小 spinner（规范 §14） */}
             <div className="relative">
               {isFetching && (
                 <Loader2 className="absolute right-2 top-2 z-10 h-4 w-4 animate-spin text-muted-foreground" />
               )}
               <div
                 className={cn(
-                  "max-h-[40vh] overflow-y-auto rounded-md border px-3",
+                  "h-[40vh] overflow-y-auto rounded-md border px-3",
                   isFetching && "opacity-50"
                 )}
               >
@@ -404,10 +393,6 @@ export default function ProductFilterDialog({
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
-
-      {/* 新增产品：创建成功后 hook 失效 ["products","list"]，结果集自动刷新 */}
-      <ProductFormDialog open={createOpen} onOpenChange={setCreateOpen} />
-    </>
+    </Dialog>
   );
 }
