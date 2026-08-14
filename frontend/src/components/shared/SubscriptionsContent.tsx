@@ -88,7 +88,7 @@ const CONFIRM_TEXT: Record<"confirm" | "cancel" | "unconfirm" | "delete", { titl
   delete: { title: "删除申请", desc: "删除后将影响后续快照数据，建议先取消确认再删除。是否继续？" },
 };
 
-/** 默认申购日期区间 = 快捷项「最近1年」（#125 决策⑤，区间语义与 DateRangePicker 快捷项一致） */
+/** 默认申购日期区间 = 快捷项「近1年」（#125 决策⑤，区间语义与 DateRangePicker 快捷项一致） */
 function defaultApplyRange(): DateRange {
   return { from: subYears(new Date(), 1), to: new Date() };
 }

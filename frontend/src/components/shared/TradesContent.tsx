@@ -67,7 +67,10 @@ import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import PaginationBar from "@/components/shared/PaginationBar";
 import NameCodeCell from "@/components/shared/NameCodeCell";
-import ProductFilterDialog, { ProductSelection } from "@/components/shared/ProductFilterDialog";
+import ProductFilterSelect from "@/components/shared/ProductFilterSelect";
+import SearchableProductSelect from "@/components/shared/SearchableProductSelect";
+import ProductFormDialog from "@/components/shared/ProductFormDialog";
+import { ProductSelection } from "@/components/shared/ProductFilterDialog";
 
 interface TradesContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -89,7 +92,7 @@ const CONFIRM_TEXT: Record<ConfirmState extends infer S ? S extends { action: st
   delete: { title: "删除交易", desc: "删除后将影响后续快照数据，建议先取消确认再删除。是否继续？" },
 };
 
-/** 默认交易日期区间 = 快捷项「最近1年」（#126 决策⑤，区间语义与 DateRangePicker 快捷项一致） */
+/** 默认交易日期区间 = 快捷项「近1年」（#126 决策⑤，区间语义与 DateRangePicker 快捷项一致） */
 function defaultTradeRange(): DateRange {
   return { from: subYears(new Date(), 1), to: new Date() };
 }
@@ -194,6 +197,8 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   };
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  // 提交交易表单内嵌「新增产品」弹窗（受控，创建成功后自动选中）
+  const [productFormOpen, setProductFormOpen] = useState(false);
   const [tradeType, setTradeType] = useState<"buy" | "sell">("buy");
   const [formData, setFormData] = useState({
     product_code: "",
@@ -297,27 +302,16 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           <SelectItem value="cancelled">已取消</SelectItem>
         </SelectContent>
       </Select>
-      <ProductFilterDialog
+      <ProductFilterSelect
         variant={variant}
         value={productFilters ?? []}
-        onConfirm={(selection) => {
+        onChange={(selection) => {
           // 空选择归一为 undefined（= 全部产品），与非默认筛选判定口径一致
           setProductFilters(selection.length ? selection : undefined);
           setPage(1);
         }}
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            productSelectWidth,
-            "justify-start font-normal",
-            !productFilters?.length && "text-muted-foreground"
-          )}
-        >
-          {productFilters?.length ? `产品 · 已选 ${productFilters.length}` : "全部产品"}
-        </Button>
-      </ProductFilterDialog>
+        className={productSelectWidth}
+      />
       <Select
         value={platformFilter ?? "all"}
         onValueChange={(v) => {
@@ -545,27 +539,36 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="product_code">产品</Label>
-                  <select
-                    id="product_code"
-                    value={formData.product_code}
-                    onChange={(e) => {
-                      const selected = products.find((p) => p.code === e.target.value);
-                      setFormData({
-                        ...formData,
-                        product_code: e.target.value,
-                        market: selected?.market || "",
-                      });
-                    }}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    required
-                  >
-                    <option value="">请选择产品</option>
-                    {products.map((product) => (
-                      <option key={`${product.code}-${product.market || "null"}`} value={product.code}>
-                        {product.name} ({product.code})
-                      </option>
-                    ))}
-                  </select>
+                  {/* 可搜索单选下拉（粒度 code|market，消除按 code 猜测市场的歧义）+ 新建入口 */}
+                  <div className="flex gap-2">
+                    <div className="min-w-0 flex-1">
+                      <SearchableProductSelect
+                        value={
+                          formData.product_code
+                            ? { code: formData.product_code, market: formData.market }
+                            : null
+                        }
+                        onChange={(v) =>
+                          setFormData({
+                            ...formData,
+                            product_code: v?.code ?? "",
+                            market: v?.market ?? "",
+                          })
+                        }
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-10 w-10 shrink-0"
+                      aria-label="新增产品"
+                      title="新增产品"
+                      onClick={() => setProductFormOpen(true)}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="platform_code">交易平台</Label>
@@ -648,7 +651,10 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                 </div>
               </div>
               <DialogFooter>
-                <Button type="submit" disabled={createTrade.isPending}>
+                <Button
+                  type="submit"
+                  disabled={createTrade.isPending || !formData.product_code}
+                >
                   {createTrade.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   提交交易
                 </Button>
@@ -805,6 +811,14 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* 新增产品：创建成功后自动选中（列表缓存失效由 hook 自带） */}
+      <ProductFormDialog
+        open={productFormOpen}
+        onOpenChange={setProductFormOpen}
+        onSuccess={(p) =>
+          setFormData((prev) => ({ ...prev, product_code: p.code, market: p.market ?? "" }))
+        }
+      />
     </div>
   );
 }
