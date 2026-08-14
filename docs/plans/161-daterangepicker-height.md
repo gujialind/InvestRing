@@ -51,7 +51,7 @@ L179-203 两处：
   <PopoverContent
     align="start"
 -   className="w-auto p-0"
-+   className="w-auto max-h-[min(calc(100dvh-2rem),44rem)] overflow-y-auto p-0"
++   className="w-auto max-h-[min(calc(100dvh_-_2rem),44rem)] overflow-y-auto p-0"
     onCloseAutoFocus={(e) => e.preventDefault()}
   >
 ```
@@ -63,7 +63,7 @@ L179-203 两处：
 
 要点：
 
-- `max-h-[min(calc(100dvh-2rem),44rem)]`：上限取「视口高 − 上下各 1rem 余量」与 44rem（704px）的较小者——桌面 B 方案后弹层 ~380px 天然不触发；移动端（快捷项 2~3 行 + 单月 + footer ≈ 450px）在矮视口触发内部滚动；
+- `max-h-[min(calc(100dvh_-_2rem),44rem)]`：上限取「视口高 − 上下各 1rem 余量」与 44rem（704px）的较小者——桌面 B 方案后弹层 ~380px 天然不触发；移动端（快捷项 2~3 行 + 单月 + footer ≈ 450px）在矮视口触发内部滚动；
 - `100dvh`（非 `vh`）：移动端浏览器地址栏收展时动态视口高度，避免 `vh` 偏大仍溢出；
 - footer `sticky bottom-0` + `bg-popover`：触发滚动时「确定」常驻弹层底部可见（sticky 作用域即滚动容器 PopoverContent 自身，无需额外包裹）；`z-10` 防止日历 day 按钮 `group-data-[focused]/day:z-10` 聚焦环叠上来；
 - `overflow-y-auto` 只加在本组件的 `PopoverContent` 用法上，**不动 `popover.tsx` 原语**——DatePicker（单月）理论上矮视口也可能溢出，但不在 #161 范围，不扩面；若后续需要再提独立 issue；

@@ -53,6 +53,27 @@ export default function ProductFilterSelect({
   });
   const items = useMemo(() => data?.items ?? [], [data?.items]);
 
+  // 名称缓存：置顶已选项回显 name (code)；跨条件/跨结果集累积，缺失时回退 code
+  const nameByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of items) map.set(`${p.code}|${p.market ?? ""}`, p.name);
+    return map;
+  }, [items]);
+  const [nameCache, setNameCache] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    setNameCache((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [k, v] of nameByKey) {
+        if (next.get(k) !== v) {
+          next.set(k, v);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [nameByKey]);
+
   const isChecked = (s: ProductSelection) =>
     value.some((v) => v.code === s.code && v.market === s.market);
 
@@ -119,7 +140,9 @@ export default function ProductFilterSelect({
           <div className="max-h-64 overflow-y-auto p-1">
             {pinned.length > 0 && (
               <>
-                {pinned.map((v) => renderRow(`pinned-${selectionKey(v)}`, undefined, v))}
+                {pinned.map((v) =>
+                  renderRow(`pinned-${selectionKey(v)}`, nameCache.get(selectionKey(v)), v)
+                )}
                 <div className="my-1 border-t" />
               </>
             )}

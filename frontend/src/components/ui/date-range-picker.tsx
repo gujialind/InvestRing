@@ -177,7 +177,7 @@ export function DateRangePicker({
       </div>
       <PopoverContent
         align="start"
-        className="w-auto max-h-[min(calc(100dvh-2rem),44rem)] overflow-y-auto p-0"
+        className="w-auto max-h-[min(calc(100dvh_-_2rem),44rem)] overflow-y-auto p-0"
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col">
