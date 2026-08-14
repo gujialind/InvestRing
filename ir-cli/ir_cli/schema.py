@@ -122,7 +122,7 @@ WORKFLOWS = {
             "ir task describe <code>（单任务详情：cron/最近执行/失败原因）",
             "ir task logs <code>（分页执行日志）",
         ],
-        "notes": "nav_sync 失败会导致净值与快照中断，排查后可 ir task run <code> 手动补跑",
+        "notes": "nav_sync 失败会导致净值中断（快照生成由独立的 snapshot_generate 任务承担），排查后可 ir task run <code> 手动补跑",
     },
     "LOF市场歧义处理": {
         "steps": [

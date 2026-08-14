@@ -325,6 +325,7 @@ def get_snapshot_status(
         first_snapshot_date=earliest.snapshot_date if earliest else None,
         missing_dates=missing_dates,
         negative_cash_platforms=negative_cash_platforms,
+        auto_snapshot_enabled=portfolio.auto_snapshot_enabled,
     )
 
 

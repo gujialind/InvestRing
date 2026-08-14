@@ -72,9 +72,9 @@ def cleanup_old_logs(db: Session) -> dict:
 
 
 def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
-    """执行净值同步任务（§4.7 四步：基金列表→逐只净值→分红检测→快照生成）。"""
+    """执行净值同步任务：基金列表→逐只净值→分红检测（#156 起不再串联快照生成，
+    快照由独立任务 run_snapshot_generate 负责）。"""
     from app.services.market_data_service import sync_product_prices
-    from app.services.snapshot_service import generate_daily_snapshots, auto_confirm_after_snapshot
     from app.models.trading_calendar import TradingCalendar
     from app.models.price_record import PriceRecord
     from sqlalchemy import func
@@ -91,7 +91,6 @@ def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
             "synced_count": 0,
             "products_count": 0,
             "failed_products": [],
-            "snapshots_generated": 0,
             "target_date": target_date.isoformat(),
         }
 
@@ -151,22 +150,36 @@ def run_nav_sync(db: Session, log_id: Optional[int] = None) -> dict:
 
     dividends_detected = _detect_dividends(db, products)
 
-    snapshots_generated = _generate_snapshots_for_date(db, target_date)
-
     return {
         "synced_count": total_synced,
         "products_count": len(products),
         "failed_products": failed_products,
         "dividends_detected": dividends_detected,
+        "target_date": target_date.isoformat(),
+    }
+
+
+def run_snapshot_generate(db: Session, log_id: Optional[int] = None) -> dict:
+    """执行组合快照生成任务（issue #156，自 run_nav_sync 剥离）。
+
+    仅处理 active 且开启自动快照（auto_snapshot_enabled）的组合；依赖当日净值
+    同步先成功，缺净值将由快照校验 fail-fast 并记入日志（次日回补自愈）。
+    """
+    target_date = datetime.now().date() - timedelta(days=1)
+    snapshots_generated = _generate_snapshots_for_date(db, target_date)
+    return {
         "snapshots_generated": snapshots_generated,
         "target_date": target_date.isoformat(),
     }
 
 
 def _generate_snapshots_for_date(db: Session, target_date) -> int:
-    """为所有活跃组合逐日补齐快照：从每组合最新快照日之后首个交易日起，
+    """为开启自动快照的活跃组合逐日补齐快照：从每组合最新快照日之后首个交易日起，
     逐交易日 generate + auto_confirm，直到 target_date（含）。
     单组合单日失败即停止该组合回补（#35 fail-fast）。
+
+    仅自动任务走本函数并受 portfolio.auto_snapshot_enabled 开关过滤（#156）；
+    手动生成/重算端点不经此过滤。
 
     逐日 commit/rollback 是编排层有意的 checkpoint 语义（与 recalculate 的
     整体原子语义相反）：多日回补中已完成的日子须保留，失败日仅回滚当日。"""
@@ -179,7 +192,10 @@ def _generate_snapshots_for_date(db: Session, target_date) -> int:
     if not end_date:
         return 0
 
-    active_portfolios = db.query(Portfolio).filter(Portfolio.status == "active").all()
+    active_portfolios = db.query(Portfolio).filter(
+        Portfolio.status == "active",
+        Portfolio.auto_snapshot_enabled.is_(True),
+    ).all()
     count = 0
     for portfolio in active_portfolios:
         latest_snapshot = db.query(func.max(PortfolioValueSnapshot.snapshot_date)).filter(
