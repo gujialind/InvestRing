@@ -14,6 +14,11 @@ export interface TradeListParams {
   trade_type?: string;
   product_code?: string;
   market?: string;
+  /**
+   * 多选产品过滤（issue #155）：逗号分隔的 `code|market` 复合值（market 段可空，如 `CASH|`）。
+   * 与 product_code/market 单值参数互斥，同传后端返回 422。
+   */
+  products?: string;
   platform_code?: string;
   trade_date_start?: string;
   trade_date_end?: string;
