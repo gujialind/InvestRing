@@ -136,6 +136,7 @@ def list_portfolios(
             "created_at": p.created_at,
             "updated_at": p.updated_at,
             "display_config": p.display_config,
+            "auto_snapshot_enabled": p.auto_snapshot_enabled,
             "total_value": total_value,
             "cumulative_return": cumulative_return,
             "investor_count": investor_count,
@@ -264,6 +265,7 @@ def update_portfolio(
     name: Optional[str] = None,
     description: Optional[str] = None,
     display_config=UNSET,
+    auto_snapshot_enabled: Optional[bool] = None,
 ) -> Portfolio:
     """更新组合信息。不 commit。
 
@@ -278,6 +280,8 @@ def update_portfolio(
     if display_config is not UNSET:
         # 校验并归一（空 dict → None）；JSON 列赋新对象（避免 in-place 突变不触发脏检测）
         portfolio.display_config = validate_display_config(db, display_config)
+    if auto_snapshot_enabled is not None:
+        portfolio.auto_snapshot_enabled = auto_snapshot_enabled
     return portfolio
 
 
