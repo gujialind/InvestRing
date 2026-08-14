@@ -87,7 +87,9 @@ def run_task(
     db.refresh(log)
 
     try:
-        from app.services.task_runner import run_nav_sync, run_calendar_sync, run_log_cleanup
+        from app.services.task_runner import (
+            run_nav_sync, run_snapshot_generate, run_calendar_sync, run_log_cleanup,
+        )
 
         if code == "trading_calendar_sync":
             result = run_calendar_sync(db)
@@ -101,6 +103,14 @@ def run_task(
             result = run_nav_sync(db, log.id)
             task.last_run_at = datetime.now()
             log.status = "success" if not result.get("failed_products") else "partial_success"
+            log.finished_at = datetime.now()
+            db.commit()
+            return {"message": f"任务 {code} 执行完成", **result}
+
+        elif code == "snapshot_generate":
+            result = run_snapshot_generate(db, log.id)
+            task.last_run_at = datetime.now()
+            log.status = "success"
             log.finished_at = datetime.now()
             db.commit()
             return {"message": f"任务 {code} 执行完成", **result}

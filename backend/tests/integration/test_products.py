@@ -75,6 +75,56 @@ class TestProductCRUD:
         assert data["page_size"] == 5
 
 
+class TestProductKeywordFilter:
+    """产品列表 keyword 模糊筛选（issue #155）：code/name ilike OR 匹配"""
+
+    def test_keyword_matches_code_fragment(self, client, admin_headers, test_db):
+        """code 片段命中"""
+        create_product(test_db, code="510300.SH", market="CN_EXCHANGE", name="沪深300ETF")
+        create_product(test_db, code="000001.OF", market="CN_OTC", name="平安大华基金")
+        resp = client.get("/api/products?keyword=5103", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["code"] == "510300.SH"
+
+    def test_keyword_matches_name_fragment(self, client, admin_headers, test_db):
+        """name 片段命中"""
+        create_product(test_db, code="510300.SH", market="CN_EXCHANGE", name="沪深300ETF")
+        create_product(test_db, code="000001.OF", market="CN_OTC", name="平安大华基金")
+        resp = client.get("/api/products?keyword=大华", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "平安大华基金"
+
+    def test_keyword_percent_literalized(self, client, admin_headers, test_db):
+        """含 % 的输入被字面化，不触发通配"""
+        create_product(test_db, code="900001.OF", market="CN_OTC", name="收益5%增强")
+        create_product(test_db, code="900002.OF", market="CN_OTC", name="收益500增强")
+        resp = client.get("/api/products?keyword=5%25", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        # % 若未转义，"收益500增强" 也会被通配命中
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "收益5%增强"
+
+    def test_keyword_and_other_filters(self, client, admin_headers, test_db):
+        """keyword 与既有筛选参数 AND 叠加"""
+        create_product(test_db, code="510300.SH", market="CN_EXCHANGE",
+                       name="沪深300ETF", product_type="ETF")
+        create_product(test_db, code="510300.OF", market="CN_OTC",
+                       name="沪深300联接", product_type="OEF")
+        resp = client.get(
+            "/api/products?keyword=510300&product_type=OEF",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["code"] == "510300.OF"
+
+
 def _seed_dims(test_db):
     """种子矩阵校验所需维度值（issue #128）"""
     create_asset_classification(test_db, code="ASSET_STOCK")

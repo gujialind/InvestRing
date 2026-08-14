@@ -24,18 +24,27 @@ function requireMarket(market: string | undefined, action: string): string {
   return market;
 }
 
+/**
+ * 产品列表查询参数。维度筛选参数（issue #128）：asset_class/region/style/size/segment 五维 code；
+ * keyword（issue #155）：code/name 模糊匹配，与其余参数 AND 叠加。
+ * axios 会丢弃 undefined 值，空筛选自然不传参。
+ */
+export interface ProductListParams {
+  page?: number;
+  page_size?: number;
+  product_type?: string;
+  market?: string;
+  data_source?: string;
+  keyword?: string;
+  asset_class_code?: string;
+  region_code?: string;
+  style_code?: string;
+  size_code?: string;
+  segment_code?: string;
+}
+
 export const productApi = {
-  // 维度筛选参数（issue #128）：asset_class/region/style/size/segment 五维 code
-  list: (params?: {
-    page?: number;
-    page_size?: number;
-    product_type?: string;
-    asset_class_code?: string;
-    region_code?: string;
-    style_code?: string;
-    size_code?: string;
-    segment_code?: string;
-  }) =>
+  list: (params?: ProductListParams) =>
     request<PaginatedResponse<Product>>({ method: "GET", url: "/products", params }),
 
   // 后端两个端点：/products/{code}/{market} 精确匹配；/products/{code} 自动解析（一码多市场时抛 MARKET_AMBIGUOUS）。
