@@ -3,16 +3,12 @@
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Table,
@@ -24,16 +20,13 @@ import {
 } from "@/components/ui/table";
 import Link from "next/link";
 import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, TrendingUp, Eye, Tags } from "lucide-react";
-import { Product, ProductCreate } from "@/types/product";
+import { Product } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
 import { formatNav } from "@/lib/utils";
-import { DIMENSION_FIELDS, DIMENSION_LABELS, RULE_DIMENSIONS } from "@/lib/dimensions";
-import { useAssetClassifications } from "@/hooks/useAssetClassification";
 import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
+import ProductFormDialog from "@/components/shared/ProductFormDialog";
 import {
   useProductList,
-  useCreateProduct,
-  useUpdateProduct,
   useDeleteProduct,
   useProductPrices,
   useSyncProductPrice,
@@ -45,124 +38,16 @@ export default function ProductsContent() {
 
   const { data, isLoading } = useProductList({ page_size: 100 });
 
-  const createProduct = useCreateProduct();
-  const updateProduct = useUpdateProduct();
   const deleteProduct = useDeleteProduct();
 
   const products = data?.items || [];
 
+  // 创建/编辑共用 ProductFormDialog（issue #155 抽取）：editingProduct 为 null 即创建态
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [formData, setFormData] = useState<Partial<Product>>({
-    code: "",
-    market: "",
-    name: "",
-    product_type: "ETF",
-    confirm_days: 1,
-    is_qdii: false,
-  });
-
-  // 维度字典驱动五维录入控件（issue #135）：选项按 applicable + is_active 过滤，
-  // 必填/禁用读顶层 dimension_rules；后端 validate_dimension_tags 为兜底
-  const { data: dictData } = useAssetClassifications();
-  const dictItems = dictData?.items ?? [];
-  const dimensionRules = dictData?.dimension_rules ?? {};
-  const assetClasses = dictItems.filter((i) => i.dimension === "asset_class" && i.is_active);
-  const currentClass = formData.asset_class_code || "";
-  const ruleOf = (dimension: string): "required" | "optional" | null =>
-    currentClass ? dimensionRules[currentClass]?.[dimension] ?? null : null;
-  /** 维度下拉选项：启用且适用当前大类；编辑回填的现值即使停用/不适用也保留显示 */
-  const dimensionOptions = (dimension: string) => {
-    const field = DIMENSION_FIELDS[dimension as keyof typeof DIMENSION_FIELDS];
-    const current = formData[field];
-    return dictItems.filter(
-      (i) =>
-        i.dimension === dimension &&
-        ((i.is_active && currentClass && i.applicable_asset_classes.includes(currentClass)) ||
-          (current != null && i.code === current))
-    );
-  };
-
-  /** 切换大类：禁用维度清空；不适用/停用值重置 */
-  const handleClassChange = (assetClass: string) => {
-    const next: Partial<Product> = { ...formData, asset_class_code: assetClass || undefined };
-    for (const dimension of RULE_DIMENSIONS) {
-      const field = DIMENSION_FIELDS[dimension];
-      const rule = assetClass ? dimensionRules[assetClass]?.[dimension] ?? null : null;
-      const current = next[field];
-      if (rule === null) {
-        next[field] = undefined;
-      } else if (current) {
-        const stillValid = dictItems.some(
-          (i) =>
-            i.code === current &&
-            i.is_active &&
-            i.applicable_asset_classes.includes(assetClass)
-        );
-        if (!stillValid) next[field] = undefined;
-      }
-    }
-    setFormData(next);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingProduct) {
-      updateProduct.mutate(
-        {
-          code: editingProduct.code,
-          market: editingProduct.market,
-          data: {
-            name: formData.name,
-            // 维度字段空值发 null 显式清除（后端 exclude_unset 下 null 进入合并校验）
-            asset_class_code: formData.asset_class_code || null,
-            region_code: formData.region_code || null,
-            style_code: formData.style_code || null,
-            size_code: formData.size_code || null,
-            segment_code: formData.segment_code || null,
-            confirm_days: formData.confirm_days,
-            is_qdii: formData.is_qdii,
-          },
-        },
-        {
-          onSuccess: () => {
-            setIsDialogOpen(false);
-            setEditingProduct(null);
-            resetForm();
-          },
-        }
-      );
-    } else {
-      // 空字符串维度字段不下发（后端按缺省 NULL 处理；market 缺省由后端归一为 ""）
-      const createPayload: ProductCreate = {
-        code: formData.code ?? "",
-        name: formData.name ?? "",
-        product_type: formData.product_type ?? "ETF",
-        confirm_days: formData.confirm_days,
-        is_qdii: formData.is_qdii,
-        ...(formData.market ? { market: formData.market } : {}),
-        ...(formData.asset_class_code ? { asset_class_code: formData.asset_class_code } : {}),
-        ...(formData.region_code ? { region_code: formData.region_code } : {}),
-        ...(formData.style_code ? { style_code: formData.style_code } : {}),
-        ...(formData.size_code ? { size_code: formData.size_code } : {}),
-        ...(formData.segment_code ? { segment_code: formData.segment_code } : {}),
-      };
-      createProduct.mutate(createPayload, {
-        onSuccess: () => {
-          setIsDialogOpen(false);
-          resetForm();
-        },
-      });
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({ code: "", market: "", name: "", product_type: "ETF", confirm_days: 1, is_qdii: false });
-  };
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
-    setFormData(product);
     setIsDialogOpen(true);
   };
 
@@ -230,167 +115,17 @@ export default function ProductsContent() {
             管理基金产品和数据源
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => {
-              setEditingProduct(null);
-              resetForm();
-            }}>
+        <ProductFormDialog
+          open={isDialogOpen}
+          onOpenChange={setIsDialogOpen}
+          editingProduct={editingProduct}
+          trigger={
+            <Button onClick={() => setEditingProduct(null)}>
               <Plus className="mr-2 h-4 w-4" />
               添加产品
             </Button>
-          </DialogTrigger>
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{editingProduct ? "编辑产品" : "添加产品"}</DialogTitle>
-              <DialogDescription>
-                {editingProduct ? "修改产品信息" : "创建新的产品"}
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleSubmit}>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="code">产品代码</Label>
-                  <Input
-                    id="code"
-                    value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                    disabled={!!editingProduct}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="market">市场</Label>
-                  <select
-                    id="market"
-                    value={formData.market}
-                    onChange={(e) => setFormData({ ...formData, market: e.target.value })}
-                    disabled={!!editingProduct}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="">无（现金类）</option>
-                    <option value="CN_EXCHANGE">A股场内</option>
-                    <option value="CN_OTC">内地场外</option>
-                    <option value="HK_MUTUAL">香港互认</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="name">产品名称</Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="product_type">产品类型</Label>
-                  <select
-                    id="product_type"
-                    value={formData.product_type}
-                    onChange={(e) => setFormData({ ...formData, product_type: e.target.value })}
-                    disabled={!!editingProduct}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="ETF">ETF</option>
-                    <option value="OEF">开放式基金</option>
-                    <option value="LOF">LOF</option>
-                    <option value="CASH">现金</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="asset_class_code">资产大类</Label>
-                  <select
-                    id="asset_class_code"
-                    value={formData.asset_class_code ?? ""}
-                    onChange={(e) => handleClassChange(e.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="">无（现金/虚拟产品）</option>
-                    {assetClasses.map((ac) => (
-                      <option key={ac.code} value={ac.code}>
-                        {ac.name}
-                      </option>
-                    ))}
-                    {/* 现值已停用/不在启用列表时补占位项，避免下拉显示错位 */}
-                    {formData.asset_class_code &&
-                      !assetClasses.some((ac) => ac.code === formData.asset_class_code) && (
-                        <option value={formData.asset_class_code}>
-                          {dictItems.find((i) => i.code === formData.asset_class_code)?.name ??
-                            formData.asset_class_code}
-                          （已停用）
-                        </option>
-                      )}
-                  </select>
-                </div>
-                {RULE_DIMENSIONS.map((dimension) => {
-                  const rule = ruleOf(dimension);
-                  if (!rule) return null;
-                  const field = DIMENSION_FIELDS[dimension];
-                  const options = dimensionOptions(dimension);
-                  const current = formData[field];
-                  return (
-                    <div className="space-y-2" key={dimension}>
-                      <Label htmlFor={field}>
-                        {DIMENSION_LABELS[dimension]}
-                        {rule === "required" && <span className="text-destructive"> *</span>}
-                      </Label>
-                      <select
-                        id={field}
-                        value={current ?? ""}
-                        onChange={(e) =>
-                          setFormData({ ...formData, [field]: e.target.value || undefined })
-                        }
-                        required={rule === "required"}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <option value="">未设置</option>
-                        {options.map((item) => (
-                          <option key={item.code} value={item.code}>
-                            {item.name}
-                          </option>
-                        ))}
-                        {current && !options.some((i) => i.code === current) && (
-                          <option value={current}>
-                            {dictItems.find((i) => i.code === current)?.name ?? current}（已停用）
-                          </option>
-                        )}
-                      </select>
-                    </div>
-                  );
-                })}
-                <div className="space-y-2">
-                  <Label htmlFor="confirm_days">确认天数</Label>
-                  <Input
-                    id="confirm_days"
-                    type="number"
-                    value={formData.confirm_days}
-                    onChange={(e) => setFormData({ ...formData, confirm_days: parseInt(e.target.value) })}
-                    required
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="is_qdii"
-                    type="checkbox"
-                    checked={formData.is_qdii}
-                    onChange={(e) => setFormData({ ...formData, is_qdii: e.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300"
-                  />
-                  <Label htmlFor="is_qdii">QDII基金</Label>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={createProduct.isPending || updateProduct.isPending}>
-                  {(createProduct.isPending || updateProduct.isPending) && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  {editingProduct ? "保存修改" : "创建产品"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+          }
+        />
       </div>
 
       {/* 移动端入口：分类矩阵管理页（PC 端走侧边栏「分类」） */}

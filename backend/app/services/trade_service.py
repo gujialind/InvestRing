@@ -10,6 +10,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.trade import Trade
@@ -694,6 +695,7 @@ def list_trades(
     trade_type: Optional[str] = None,
     product_code: Optional[str] = None,
     market: Optional[str] = None,
+    products: Optional[str] = None,
     platform_code: Optional[str] = None,
     trade_date_start: Optional[date] = None,
     trade_date_end: Optional[date] = None,
@@ -707,6 +709,12 @@ def list_trades(
     - 日期区间均为闭区间；同组 start > end 抛 INVALID_DATE_RANGE（422）。
     - product_code 与 market 独立可选：都给则精确过滤（LOF 一码多市场场景）；
       只给 product_code 则跨市场全匹配。
+    - products（issue #155）：逗号分隔的 `code|market` 复合值多选过滤，
+      market 段可为空字符串（如 `CASH|` 匹配 market="" 的现金腿；缺省 `|`
+      时按空 market 处理）。解析为 (code, market) 对后逐对精确匹配、对间 OR。
+      空段/空串忽略，解析后全空视为未传。
+      与单值参数互斥：products 与 product_code 或 market 同传抛
+      PRODUCTS_PARAM_CONFLICT（422），避免两套过滤语义叠加产生歧义。
     - 排序：trade_date DESC, transfer_group, id DESC——transfer_group 入排序键
       使同组两腿大概率同页相邻（同组两腿同事务插入 id 连续，此为双保险）。
     - trades 无 viewer 过滤（组合级操作，保持现状语义，不在本 PR 引入权限变化）。
@@ -727,6 +735,23 @@ def list_trades(
             http_status=422,
         )
 
+    # products 多选解析（issue #155）："A|CN_OTC,B|CN_EXCHANGE" → [(A, CN_OTC), (B, CN_EXCHANGE)]
+    product_pairs: list[tuple[str, str]] = []
+    if products:
+        for part in products.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            code, _, mkt = part.partition("|")
+            if code:
+                product_pairs.append((code, mkt))
+    if product_pairs and (product_code or market is not None):
+        raise BusinessError(
+            "PRODUCTS_PARAM_CONFLICT",
+            "products 与 product_code/market 互斥，不能同时传参",
+            http_status=422,
+        )
+
     query = db.query(Trade)
     if portfolio_code:
         query = query.filter(Trade.portfolio_code == portfolio_code)
@@ -734,6 +759,11 @@ def list_trades(
         query = query.filter(Trade.status == status)
     if trade_type:
         query = query.filter(Trade.trade_type == trade_type)
+    if product_pairs:
+        query = query.filter(or_(*(
+            and_(Trade.product_code == code, Trade.market == mkt)
+            for code, mkt in product_pairs
+        )))
     if product_code:
         query = query.filter(Trade.product_code == product_code)
     if market is not None:

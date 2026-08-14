@@ -1067,6 +1067,22 @@
             }
           },
           {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
             "name": "data_source",
             "in": "query",
             "required": false,
@@ -3331,6 +3347,22 @@
                 }
               ],
               "title": "Market"
+            }
+          },
+          {
+            "name": "products",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Products"
             }
           },
           {
