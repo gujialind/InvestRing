@@ -56,12 +56,16 @@ def create_portfolio(
     code: str = "PORT001",
     name: str = "测试组合",
     status: str = "draft",
+    auto_snapshot_enabled: bool = False,
 ) -> Portfolio:
     """创建组合，如已存在则直接返回"""
     existing = db.query(Portfolio).filter(Portfolio.code == code).first()
     if existing:
         return existing
-    portfolio = Portfolio(code=code, name=name, description="测试", status=status)
+    portfolio = Portfolio(
+        code=code, name=name, description="测试", status=status,
+        auto_snapshot_enabled=auto_snapshot_enabled,
+    )
     db.add(portfolio)
     db.commit()
     db.refresh(portfolio)

@@ -3,6 +3,8 @@ export interface Portfolio {
   name: string;
   description?: string;
   status: string;
+  /** 组合级自动快照开关（issue #156）：开启后由定时任务每个交易日自动补齐快照 */
+  auto_snapshot_enabled: boolean;
   started_at?: string;
   closed_at?: string;
   created_at?: string;
@@ -31,6 +33,8 @@ export interface PortfolioUpdate {
   description?: string;
   /** 显式传 null = 清空配置恢复默认；不传 = 不修改 */
   display_config?: Record<string, string> | null;
+  /** 不传 = 不修改（#156） */
+  auto_snapshot_enabled?: boolean;
 }
 
 export interface PortfolioValueSnapshot {

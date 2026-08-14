@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   Dialog,
@@ -72,6 +73,7 @@ import {
   useValidateSnapshot,
   useDeleteSnapshot,
 } from "@/hooks/useSnapshot";
+import { useUpdatePortfolio } from "@/hooks/usePortfolio";
 import { useSyncJob } from "@/hooks/useSyncJob";
 import type { SnapshotValidationCheck, BulkDeleteDryRunResult } from "@/types/snapshot";
 
@@ -104,6 +106,19 @@ export default function SnapshotsContent({ basePath, variant = "desktop" }: Snap
   const bulkDelete = useBulkDeleteSnapshots();
   const validateSnapshot = useValidateSnapshot();
   const deleteSnapshot = useDeleteSnapshot();
+  // 组合级自动快照开关（#156）：写走组合更新，成功后额外失效快照状态查询
+  const updatePortfolio = useUpdatePortfolio(code);
+
+  const handleToggleAutoSnapshot = (next: boolean) => {
+    updatePortfolio.mutate(
+      { auto_snapshot_enabled: next },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["snapshots"] });
+        },
+      }
+    );
+  };
 
   // 重算任务跟踪（终态经 useSyncJob 轮询 + 下方 effect 处理）
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
@@ -282,6 +297,24 @@ export default function SnapshotsContent({ basePath, variant = "desktop" }: Snap
                 {statusData?.first_snapshot_date || "无"}
               </div>
             </div>
+          </div>
+
+          {/* 组合级自动快照开关（#156） */}
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="auto-snapshot-switch" className="text-sm font-medium">
+                自动生成快照
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                开启后每个交易日由定时任务自动补齐快照；关闭不影响手动生成
+              </p>
+            </div>
+            <Switch
+              id="auto-snapshot-switch"
+              checked={statusData?.auto_snapshot_enabled ?? false}
+              disabled={updatePortfolio.isPending || statusData?.auto_snapshot_enabled === undefined}
+              onCheckedChange={handleToggleAutoSnapshot}
+            />
           </div>
 
           {/* 负现金平台预警（issue #71） */}

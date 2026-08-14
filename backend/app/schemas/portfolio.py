@@ -21,6 +21,8 @@ class PortfolioUpdate(BaseModel):
     # 显式传 null = 清空配置恢复默认；不传 = 不修改（exclude_unset 语义，
     # router 以 "display_config" in updates 区分后经哨兵传入 service）
     display_config: Optional[Dict[str, str]] = None
+    # 自动快照开关（issue #156）：不传 = 不修改
+    auto_snapshot_enabled: Optional[bool] = None
 
 
 class PortfolioResponse(PortfolioBase):
@@ -31,6 +33,8 @@ class PortfolioResponse(PortfolioBase):
     updated_at: Optional[datetime] = None
     # 组合级展示配置（issue #144）；ListItem 继承自动带出（列表页不消费）
     display_config: Optional[Dict[str, str]] = None
+    # 自动快照开关（issue #156）：默认 False（opt-in），仅约束自动任务
+    auto_snapshot_enabled: bool = False
     # 读侧派生（详情接口并入，issue #99）：最新快照总资产 / 累计收益（总资产 − 净投入）
     # 无快照（draft 等）时为 None
     total_value: Optional[float] = None

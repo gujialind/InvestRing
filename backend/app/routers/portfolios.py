@@ -84,6 +84,7 @@ def update_portfolio(
             if "display_config" in updates
             else portfolio_service.UNSET
         ),
+        auto_snapshot_enabled=updates.get("auto_snapshot_enabled"),
     )
     db.commit()
     db.refresh(db_portfolio)

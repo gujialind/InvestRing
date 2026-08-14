@@ -6,10 +6,11 @@ def init_scheduled_tasks(db: Session) -> None:
     """
     初始化定时任务数据
     
-    确保 3 个核心任务记录存在于数据库中：
+    确保 4 个核心任务记录存在于数据库中：
     1. nav_sync - 净值同步
-    2. trading_calendar_sync - 交易日历同步
-    3. log_cleanup - 日志清理
+    2. snapshot_generate - 组合快照生成（issue #156，自 nav_sync 剥离）
+    3. trading_calendar_sync - 交易日历同步
+    4. log_cleanup - 日志清理
 
     已存在的记录会同步最新的 name/description 文案，
     保证任务说明随代码演进更新（不覆盖启用状态、运行记录与 cron_expr）。
@@ -19,10 +20,20 @@ def init_scheduled_tasks(db: Session) -> None:
             "code": "nav_sync",
             "name": "净值同步",
             "description": (
-                "每交易日 07:00 增量同步产品净值，并自动回补当日组合快照；"
-                "禁用将导致净值与快照数据中断，估值和收益统计停留在最后一次同步日"
+                "每交易日 07:00 增量同步产品净值并检测分红；"
+                "禁用将导致净值数据中断，估值与收益统计停留在最后一次同步日"
             ),
             "cron_expr": "0 7 * * 1-5",
+        },
+        {
+            "code": "snapshot_generate",
+            "name": "组合快照生成",
+            "description": (
+                "每交易日 07:30 为开启自动快照的活跃组合逐日补齐快照"
+                "（依赖当日净值同步先成功，缺净值将 fail-fast 并记入日志、次日自愈）；"
+                "仅自动任务受组合开关约束，手动生成/重算不受影响"
+            ),
+            "cron_expr": "30 7 * * 1-5",
         },
         {
             "code": "trading_calendar_sync",

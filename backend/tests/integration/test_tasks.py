@@ -151,8 +151,23 @@ class TestInitTaskDescriptions:
             ScheduledTask.code == "nav_sync"
         ).first()
         assert refreshed.description != "旧文案"
-        assert "快照" in refreshed.description
+        # #156：快照生成已剥离为独立任务，nav_sync 文案不再含「快照」
+        assert "快照" not in refreshed.description
         assert refreshed.cron_expr == "0 7 * * 1-5"
+
+    def test_init_seeds_snapshot_generate_task(self, test_db):
+        """#156：snapshot_generate 任务记录被种子，文案说明开关语义"""
+        from app.init_tasks import init_scheduled_tasks
+
+        init_scheduled_tasks(test_db)
+
+        task = test_db.query(ScheduledTask).filter(
+            ScheduledTask.code == "snapshot_generate"
+        ).first()
+        assert task is not None
+        assert task.name == "组合快照生成"
+        assert "开启自动快照" in task.description
+        assert task.cron_expr == "30 7 * * 1-5"
 
     def test_init_preserves_custom_cron_expr(self, test_db):
         """已有记录的自定义 cron_expr 在 init 后保持不变"""
