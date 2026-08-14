@@ -1143,3 +1143,75 @@ class TestListTradeFilters:
         assert data["total"] == 1
         assert data["items"][0]["market"] == "CN_OTC"
 
+    def test_filter_products_multi_pairs(self, client, admin_headers, test_db):
+        """products=A|CN_OTC,B|CN_EXCHANGE 复合多选命中两笔，LOF 不串市场（issue #155）"""
+        create_portfolio(test_db, code="LT_P9", status="active")
+        create_product(test_db, code="LOF03", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="LOF03", market="CN_OTC", product_type="LOF")
+        create_product(test_db, code="ETF03", market="CN_EXCHANGE", product_type="ETF")
+        create_trade(test_db, "LT_P9", "LOF03", "CN_OTC", trade_date=date(2025, 9, 1))
+        create_trade(test_db, "LT_P9", "LOF03", "CN_EXCHANGE", trade_date=date(2025, 9, 1))
+        create_trade(test_db, "LT_P9", "ETF03", "CN_EXCHANGE", trade_date=date(2025, 9, 1))
+
+        resp = client.get(
+            "/api/trades?products=LOF03|CN_OTC,ETF03|CN_EXCHANGE",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        pairs = sorted((item["product_code"], item["market"]) for item in data["items"])
+        assert pairs == [("ETF03", "CN_EXCHANGE"), ("LOF03", "CN_OTC")]
+
+    def test_filter_products_empty_market_segment(self, client, admin_headers, test_db):
+        """products 单值 code|（空 market 段）匹配 market="" 的 CASH 腿"""
+        create_portfolio(test_db, code="LT_P10", status="active")
+        create_trade(test_db, "LT_P10", "CASH", "", trade_type="sell",
+                     trade_date=date(2025, 9, 1))
+        create_trade(test_db, "LT_P10", "510300.SH", "CN_EXCHANGE",
+                     trade_date=date(2025, 9, 1))
+
+        resp = client.get("/api/trades?products=CASH|", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["product_code"] == "CASH"
+        assert data["items"][0]["market"] == ""
+
+    def test_filter_products_conflict_with_single_params(self, client, admin_headers, test_db):
+        """products 与 product_code/market 同传 → 422 PRODUCTS_PARAM_CONFLICT"""
+        resp = client.get(
+            "/api/trades?products=CASH|&product_code=CASH",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "PRODUCTS_PARAM_CONFLICT"
+
+        resp = client.get(
+            "/api/trades?products=CASH|&market=CN_OTC",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "PRODUCTS_PARAM_CONFLICT"
+
+    def test_filter_products_with_date_and_status(self, client, admin_headers, test_db):
+        """products 与既有日期/状态筛选 AND 叠加"""
+        create_portfolio(test_db, code="LT_P11", status="active")
+        create_trade(test_db, "LT_P11", "CASH", "", status="confirmed",
+                     trade_date=date(2025, 9, 1), confirm_date=date(2025, 9, 1))
+        create_trade(test_db, "LT_P11", "CASH", "", status="pending",
+                     trade_date=date(2025, 9, 5))
+        create_trade(test_db, "LT_P11", "510300.SH", "CN_EXCHANGE", status="confirmed",
+                     trade_date=date(2025, 9, 3), confirm_date=date(2025, 9, 3))
+
+        resp = client.get(
+            "/api/trades?products=CASH|,510300.SH|CN_EXCHANGE"
+            "&status=confirmed&trade_date_start=2025-09-01&trade_date_end=2025-09-02",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["product_code"] == "CASH"
+        assert data["items"][0]["status"] == "confirmed"
+

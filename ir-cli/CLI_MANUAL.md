@@ -1184,7 +1184,8 @@ ir task run <CODE>
 
 | 任务代码 | 说明 |
 |----------|------|
-| `nav_sync` | 净值同步 + 快照生成 |
+| `nav_sync` | 净值同步 |
+| `snapshot_generate` | 组合快照生成（仅处理开启自动快照的组合） |
 | `trading_calendar_sync` | 交易日历同步 |
 | `log_cleanup` | 过期日志清理 |
 

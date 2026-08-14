@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import {
+  differenceInCalendarDays,
   endOfYear,
   format,
   isSameDay,
@@ -68,7 +69,10 @@ export function DateRangePicker({
   numberOfMonths = 2,
 }: DateRangePickerProps) {
   const [open, setOpen] = React.useState(false)
-  // 快捷项选中态：点击快捷项置位，手选区间后按 isSameDay 联动（一致保持/否则解除）
+  // 草稿态（#154，规范 §10）：弹层内手选/快捷项只填草稿，「确定」才提交 onChange；
+  // 规避 react-day-picker v10 addToRange「空区间首击即得完整单日区间」导致的误关闭
+  const [draft, setDraft] = React.useState<DateRange | undefined>(value)
+  // 快捷项选中态：随草稿/外部值按 isSameDay 联动（一致保持/否则解除）
   const [quickKey, setQuickKey] = React.useState<string | null>(() => matchQuickOption(value))
 
   // 外部重置 value（如筛选栏「重置」恢复默认区间）时同步快捷项选中态
@@ -76,17 +80,30 @@ export function DateRangePicker({
     setQuickKey(matchQuickOption(value))
   }, [value])
 
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      // 打开时以当前提交值为草稿起点；关闭未确定则草稿自然丢弃
+      setDraft(value)
+      setQuickKey(matchQuickOption(value))
+    }
+    setOpen(next)
+  }
+
   const handleSelect = (range: DateRange | undefined) => {
-    onChange?.(range)
+    // v10 语义：空草稿首击即得 {D,D} 单日区间；完整单日区间再点同一日返回 undefined（清空草稿）
+    setDraft(range)
     setQuickKey(matchQuickOption(range))
-    // 选完起止即关（不设「确定」按钮）
-    if (range?.from && range?.to) setOpen(false)
   }
 
   const handleQuick = (opt: (typeof QUICK_OPTIONS)[number]) => {
     const range = opt.range(new Date())
+    setDraft(range)
     setQuickKey(opt.key)
-    onChange?.(range)
+  }
+
+  const handleConfirm = () => {
+    if (!draft?.from) return
+    onChange?.(draft)
     setOpen(false)
   }
 
@@ -100,13 +117,17 @@ export function DateRangePicker({
     ? `${format(value.from, "yyyy-MM-dd")} ~ ${value.to ? format(value.to, "yyyy-MM-dd") : ""}`
     : placeholder
 
+  const draftSummary = draft?.from
+    ? `${format(draft.from, "yyyy-MM-dd")} ~ ${draft.to ? format(draft.to, "yyyy-MM-dd") : ""} · 共 ${differenceInCalendarDays(draft.to ?? draft.from, draft.from) + 1} 天`
+    : "请点选起止日期"
+
   const quickPanel = (
     <div
       className={cn(
         "flex gap-1 p-3",
         numberOfMonths === 2
           ? "flex-col border-r pr-2"
-          : "flex-row overflow-x-auto border-b pb-2"
+          : "flex-row flex-wrap border-b pb-2"
       )}
     >
       {QUICK_OPTIONS.map((opt) => (
@@ -115,8 +136,8 @@ export function DateRangePicker({
           type="button"
           onClick={() => handleQuick(opt)}
           className={cn(
-            "shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-left text-xs hover:bg-muted",
-            quickKey === opt.key && "bg-success-soft text-success-foreground hover:bg-success-soft"
+            "shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-muted",
+            quickKey === opt.key && "bg-success-soft font-medium text-success-foreground hover:bg-success-soft"
           )}
         >
           {opt.label}
@@ -126,20 +147,21 @@ export function DateRangePicker({
   )
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <div className="relative">
         <PopoverTrigger asChild>
           <Button
             type="button"
             variant="outline"
             disabled={disabled}
+            title={label}
             className={cn(
-              "w-full justify-start whitespace-nowrap pr-9 text-left font-normal",
+              "w-full justify-start whitespace-nowrap pr-9 text-left font-normal transition-colors hover:border-primary/40",
               !value?.from && "text-muted-foreground",
               className
             )}
           >
-            <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+            <CalendarIcon className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="truncate">{label}</span>
           </Button>
         </PopoverTrigger>
@@ -159,16 +181,24 @@ export function DateRangePicker({
         className="w-auto p-0"
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div className={cn("flex", numberOfMonths === 2 ? "flex-row" : "flex-col")}>
-          {quickPanel}
-          <Calendar
-            mode="range"
-            selected={value}
-            onSelect={handleSelect}
-            defaultMonth={value?.to ?? value?.from}
-            numberOfMonths={numberOfMonths}
-            autoFocus
-          />
+        <div className="flex flex-col">
+          <div className={cn("flex", numberOfMonths === 2 ? "flex-row" : "flex-col")}>
+            {quickPanel}
+            <Calendar
+              mode="range"
+              selected={draft}
+              onSelect={handleSelect}
+              defaultMonth={draft?.to ?? draft?.from}
+              numberOfMonths={numberOfMonths}
+              autoFocus
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+            <span className="text-xs text-muted-foreground">{draftSummary}</span>
+            <Button type="button" size="sm" onClick={handleConfirm} disabled={!draft?.from}>
+              确定
+            </Button>
+          </div>
         </div>
       </PopoverContent>
     </Popover>

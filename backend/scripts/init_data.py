@@ -52,6 +52,13 @@ def init_scheduled_tasks(session):
             'is_enabled': True
         },
         {
+            'code': 'snapshot_generate',
+            'name': '组合快照生成',
+            'description': '每交易日07:30为开启自动快照的活跃组合逐日补齐快照（依赖当日净值同步先成功，缺净值将fail-fast并记入日志、次日自愈）；仅自动任务受组合开关约束，手动生成/重算不受影响',
+            'cron_expr': '30 7 * * 1-5',
+            'is_enabled': True
+        },
+        {
             'code': 'trading_calendar_sync',
             'name': '交易日历同步',
             'description': '每年1月1日02:00同步新年交易日历',

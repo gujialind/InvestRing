@@ -15,11 +15,19 @@ export function useSnapshotStatus(portfolioCode: string) {
   });
 }
 
-// 快照历史列表（#146）：["snapshots"] 前缀失效即同时刷 status+list
-export function useSnapshotList(portfolioCode: string) {
+// 快照历史列表（#146；#152 日期区间筛选）：["snapshots"] 前缀失效即同时刷 status+list。
+// 区间入 queryKey 防缓存碰撞；undefined 字段 axios 自然不传参（X 清空 = 不按日期过滤）
+export function useSnapshotList(
+  portfolioCode: string,
+  range?: { startDate?: string; endDate?: string }
+) {
   return useQuery({
-    queryKey: [SNAPSHOT_QUERY_KEY, "list", portfolioCode],
-    queryFn: () => snapshotApi.list(portfolioCode),
+    queryKey: [SNAPSHOT_QUERY_KEY, "list", portfolioCode, range?.startDate, range?.endDate],
+    queryFn: () =>
+      snapshotApi.list(portfolioCode, {
+        start_date: range?.startDate,
+        end_date: range?.endDate,
+      }),
     enabled: !!portfolioCode,
   });
 }

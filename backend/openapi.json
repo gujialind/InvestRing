@@ -1067,6 +1067,22 @@
             }
           },
           {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
             "name": "data_source",
             "in": "query",
             "required": false,
@@ -3331,6 +3347,22 @@
                 }
               ],
               "title": "Market"
+            }
+          },
+          {
+            "name": "products",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Products"
             }
           },
           {
@@ -7856,6 +7888,11 @@
             ],
             "title": "Display Config"
           },
+          "auto_snapshot_enabled": {
+            "type": "boolean",
+            "title": "Auto Snapshot Enabled",
+            "default": false
+          },
           "total_value": {
             "anyOf": [
               {
@@ -8213,6 +8250,11 @@
             ],
             "title": "Display Config"
           },
+          "auto_snapshot_enabled": {
+            "type": "boolean",
+            "title": "Auto Snapshot Enabled",
+            "default": false
+          },
           "total_value": {
             "anyOf": [
               {
@@ -8280,6 +8322,17 @@
               }
             ],
             "title": "Display Config"
+          },
+          "auto_snapshot_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Snapshot Enabled"
           }
         },
         "type": "object",
@@ -10438,6 +10491,11 @@
             "type": "array",
             "title": "Negative Cash Platforms",
             "default": []
+          },
+          "auto_snapshot_enabled": {
+            "type": "boolean",
+            "title": "Auto Snapshot Enabled",
+            "default": false
           }
         },
         "type": "object",

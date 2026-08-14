@@ -130,3 +130,5 @@ class SnapshotStatusResponse(BaseModel):
     missing_dates: List[str]  # 缺失的交易日（ISO格式）
     # issue #71：最新快照日 CASH 持仓 cash_amount < 0 的平台清单（正常为空）
     negative_cash_platforms: List[str] = []
+    # issue #156：组合自动快照开关（仅约束自动任务，手动生成/重算不受影响）
+    auto_snapshot_enabled: bool = False

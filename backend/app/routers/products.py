@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.database import get_db
@@ -14,6 +15,7 @@ router = APIRouter()
 def get_products(
     product_type: Optional[str] = None,
     market: Optional[str] = None,
+    keyword: Optional[str] = None,
     data_source: Optional[str] = None,
     data_source_status: Optional[str] = None,
     # 维度筛选（issue #128）
@@ -32,6 +34,13 @@ def get_products(
         query = query.filter(Product.product_type == product_type)
     if market:
         query = query.filter(Product.market == market)
+    if keyword:
+        # code/name 模糊 OR 匹配（issue #155）：用户输入的 %/_/ 须转义字面化
+        kw = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.filter(or_(
+            Product.code.ilike(f"%{kw}%", escape="\\"),
+            Product.name.ilike(f"%{kw}%", escape="\\"),
+        ))
     if data_source:
         query = query.filter(Product.data_source == data_source)
     if data_source_status:

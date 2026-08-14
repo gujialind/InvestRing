@@ -47,6 +47,8 @@ export interface SnapshotStatusResponse {
   missing_dates: string[];
   /** 最新快照日 CASH 持仓 cash_amount < 0 的平台清单（正常为空） */
   negative_cash_platforms?: string[];
+  /** 组合级自动快照开关（issue #156），随组合配置返回 */
+  auto_snapshot_enabled: boolean;
 }
 
 // ---- #146 快照管理页重构 ----

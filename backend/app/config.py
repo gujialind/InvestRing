@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # APScheduler
     scheduler_enabled: bool = True
     scheduler_cron_daily: str = "0 7 * * *"
+    scheduler_cron_snapshot: str = "30 7 * * *"
     scheduler_jobstore_table: str = "apscheduler_jobs"
 
     # Application
