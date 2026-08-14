@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { format } from "date-fns";
+import { format, isSameDay, subYears } from "date-fns";
+import type { DateRange } from "react-day-picker";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -24,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { DatePicker } from "@/components/ui/date-picker";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import {
   Dialog,
   DialogContent,
@@ -83,6 +85,18 @@ interface SnapshotsContentProps {
   variant?: "desktop" | "mobile";
 }
 
+/** 默认快照区间 = 快捷项「近1年」（#152 决策，与调仓/申赎页 #125/#126 决策⑤一致） */
+function defaultSnapshotRange(): DateRange {
+  return { from: subYears(new Date(), 1), to: new Date() };
+}
+
+/** 与默认区间一致（isSameDay 双端比较）→ 视为「无筛选」默认态，驱动重置按钮显隐 */
+function isDefaultSnapshotRange(range: DateRange | undefined): boolean {
+  if (!range?.from || !range.to) return false;
+  const d = defaultSnapshotRange();
+  return !!d.from && !!d.to && isSameDay(range.from, d.from) && isSameDay(range.to, d.to);
+}
+
 /**
  * 快照管理页内容（#146，桌面/移动共用）。
  * 六区块：Header / 状态概览 / 操作区 / 重算任务进度 / 历史表格 / 批量删除两段式。
@@ -94,9 +108,16 @@ export default function SnapshotsContent({ basePath, variant = "desktop" }: Snap
   const queryClient = useQueryClient();
   const addToast = useUIStore((state) => state.addToast);
 
-  // 数据
+  // 快照日期筛选（#152）：默认最近 1 年，惰性初始化避免每渲染重算；X 清空 = 不按日期过滤
+  const [snapshotRange, setSnapshotRange] = useState<DateRange | undefined>(() => defaultSnapshotRange());
+  const hasNonDefaultRange = snapshotRange !== undefined && !isDefaultSnapshotRange(snapshotRange);
+
+  // 数据：区间转查询参数（闭区间）；undefined 字段 axios 不传参
   const { data: statusData } = useSnapshotStatus(code);
-  const { data: listData, isLoading: listLoading } = useSnapshotList(code);
+  const { data: listData, isLoading: listLoading } = useSnapshotList(code, {
+    startDate: snapshotRange?.from ? format(snapshotRange.from, "yyyy-MM-dd") : undefined,
+    endDate: snapshotRange?.to ? format(snapshotRange.to, "yyyy-MM-dd") : undefined,
+  });
 
   // Mutations
   const generateSnapshot = useGenerateSnapshot();
@@ -426,12 +447,56 @@ export default function SnapshotsContent({ basePath, variant = "desktop" }: Snap
           <CardDescription>按交易日倒序；涨跌幅按相邻交易日净值计算</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* 筛选行（#152）：默认最近 1 年，X 清空后为后端默认最近 500 条（与调仓页语义一致） */}
+          <div
+            className={
+              variant === "mobile"
+                ? "mb-3 space-y-2"
+                : "mb-3 flex flex-wrap items-center gap-2"
+            }
+          >
+            <DateRangePicker
+              value={snapshotRange}
+              onChange={setSnapshotRange}
+              placeholder="快照日期"
+              numberOfMonths={variant === "mobile" ? 1 : 2}
+              className={variant === "mobile" ? "h-9 w-full" : "h-9 w-[240px]"}
+            />
+            {hasNonDefaultRange && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9"
+                onClick={() => setSnapshotRange(defaultSnapshotRange())}
+              >
+                重置
+              </Button>
+            )}
+          </div>
           {listLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : items.length === 0 ? (
-            <EmptyState message="暂无快照" description="可经上方操作区生成首份快照" />
+            snapshotRange ? (
+              <EmptyState
+                message="当前区间暂无快照"
+                description="可扩大日期区间或清除筛选后查看"
+                action={
+                  hasNonDefaultRange ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSnapshotRange(defaultSnapshotRange())}
+                    >
+                      重置筛选
+                    </Button>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <EmptyState message="暂无快照" description="可经上方操作区生成首份快照" />
+            )
           ) : (
             <>
               <div className={variant === "mobile" ? "overflow-x-auto" : undefined}>
@@ -483,7 +548,9 @@ export default function SnapshotsContent({ basePath, variant = "desktop" }: Snap
               </div>
               {listData && listData.total > items.length && (
                 <p className="text-xs text-muted-foreground mt-2">
-                  仅显示最近 {items.length} 条，共 {listData.total} 条
+                  {snapshotRange
+                    ? `区间内共 ${listData.total} 条，仅显示最近 ${items.length} 条`
+                    : `仅显示最近 ${items.length} 条，共 ${listData.total} 条`}
                 </p>
               )}
             </>

@@ -7,7 +7,6 @@ import {
   format,
   isSameDay,
   startOfMonth,
-  startOfQuarter,
   startOfYear,
   subDays,
   subMonths,
@@ -26,16 +25,16 @@ import {
 } from "@/components/ui/popover"
 
 // 快捷选项（规范 §10：形态统一，清单由业务定义；区间语义在此定死）
+// 文案与顺序（#161 实测反馈）：近7天、本月、近1月、今年、去年、近1年、近3年
 const QUICK_OPTIONS: { key: string; label: string; range: (now: Date) => DateRange }[] = [
+  { key: "last-7d", label: "近7天", range: (now) => ({ from: subDays(now, 6), to: now }) },
   { key: "this-month", label: "本月", range: (now) => ({ from: startOfMonth(now), to: now }) },
-  { key: "this-quarter", label: "本季度", range: (now) => ({ from: startOfQuarter(now), to: now }) },
+  { key: "last-1m", label: "近1月", range: (now) => ({ from: subMonths(now, 1), to: now }) },
   { key: "this-year", label: "今年", range: (now) => ({ from: startOfYear(now), to: now }) },
   { key: "last-year", label: "去年", range: (now) => ({ from: startOfYear(subYears(now, 1)), to: endOfYear(subYears(now, 1)) }) },
-  { key: "last-7d", label: "最近7天", range: (now) => ({ from: subDays(now, 6), to: now }) },
-  { key: "last-1m", label: "最近1个月", range: (now) => ({ from: subMonths(now, 1), to: now }) },
-  { key: "last-1y", label: "最近1年", range: (now) => ({ from: subYears(now, 1), to: now }) },
-  { key: "last-3y", label: "最近3年", range: (now) => ({ from: subYears(now, 3), to: now }) },
-]
+  { key: "last-1y", label: "近1年", range: (now) => ({ from: subYears(now, 1), to: now }) },
+  { key: "last-3y", label: "近3年", range: (now) => ({ from: subYears(now, 3), to: now }) },
+];
 
 // 手选区间与某快捷项完全一致（isSameDay 双端比较）→ 返回其 key，否则 null
 function matchQuickOption(value: DateRange | undefined): string | null {
@@ -178,7 +177,7 @@ export function DateRangePicker({
       </div>
       <PopoverContent
         align="start"
-        className="w-auto p-0"
+        className="w-auto max-h-[min(calc(100dvh_-_2rem),44rem)] overflow-y-auto p-0"
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col">
@@ -193,7 +192,7 @@ export function DateRangePicker({
               autoFocus
             />
           </div>
-          <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+          <div className="sticky bottom-0 z-10 flex items-center justify-between gap-2 border-t bg-popover px-3 py-2">
             <span className="text-xs text-muted-foreground">{draftSummary}</span>
             <Button type="button" size="sm" onClick={handleConfirm} disabled={!draft?.from}>
               确定
