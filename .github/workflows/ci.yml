@@ -226,14 +226,19 @@ jobs:
           mysql -h 127.0.0.1 -uroot -proot -e "
             CREATE DATABASE ir_e2e CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci;"
 
-      - name: Run migrations
+      # 复刻生产启动顺序（对齐 backend-test-mysql）：create_all 先建全表，
+      # alembic upgrade head 增量修补——迁移链依赖 create_all 已建表
+      # （如 0007 直接 UPDATE product），单独跑迁移会报表不存在
+      - name: Create schema and run migrations
         working-directory: backend
         env:
           DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/ir_e2e?charset=utf8mb4
           SECRET_KEY: test-secret-key-for-ci
           SCHEDULER_ENABLED: "false"
           DEBUG: "false"
-        run: alembic upgrade head
+        run: |
+          python -c "from app.database import engine, Base; import app.models; Base.metadata.create_all(bind=engine)"
+          alembic upgrade head
 
       # 种子 ADMIN/admin123（E2E auth.setup.ts 登录依赖，勿删）
       - name: Seed admin user
