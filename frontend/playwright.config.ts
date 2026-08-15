@@ -58,11 +58,14 @@ export default defineConfig({
       },
       dependencies: ['setup'],
     },
-    // 移动端 iPhone
+    // 移动端（chromium 内核）：原用 iPhone 13（webkit 内核），
+    // 但 webkit 下登录成功后 /dashboard→/m/dashboard 的 307 跳转会被取消
+    // （浏览器侧 "Load request cancelled"，真实原因未定位），改用同为移动
+    // 视口的 Pixel 5（chromium），与 CI 只装 chromium 保持一致
     {
       name: 'mobile',
       use: {
-        ...devices['iPhone 13'],
+        ...devices['Pixel 5'],
         storageState: 'e2e/.auth/admin.json',
       },
       dependencies: ['setup'],

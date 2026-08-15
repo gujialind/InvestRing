@@ -15,7 +15,8 @@ test.describe('页面渲染回归（防 P0 复发）', () => {
     await page.goto('/settings/tasks');
 
     await expect(page.getByRole('heading', { name: '任务管理' })).toBeVisible();
-    await expect(page.getByText('定时任务')).toBeVisible();
+    // 页面内「定时任务」文本存在多处（标题/描述），用 heading 角色精确定位
+    await expect(page.getByRole('heading', { name: '定时任务' })).toBeVisible();
     // 执行历史区必须渲染（可以是空态，但不能是崩溃）
     await expect(page.getByText('执行历史')).toBeVisible();
     await expect(page.getByText(/Application error/i)).toHaveCount(0);
