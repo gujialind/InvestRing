@@ -61,6 +61,38 @@ test.describe('移动端布局回归（防 P0-8 复发）', () => {
   });
 });
 
+test.describe('DateRangePicker 矮视口回归（防 #161 复发）', () => {
+  // 防 #161：矮视口下日期区间弹层曾溢出视口、「确定」按钮不可达；
+  // #161 以 max-h-[min(calc(100dvh_-_2rem),44rem)] + sticky footer 修复，
+  // PR #164 修正 calc 任意值空格语法后高度兜底才真正生效——本用例以修正后行为为准。
+  // 仅桌面项目有意义（mobile 项目 numberOfMonths=1、视口语义不同）
+  test.use({ viewport: { width: 1280, height: 600 } });
+
+  test('600px 视口下日期区间弹层「确定」按钮应在视口内可达', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile', '矮视口断言仅针对桌面项目');
+
+    await page.goto('/portfolio');
+    const firstDetailLink = page.locator('a[href^="/portfolio/"]').first();
+    if ((await firstDetailLink.count()) === 0) {
+      test.skip(true, '环境中没有组合数据');
+    }
+    await firstDetailLink.click();
+    await page.getByRole('link', { name: '调仓交易' }).click();
+
+    // DateRangePicker 触发器：默认区间「近1年」，按钮文案为 yyyy-MM-dd ~ yyyy-MM-dd
+    await page.getByRole('button').filter({ hasText: '~' }).first().click();
+
+    const confirmBtn = page.getByRole('button', { name: '确定' });
+    await expect(confirmBtn).toBeVisible();
+    const box = await confirmBtn.boundingBox();
+    expect(box, '「确定」按钮未渲染出 boundingBox').not.toBeNull();
+    if (box) {
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(600);
+    }
+  });
+});
+
 test.describe('持仓明细维度二级分组（防 #109 / #114 复发，#128 维度化）', () => {
   // 防 #109：同分组产品曾各自独立成卡、无分组级合计；
   // 关系式断言（子分组头合计 = 名下各行市值之和），不硬绑定生产快照数字

@@ -32,6 +32,8 @@ export default function SearchableProductSelect({
   id,
 }: SearchableProductSelectProps) {
   const [open, setOpen] = useState(false);
+  // 懒加载（#165）：首次打开后才挂产品查询；sticky 不回落，避免关闭后缓存丢弃
+  const [hasOpened, setHasOpened] = useState(false);
 
   // 关键字防抖 300ms（规范 §9 文本输入类）
   const [keywordInput, setKeywordInput] = useState("");
@@ -41,10 +43,10 @@ export default function SearchableProductSelect({
     return () => clearTimeout(timer);
   }, [keywordInput]);
 
-  const { data, isLoading, isFetching } = useProductList({
-    page_size: 50,
-    keyword: keyword || undefined,
-  });
+  const { data, isLoading, isFetching } = useProductList(
+    { page_size: 50, keyword: keyword || undefined },
+    { enabled: hasOpened }
+  );
   const items = useMemo(() => data?.items ?? [], [data?.items]);
 
   // 名称缓存：选中项回显 name (code)；name 仅来自当前/历史结果集，缺失时回退 code
@@ -80,7 +82,13 @@ export default function SearchableProductSelect({
     : placeholder;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) setHasOpened(true);
+      }}
+    >
       <PopoverTrigger asChild>
         <button
           type="button"
