@@ -2,6 +2,8 @@
 # 集成测试：产品管理 (test_products.py)
 # ============================================================================
 
+import time
+
 import pytest
 from tests.factories import create_product, create_asset_classification
 
@@ -123,6 +125,41 @@ class TestProductKeywordFilter:
         data = resp.json()
         assert data["total"] == 1
         assert data["items"][0]["code"] == "510300.OF"
+
+
+class TestProductListOrder:
+    """产品 list 确定性排序（issue #165）：created_at DESC + code ASC"""
+
+    def test_new_product_on_first_page(self, client, admin_headers, test_db):
+        """新建产品必然出现在 page_size=50 首页（#162 下拉验收前提）"""
+        create_product(test_db, code="960001.OF", market="CN_OTC", name="排序测试基金")
+        resp = client.get("/api/products?page_size=50", headers=admin_headers)
+        assert resp.status_code == 200
+        codes = [i["code"] for i in resp.json()["items"]]
+        assert "960001.OF" in codes
+
+    def test_created_desc_tiebreak_code_and_stable(self, client, admin_headers, test_db):
+        """新建优先；同秒并列按 code 定序；重复请求顺序稳定"""
+        create_product(test_db, code="960010.OF", market="CN_OTC", name="排序旧基金")
+        time.sleep(1.1)  # 跨秒创建（created_at 为 NOW() 秒级精度）
+        create_product(test_db, code="960012.OF", market="CN_OTC", name="排序新基金B")
+        create_product(test_db, code="960011.OF", market="CN_OTC", name="排序新基金A")
+
+        resp = client.get("/api/products?page_size=100", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        codes = [i["code"] for i in items]
+        # 新建优先：跨秒后创建的两个产品均排在旧产品之前
+        assert codes.index("960012.OF") < codes.index("960010.OF")
+        assert codes.index("960011.OF") < codes.index("960010.OF")
+        # 同秒并列时按 code 升序定序
+        by_code = {i["code"]: i for i in items}
+        if by_code["960011.OF"]["created_at"] == by_code["960012.OF"]["created_at"]:
+            assert codes.index("960011.OF") < codes.index("960012.OF")
+
+        # 重复请求顺序稳定（确定性排序）
+        resp2 = client.get("/api/products?page_size=100", headers=admin_headers)
+        assert [i["code"] for i in resp2.json()["items"]] == codes
 
 
 def _seed_dims(test_db):
