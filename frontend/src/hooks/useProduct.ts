@@ -9,11 +9,13 @@ import { useUIStore } from "@/stores/uiStore";
 const PRODUCT_QUERY_KEY = "products";
 
 // 产品列表 Hook（参数全集见 ProductListParams，queryKey 带 params 自动按条件刷新）
-export function useProductList(params?: ProductListParams) {
+// options.enabled 供下拉组件懒加载（#165）：默认 true，不影响页面级调用方
+export function useProductList(params?: ProductListParams, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [PRODUCT_QUERY_KEY, "list", params],
     queryFn: () => productApi.list(params),
     staleTime: 30 * 1000,
+    enabled: options?.enabled ?? true,
   });
 }
 
