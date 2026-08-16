@@ -177,7 +177,10 @@ export function DateRangePicker({
       </div>
       <PopoverContent
         align="start"
-        className="w-auto max-h-[min(calc(100dvh_-_2rem),44rem)] overflow-y-auto p-0"
+        collisionPadding={16}
+        // #161 高度兜底修正：100dvh 口径只在触发器贴近页顶时有效；触发器靠下时弹层仍溢出。
+        // 改用 Radix Popper 暴露的可用高度变量按实际剩余空间限高，sticky footer 才可落在视口内
+        className="w-auto max-h-[min(var(--radix-popper-available-height,calc(100dvh_-_2rem)),44rem)] overflow-y-auto p-0"
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col">

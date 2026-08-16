@@ -56,7 +56,14 @@ def get_products(
     if segment_code:
         query = query.filter(Product.segment_code == segment_code)
     total = query.count()
-    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    # 确定性排序（#165）：新建优先保证下拉首页（page_size=50）可见新产品；
+    # code 次级键保证同秒批量创建时顺序确定（Product 无自增 id）
+    items = (
+        query.order_by(Product.created_at.desc(), Product.code.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
     return {
         "items": items,
         "total": total,
