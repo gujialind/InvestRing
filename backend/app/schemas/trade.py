@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from datetime import date, datetime
 
 
@@ -53,6 +53,15 @@ class TradeResponse(TradeBase):
 
     class Config:
         from_attributes = True
+
+
+class PaginatedTradeResponse(BaseModel):
+    """交易列表分页响应（issue #183）。items 元素复用 TradeResponse：
+    product_name 仅 list 端点填充，单对象端点恒为 None（见 TradeResponse 注释）。"""
+    items: List[TradeResponse]
+    total: int
+    page: int
+    page_size: int
 
 
 class TradePreviewResult(BaseModel):
