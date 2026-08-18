@@ -15,6 +15,11 @@ from app.models.subscription import Subscription
 from app.models.trade import Trade
 
 
+def _started_date(p):
+    """started_at 为 DateTime 列但承载日期语义，读回可能是 date/datetime，归一后断言"""
+    return p.started_at.date() if p.started_at else None
+
+
 class TestSubscriptionCreate:
     """申购创建测试"""
 
@@ -449,3 +454,477 @@ class TestListSubscriptionFilters:
         data = resp.json()
         assert data["total"] == 1
         assert data["items"][0]["investor_code"] == "VIEWER"
+
+
+# ============================================================================
+# issue #179：首窗 1.0 定价（三级决策）+ CONFIRM_BEFORE_STARTED 硬闸门
+# ============================================================================
+
+class TestFirstWindowPricingAndGate:
+    """首日多平台申购不再死循环；乱序补录被闸门阻断"""
+
+    def test_same_day_multi_platform_all_confirm_at_1(self, client, admin_headers, test_db):
+        """原场景（PORT005）：同日多平台申购全部可确认，unit_price 均 1.0000，
+        confirm_date == started_at 放行，各自生成配对 CASH buy"""
+        create_portfolio(test_db, code="FW_P1")  # draft
+        create_investor(test_db, code="FW_I1")
+        create_platform(test_db, code="FW_PLAT2")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+
+        sub_ids = []
+        for plat, amount in (("MYCF", 143560.82), ("FW_PLAT2", 39105.99)):
+            resp = client.post(
+                "/api/subscriptions",
+                json={
+                    "portfolio_code": "FW_P1", "investor_code": "FW_I1",
+                    "sub_type": "subscribe", "amount": amount,
+                    "apply_date": "2025-09-01", "platform_code": plat,
+                },
+                headers=admin_headers,
+            )
+            assert resp.status_code in (200, 201)
+            sub_ids.append(resp.json()["id"])
+
+        for sid in sub_ids:
+            resp = client.post(f"/api/subscriptions/{sid}/confirm", headers=admin_headers)
+            assert resp.status_code == 200, resp.json()
+            data = resp.json()
+            assert Decimal(str(data["unit_price"])) == Decimal("1.0000")
+            # 配对 CASH buy 落库
+            legs = test_db.query(Trade).filter(
+                Trade.transfer_group == f"sub_{sid}"
+            ).all()
+            assert len(legs) == 1
+            assert legs[0].trade_type == "buy" and legs[0].status == "confirmed"
+
+        from app.models.portfolio import Portfolio
+        p = test_db.query(Portfolio).filter(Portfolio.code == "FW_P1").first()
+        assert p.status == "active"
+        assert _started_date(p) == date(2025, 9, 2)
+
+    def test_apply_date_with_prior_arrival_needs_snapshot(self, client, admin_headers, test_db):
+        """边界守卫：A apply=D-1 已 confirmed（confirm=D），B apply=D 且无快照 →
+        NAV_NOT_AVAILABLE（当日已有资金到账，不适用首窗例外）"""
+        create_portfolio(test_db, code="FW_P2")
+        create_investor(test_db, code="FW_I2")
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "FW_P2", "investor_code": "FW_I2",
+                "sub_type": "subscribe", "amount": 10000.0,
+                "apply_date": "2025-09-01", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        a_id = resp.json()["id"]
+        assert client.post(f"/api/subscriptions/{a_id}/confirm", headers=admin_headers).status_code == 200
+
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "FW_P2", "investor_code": "FW_I2",
+                "sub_type": "subscribe", "amount": 5000.0,
+                "apply_date": "2025-09-02", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        b_id = resp.json()["id"]
+        resp = client.post(f"/api/subscriptions/{b_id}/confirm", headers=admin_headers)
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "NAV_NOT_AVAILABLE"
+
+    def test_out_of_order_confirm_blocked(self, client, admin_headers, test_db):
+        """乱序补录：confirm_date < started_at 被 CONFIRM_BEFORE_STARTED 阻断且不落库；
+        首笔确认（started_at 尚空）豁免"""
+        create_portfolio(test_db, code="FW_P3")
+        create_investor(test_db, code="FW_I3")
+        ensure_trading_day(test_db, date(2025, 8, 29), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+
+        # 首笔（started_at 空）豁免阻断
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "FW_P3", "investor_code": "FW_I3",
+                "sub_type": "subscribe", "amount": 10000.0,
+                "apply_date": "2025-09-01", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        s1_id = resp.json()["id"]
+        assert client.post(f"/api/subscriptions/{s1_id}/confirm", headers=admin_headers).status_code == 200
+
+        # 补录更早申购：confirm=09-01 < started_at=09-02 → 阻断
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "FW_P3", "investor_code": "FW_I3",
+                "sub_type": "subscribe", "amount": 8000.0,
+                "apply_date": "2025-08-29", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        s0_id = resp.json()["id"]
+        resp = client.post(f"/api/subscriptions/{s0_id}/confirm", headers=admin_headers)
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "CONFIRM_BEFORE_STARTED"
+        still = test_db.query(Subscription).filter(Subscription.id == s0_id).first()
+        assert still.status == "pending"
+
+    def test_unconfirm_first_then_confirm_another(self, client, admin_headers, test_db):
+        """首笔 unconfirm 后组合回 draft/started_at 清空（#180），
+        再 confirm 另一笔仍走 1.0 且重设 started_at"""
+        create_portfolio(test_db, code="FW_P4")
+        create_investor(test_db, code="FW_I4")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "FW_P4", "investor_code": "FW_I4",
+                "sub_type": "subscribe", "amount": 10000.0,
+                "apply_date": "2025-09-01", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        s1_id = resp.json()["id"]
+        assert client.post(f"/api/subscriptions/{s1_id}/confirm", headers=admin_headers).status_code == 200
+        assert client.post(f"/api/subscriptions/{s1_id}/unconfirm", headers=admin_headers).status_code == 200
+
+        from app.models.portfolio import Portfolio
+        p = test_db.query(Portfolio).filter(Portfolio.code == "FW_P4").first()
+        assert p.status == "draft" and p.started_at is None
+
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "FW_P4", "investor_code": "FW_I4",
+                "sub_type": "subscribe", "amount": 6000.0,
+                "apply_date": "2025-09-01", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        s2_id = resp.json()["id"]
+        resp = client.post(f"/api/subscriptions/{s2_id}/confirm", headers=admin_headers)
+        assert resp.status_code == 200
+        assert Decimal(str(resp.json()["unit_price"])) == Decimal("1.0000")
+        test_db.refresh(p)
+        assert p.status == "active" and _started_date(p) == date(2025, 9, 2)
+
+    def test_snapshot_nav_takes_precedence(self, client, admin_headers, test_db):
+        """回归：申请日快照存在时取快照净值（三级决策 branch 1）"""
+        create_portfolio(test_db, code="FW_P5", status="active")
+        create_investor(test_db, code="FW_I5")
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        create_value_snapshot(test_db, "FW_P5", date(2025, 9, 1),
+                              total_value=12345, total_shares=10000, unit_price=1.2345)
+
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "FW_P5", "investor_code": "FW_I5",
+                "sub_type": "subscribe", "amount": 10000.0,
+                "apply_date": "2025-09-02", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        sub_id = resp.json()["id"]
+        # 创建后再补申请日快照（模拟快照生成先于确认的正常流程）
+        create_value_snapshot(test_db, "FW_P5", date(2025, 9, 2),
+                              total_value=12500, total_shares=10000, unit_price=1.25)
+
+        resp = client.post(f"/api/subscriptions/{sub_id}/confirm", headers=admin_headers)
+        assert resp.status_code == 200
+        assert Decimal(str(resp.json()["unit_price"])) == Decimal("1.25")
+
+
+# ============================================================================
+# issue #180：started_at = 现存最小 confirm_date（重算不变量）+ 回滚链防护
+# ============================================================================
+
+def _confirmed_sub_with_cash_leg(
+    db, portfolio_code, investor_code, amount, apply_date, confirm_date,
+):
+    """工厂造 confirmed 申购 + 配对 CASH buy 腿（模拟真实确认产物）"""
+    sub = create_subscription(
+        db, portfolio_code, investor_code,
+        sub_type="subscribe", amount=amount, shares=amount,
+        unit_price=1.0, apply_date=apply_date,
+        confirm_date=confirm_date, status="confirmed",
+    )
+    create_trade(
+        db, portfolio_code, "CASH", "",
+        trade_type="buy", amount=amount, price=1.0,
+        trade_date=apply_date, confirm_date=confirm_date,
+        actual_amount=amount, status="confirmed",
+        transfer_group=f"sub_{sub.id}",
+    )
+    return sub
+
+
+class TestStartedAtInvariant:
+    """started_at 重算不变量（#180 定稿方案）"""
+
+    def test_unconfirm_earliest_recomputes_to_next(self, client, admin_headers, test_db):
+        """定稿反例：unconfirm 最早那笔（还有更晚 B）→ started_at = 次小 confirm_date"""
+        from app.models.portfolio import Portfolio
+        create_portfolio(test_db, code="SR_P1", status="active")
+        create_investor(test_db, code="SR_I1")
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        s1 = _confirmed_sub_with_cash_leg(
+            test_db, "SR_P1", "SR_I1", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+        _confirmed_sub_with_cash_leg(
+            test_db, "SR_P1", "SR_I1", 5000.0, date(2025, 9, 2), date(2025, 9, 3))
+        p = test_db.query(Portfolio).filter(Portfolio.code == "SR_P1").first()
+        p.started_at = date(2025, 9, 2)
+        test_db.commit()
+
+        resp = client.post(f"/api/subscriptions/{s1.id}/unconfirm", headers=admin_headers)
+        assert resp.status_code == 200, resp.json()
+        test_db.refresh(p)
+        assert _started_date(p) == date(2025, 9, 3)  # 不再悬空在已撤销交易的确认日
+        assert p.status == "active"
+
+    def test_unconfirm_non_earliest_keeps_started_at(self, client, admin_headers, test_db):
+        """unconfirm 非最早笔 → started_at 不变，多笔时 status 保持 active"""
+        from app.models.portfolio import Portfolio
+        create_portfolio(test_db, code="SR_P2", status="active")
+        create_investor(test_db, code="SR_I2")
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        _confirmed_sub_with_cash_leg(
+            test_db, "SR_P2", "SR_I2", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+        s2 = _confirmed_sub_with_cash_leg(
+            test_db, "SR_P2", "SR_I2", 5000.0, date(2025, 9, 2), date(2025, 9, 3))
+        p = test_db.query(Portfolio).filter(Portfolio.code == "SR_P2").first()
+        p.started_at = date(2025, 9, 2)
+        test_db.commit()
+
+        resp = client.post(f"/api/subscriptions/{s2.id}/unconfirm", headers=admin_headers)
+        assert resp.status_code == 200
+        test_db.refresh(p)
+        assert _started_date(p) == date(2025, 9, 2)
+        assert p.status == "active"
+
+    def test_unconfirm_to_zero_reverts_draft(self, client, admin_headers, test_db):
+        """unconfirm 至零确认申购 → draft + started_at NULL"""
+        from app.models.portfolio import Portfolio
+        create_portfolio(test_db, code="SR_P3", status="active")
+        create_investor(test_db, code="SR_I3")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+        s1 = _confirmed_sub_with_cash_leg(
+            test_db, "SR_P3", "SR_I3", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+
+        resp = client.post(f"/api/subscriptions/{s1.id}/unconfirm", headers=admin_headers)
+        assert resp.status_code == 200
+        p = test_db.query(Portfolio).filter(Portfolio.code == "SR_P3").first()
+        assert p.status == "draft" and p.started_at is None
+
+    def test_closed_not_reverted_by_cascade_unconfirm(self, test_db):
+        """closed 组合经级联回退（check_snapshot=False）至零确认时保持 closed"""
+        from app.models.portfolio import Portfolio
+        from app.services.subscription_service import unconfirm_single_subscription
+        create_portfolio(test_db, code="SR_P4", status="closed")
+        create_investor(test_db, code="SR_I4")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+        s1 = _confirmed_sub_with_cash_leg(
+            test_db, "SR_P4", "SR_I4", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+
+        unconfirm_single_subscription(test_db, s1, check_snapshot=False)
+        test_db.commit()
+        p = test_db.query(Portfolio).filter(Portfolio.code == "SR_P4").first()
+        assert p.status == "closed" and p.started_at is None
+
+    def test_reactivate_keeps_started_at_and_relaxed_write(self, client, admin_headers, test_db):
+        """close/reactivate 不碰 started_at；空组合 reactivate 后新首购仍能写入
+        （写入条件放宽为 started_at is None）"""
+        from app.models.portfolio import Portfolio
+        from app.services.subscription_service import unconfirm_single_subscription
+        create_portfolio(test_db, code="RA_P1", status="active")
+        create_investor(test_db, code="RA_I1")
+        for d in (1, 2, 8, 9):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        s1 = _confirmed_sub_with_cash_leg(
+            test_db, "RA_P1", "RA_I1", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+        p = test_db.query(Portfolio).filter(Portfolio.code == "RA_P1").first()
+        p.started_at = date(2025, 9, 2)
+        test_db.commit()
+
+        # 级联回退至零确认（closed 保持），再 close/reactivate 流转
+        p.status = "closed"
+        test_db.commit()
+        unconfirm_single_subscription(test_db, s1, check_snapshot=False)
+        test_db.commit()
+        assert client.post("/api/portfolios/RA_P1/reactivate", headers=admin_headers).status_code == 200
+        test_db.refresh(p)
+        assert p.status == "active" and p.started_at is None
+
+        # reactivate 后的新首购：status 已是 active，旧 draft 条件会漏设 started_at
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "RA_P1", "investor_code": "RA_I1",
+                "sub_type": "subscribe", "amount": 7000.0,
+                "apply_date": "2025-09-08", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        new_id = resp.json()["id"]
+        resp = client.post(f"/api/subscriptions/{new_id}/confirm", headers=admin_headers)
+        assert resp.status_code == 200
+        assert Decimal(str(resp.json()["unit_price"])) == Decimal("1.0000")
+        test_db.refresh(p)
+        assert p.started_at == date(2025, 9, 9) or _started_date(p) == date(2025, 9, 9)
+
+    def test_close_reactivate_keeps_started_at_regression(self, client, admin_headers, test_db):
+        """回归：close/reactivate 流转前后 started_at 完全不变"""
+        from app.models.portfolio import Portfolio
+        create_portfolio(test_db, code="RA_P2", status="active")
+        create_investor(test_db, code="RA_I2")
+        p = test_db.query(Portfolio).filter(Portfolio.code == "RA_P2").first()
+        p.started_at = date(2025, 9, 2)
+        test_db.commit()
+
+        assert client.post("/api/portfolios/RA_P2/close", headers=admin_headers).status_code == 200
+        assert client.post("/api/portfolios/RA_P2/reactivate", headers=admin_headers).status_code == 200
+        test_db.refresh(p)
+        assert _started_date(p) == date(2025, 9, 2)
+
+
+class TestUnconfirmNegativeCashGuard:
+    """回滚链防护：入金已被消耗时拒绝 unconfirm"""
+
+    def test_unconfirm_blocked_when_cash_consumed(self, client, admin_headers, test_db):
+        create_portfolio(test_db, code="RC_P1")
+        create_investor(test_db, code="RC_I1")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": "RC_P1", "investor_code": "RC_I1",
+                "sub_type": "subscribe", "amount": 10000.0,
+                "apply_date": "2025-09-01", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        s1_id = resp.json()["id"]
+        assert client.post(f"/api/subscriptions/{s1_id}/confirm", headers=admin_headers).status_code == 200
+
+        # 模拟现金被后续交易消耗（confirmed CASH sell 8000，余额仅剩 2000）
+        create_trade(
+            test_db, "RC_P1", "CASH", "",
+            trade_type="sell", amount=8000.0, price=1.0,
+            trade_date=date(2025, 9, 2), confirm_date=date(2025, 9, 2),
+            actual_amount=8000.0, status="confirmed",
+            transfer_group="rc_consume",
+        )
+
+        resp = client.post(f"/api/subscriptions/{s1_id}/unconfirm", headers=admin_headers)
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "UNCONFIRM_WOULD_NEGATIVE_CASH"
+        still = test_db.query(Subscription).filter(Subscription.id == s1_id).first()
+        assert still.status == "confirmed"
+
+
+# ============================================================================
+# issue #180：零快照 + 目标日前有确认交易 → 拒绝单日 generate（防首快照失忆）
+# ============================================================================
+
+class TestSnapshotHistoryGapGuard:
+
+    def test_generate_rejected_when_earlier_arrivals_exist(self, test_db):
+        from app.services.snapshot_service import generate_daily_snapshots
+        from app.services.exceptions import BusinessError
+        create_portfolio(test_db, code="SG_P1", status="active")
+        create_investor(test_db, code="SG_I1")
+        for d in (1, 2, 3, 4):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        _confirmed_sub_with_cash_leg(
+            test_db, "SG_P1", "SG_I1", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+
+        with pytest.raises(BusinessError) as exc_info:
+            generate_daily_snapshots(test_db, "SG_P1", date(2025, 9, 4))
+        assert exc_info.value.code == "SNAPSHOT_REQUIRES_RECALCULATE"
+
+    def test_generate_at_earliest_confirm_date_allowed(self, test_db):
+        """目标日即最早到账日的真正首次生成不受守卫影响"""
+        from app.services.snapshot_service import generate_daily_snapshots
+        from app.services.exceptions import BusinessError
+        create_portfolio(test_db, code="SG_P2", status="active")
+        create_investor(test_db, code="SG_I2")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+        _confirmed_sub_with_cash_leg(
+            test_db, "SG_P2", "SG_I2", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+
+        try:
+            generate_daily_snapshots(test_db, "SG_P2", date(2025, 9, 2))
+        except BusinessError as e:
+            assert e.code != "SNAPSHOT_REQUIRES_RECALCULATE"
+
+    def test_recalculate_captures_history_cash(self, test_db):
+        """recalculate 从最早 confirm_date 逐日重建，首张快照含历史 CASH 到账"""
+        from app.models.portfolio_position import PortfolioPosition
+        from app.services.snapshot_service import recalculate_snapshots
+        create_portfolio(test_db, code="SG_P3", status="active")
+        create_investor(test_db, code="SG_I3")
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        _confirmed_sub_with_cash_leg(
+            test_db, "SG_P3", "SG_I3", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+
+        result = recalculate_snapshots(test_db, "SG_P3", date(2025, 9, 2), date(2025, 9, 3))
+        assert not result.get("errors"), result
+        test_db.commit()
+
+        pos = test_db.query(PortfolioPosition).filter(
+            PortfolioPosition.portfolio_code == "SG_P3",
+            PortfolioPosition.snapshot_date == date(2025, 9, 2),
+            PortfolioPosition.product_code == "CASH",
+        ).first()
+        assert pos is not None
+        assert Decimal(str(pos.cash_amount)) == Decimal("10000")
+
+
+class TestAutoConfirmOutOfOrder:
+
+    def test_out_of_order_sub_fails_not_blocking(self, test_db):
+        """乱序早期申购在 auto_confirm 下 fail 为 auto_confirm_failed，不阻断整批"""
+        from app.models.portfolio import Portfolio
+        from app.services.snapshot_service import auto_confirm_after_snapshot
+        create_portfolio(test_db, code="AC_P1", status="active")
+        create_investor(test_db, code="AC_I1")
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 8, d), is_open=True)
+        for d in (1, 2, 3, 4):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        s1 = _confirmed_sub_with_cash_leg(
+            test_db, "AC_P1", "AC_I1", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+        p = test_db.query(Portfolio).filter(Portfolio.code == "AC_P1").first()
+        p.started_at = s1.confirm_date
+        test_db.commit()
+        # 乱序 pending 早期申购：confirm=09-01 < started_at=09-02
+        s0 = create_subscription(
+            test_db, "AC_P1", "AC_I1", sub_type="subscribe", amount=8000.0,
+            apply_date=date(2025, 8, 29), confirm_date=date(2025, 9, 1),
+            status="pending",
+        )
+
+        results = auto_confirm_after_snapshot(test_db, "AC_P1", date(2025, 9, 2))
+        failed = [r for r in results if r["id"] == s0.id]
+        assert failed and failed[0]["action"] == "auto_confirm_failed"
+        assert "首笔到账日" in failed[0]["error"]  # CONFIRM_BEFORE_STARTED 闸门文案
+        test_db.refresh(s0)
+        assert s0.status == "pending"
