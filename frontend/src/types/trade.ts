@@ -18,6 +18,8 @@ export interface Trade {
   notes?: string;
   created_at?: string;
   updated_at?: string;
+  /** 读侧派生（#175）：仅 list 响应有值；create/get/update 恒为 undefined */
+  product_name?: string;
 }
 
 export interface TradeCreate {
