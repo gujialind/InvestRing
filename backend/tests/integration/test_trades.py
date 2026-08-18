@@ -1215,3 +1215,55 @@ class TestListTradeFilters:
         assert data["items"][0]["product_code"] == "CASH"
         assert data["items"][0]["status"] == "confirmed"
 
+
+class TestListTradeProductName:
+    """list 响应读侧派生 product_name（issue #175）"""
+
+    def test_list_trades_includes_product_name(self, client, admin_headers, test_db):
+        """基金买入产生基金腿 + 配对 CASH 腿，list 每条 item 均应带 product_name
+        （基金腿=基金名，CASH 腿=CASH 种子产品名）。
+        注：>100 产品的名称回退是前端分页映射问题，后端 join 与产品总数无关，
+        无需构造 100+ 产品。"""
+        create_portfolio(test_db, code="PN_P1", status="active")
+        create_product(test_db, code="ETF_PN", market="CN_EXCHANGE",
+                       name="测试ETF产品", product_type="ETF",
+                       asset_class_code="ASSET_STOCK", confirm_days=0)
+        create_platform(test_db, code="PN_PLAT")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        create_trade(
+            test_db, "PN_P1", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="PN_PLAT", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "PN_P1",
+                "product_code": "ETF_PN",
+                "market": "CN_EXCHANGE",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "price": 1.5,
+                "platform_code": "PN_PLAT",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), f"Response: {resp.status_code} {resp.json()}"
+
+        resp = client.get("/api/trades?portfolio_code=PN_P1", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        # 现金流入 1 条 + 基金腿 1 条 + 配对 CASH 腿 1 条
+        assert data["total"] == 3
+        name_by_leg = {
+            (item["product_code"], item["trade_type"]): item["product_name"]
+            for item in data["items"]
+        }
+        assert all(item["product_name"] for item in data["items"])
+        assert name_by_leg[("ETF_PN", "buy")] == "测试ETF产品"
+        assert name_by_leg[("CASH", "sell")] == "现金类资产"
+        assert name_by_leg[("CASH", "buy")] == "现金类资产"
+

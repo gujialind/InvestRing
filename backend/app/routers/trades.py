@@ -66,8 +66,26 @@ def get_trades(
         page=page,
         page_size=page_size,
     )
+    # 读侧派生 product_name（#175）：批量查当页产品建 name_map（防 N+1，
+    # 同 positions.py 模式）；(code, market) 双键天然覆盖 LOF 与 CASH 虚拟产品
+    pairs = {(t.product_code, t.market) for t in items}
+    name_map = {}
+    if pairs:
+        codes = {c for c, _ in pairs}
+        name_map = {
+            (p.code, p.market): p.name
+            for p in db.query(Product.code, Product.market, Product.name)
+            .filter(Product.code.in_(codes))
+            .all()
+            if (p.code, p.market) in pairs
+        }
+    enriched = []
+    for t in items:
+        row = TradeResponse.model_validate(t).model_dump()
+        row["product_name"] = name_map.get((t.product_code, t.market))
+        enriched.append(row)
     return {
-        "items": items,
+        "items": enriched,
         "total": total,
         "page": page,
         "page_size": page_size,
