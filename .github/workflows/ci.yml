@@ -277,11 +277,12 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      # 桌面/移动双 project 同为 chromium 内核（mobile 用 Pixel 5 描述符，
-      # 见 playwright.config.ts 注释），无需装全量浏览器
+      # 桌面 chromium + 移动 webkit（mobile 用 iPhone 13 描述符，
+      # 见 playwright.config.ts 注释；PR #169 遗留的 webkit 307 取消问题
+      # 已定位为 dev 竞态并修复，恢复真实 Safari 内核覆盖）
       - name: Install Playwright browsers
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Run Playwright tests
         working-directory: frontend
