@@ -67,7 +67,11 @@ test.describe('移动端渲染回归（防 P0 复发）', () => {
 
 test.describe('移动端布局回归（防 P0-8 复发）', () => {
   // 防 P0-8：/m 页面曾直接复用含 MainLayout 的 PC 页面，导致 PC 侧栏 + 底部 Tab 双导航
-  test('移动端管理页不应出现 PC 侧边栏', async ({ page }) => {
+  test('移动端管理页不应出现 PC 侧边栏', async ({ page }, testInfo) => {
+    // 仅 mobile 项目有意义：桌面 UA 访问 /m/products 会被 middleware 重定向
+    // 回 /products（含 PC 侧边栏），断言必挂（此前编译慢时幸免）
+    test.skip(testInfo.project.name !== 'mobile', '移动端布局断言仅针对移动项目');
+
     await page.goto('/m/products');
     // PC 侧边栏是 <aside>，移动端布局只应有 BottomNav（<nav>）
     await expect(page.locator('aside')).toHaveCount(0);
