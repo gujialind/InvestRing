@@ -100,7 +100,7 @@ function PositionCard({
         <div className="flex-1">
           <div className="flex items-center gap-1 text-xs text-slate-500">
             最新收益
-            {position.is_qdii && (
+            {position.is_qdii && position.market === "CN_OTC" && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>

@@ -29,7 +29,7 @@ export interface Position {
   segment_name?: string | null;
   // 读侧派生（issue #99）：daily_profit=当日收益（首个快照日 / IN_TRANSIT 在途行 → null）
   daily_profit?: number | null;
-  /** QDII 按 T-1 净值估值，日收益滞后一天（前端 tooltip 提示） */
+  /** 场外 QDII 按 T-1 净值估值，日收益滞后一天（前端 tooltip 提示）；场内 QDII 取当日收盘价，不提示 */
   is_qdii?: boolean | null;
   snapshot_date: string;
   created_at?: string;

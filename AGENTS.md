@@ -85,7 +85,7 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 * **净值稳定性**：申购/赎回/现金分红/份额拆分合并 → 净值不变；调仓 → 净值可能变化。
 * **市值** = Σ(场内份额 × 收盘价) + Σ(场外份额 × 净值) + Σ(非净值型资产金额)。非净值型资产金额即 `portfolio_position` 中 `cash_amount IS NOT NULL` 的行（含 CASH 与 IN\_TRANSIT 两类现金行），故 `total_value = Σ(fund market_value) + Σ(CASH cash_amount) + Σ(IN_TRANSIT cash_amount)`；`portfolio_value_snapshot.in_transit_total` 单独记录在途合计。
 * **净值** `unit_price = total_value / total_shares`（4 位小数）。
-* **快照净值严格匹配**（#96）：取价禁止向前回退——普通基金严格取 `price_date == snapshot_date` 当日净值，QDII 严格取 T-1（前一交易日）净值；任一持仓缺失即抛 `MISSING_NAV` 拒绝生成，与 trade 确认侧严格口径一致；重算在删除任何快照前先做整区间预校验（§3.4）。
+* **快照净值严格匹配**（#96/#178）：取价禁止向前回退——普通基金严格取 `price_date == snapshot_date` 当日净值，**场外 QDII** 严格取 T-1（前一交易日）净值，场内 QDII 与普通场内产品一致取当日收盘价；任一持仓缺失即抛 `MISSING_NAV` 拒绝生成，与 trade 确认侧严格口径一致；重算在删除任何快照前先做整区间预校验（§3.4）。
 * **份额统一 2 位小数**（ROUND\_HALF\_UP，负数按绝对值对称、远离零进位，符合场外基金行业惯例，误差计入基金财产）：产生点（申购确认 `amount/nav`、调仓买入 `amount/price`、卖出/赎回用户输入、份额事件变动计算）统一经 `quantize_shares` 量化；读取/累加路径不量化。净值 4 位不变。
 * **金额统一 2 位小数**（#94，ROUND\_HALF\_UP，负数对称语义同份额，量化误差 < 0.005 计入基金财产）：产生点（卖出/赎回确认 `shares×nav`、买入金额与手续费用户输入、申赎金额、现金分红 `cash_change`、forced\_adjustment 用户填写、`manual_market_value` 写入、现金转移金额、trade PUT 直改）统一经 `quantize_amount` 量化；读取/累加路径不量化，现金闸门保持**精确比较**（无容差）。估值口径（`market_value`/`total_value`/`unit_price`）保持 4 位不进现金账本；DB 字段精度收紧留作后续迁移。
 * **卖出/赎回输入份额先量化再校验**：量化到 2 位后与可用份额**精确比较**（无容差），超出返回 `INSUFFICIENT_SHARES`；买入/转移金额同理先量化再与可用现金精确比较。
