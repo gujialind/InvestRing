@@ -61,7 +61,6 @@ import {
   useUnconfirmTrade,
   useDeleteTrade,
 } from "@/hooks/useTrade";
-import { useProductList } from "@/hooks/useProduct";
 import { usePlatformList } from "@/hooks/usePlatform";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
@@ -148,12 +147,10 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const cancelTrade = useCancelTrade();
   const unconfirmTrade = useUnconfirmTrade();
   const deleteTradeMutation = useDeleteTrade();
-  const { data: productsData } = useProductList({ page_size: 100 });
   const { data: platformsData } = usePlatformList({ page_size: 100 });
 
   const trades = data?.items || [];
   const total = data?.total ?? 0;
-  const products = productsData?.items || [];
   const platforms = platformsData?.items || [];
 
   // 结对视图行（#126 决策⑧）：保持后端排序序，同组相邻时配对腿自然成对
@@ -189,11 +186,6 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     setTradeRange(defaultTradeRange());
     setConfirmRange(undefined);
     setPage(1);
-  };
-
-  const getProductName = (productCode: string, market?: string) => {
-    const product = products.find((p) => p.code === productCode && p.market === market);
-    return product?.name || productCode;
   };
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -364,7 +356,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           <span className="text-sm">{cashOrphanLabel(trade)}</span>
         ) : (
           <div>
-            <p className="font-medium">{getProductName(trade.product_code, trade.market)}</p>
+            <p className="font-medium">{trade.product_name || trade.product_code}</p>
             <p className="text-xs text-muted-foreground">{trade.product_code}</p>
           </div>
         )}
