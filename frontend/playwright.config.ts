@@ -44,10 +44,18 @@ export default defineConfig({
   },
 
   projects: [
+    // 路由预热：先编译 E2E 涉及的全部路由（next dev 按需编译会向已连接
+    // 客户端广播重建、触发 full reload 取消其他客户端进行中的导航，
+    // 即 PR #169 「webkit 307 跳转被取消」的根因，详见 fixtures/warmup.ts）
+    {
+      name: 'warmup',
+      testMatch: /warmup\.ts/,
+    },
     // 认证状态设置（登录一次，所有测试共享）
     {
       name: 'setup',
       testMatch: /.*\.setup\.ts/,
+      dependencies: ['warmup'],
     },
     // 桌面端 Chrome
     {
@@ -58,14 +66,16 @@ export default defineConfig({
       },
       dependencies: ['setup'],
     },
-    // 移动端（chromium 内核）：原用 iPhone 13（webkit 内核），
-    // 但 webkit 下登录成功后 /dashboard→/m/dashboard 的 307 跳转会被取消
-    // （浏览器侧 "Load request cancelled"，真实原因未定位），改用同为移动
-    // 视口的 Pixel 5（chromium），与 CI 只装 chromium 保持一致
+    // 移动端 webkit（iPhone 13）：PR #169 曾困「登录后 /dashboard→/m/dashboard
+    // 307 跳转被取消（Load request cancelled）」改用 Pixel 5（chromium）绕过，
+    // 后续实测定位到两个与 webkit 无关的 dev 竞态（根因，均已修复）：
+    //   1. next dev 重编译触发的 Fast Refresh full reload 会取消进行中的导航；
+    //   2. hydration 前 fill 的值被 controlled input 重渲染清空，登录静默失败
+    //      （JS 较慢的引擎先触发）——auth.setup.ts/auth.spec.ts 已加水合等待
     {
       name: 'mobile',
       use: {
-        ...devices['Pixel 5'],
+        ...devices['iPhone 13'],
         storageState: 'e2e/.auth/admin.json',
       },
       dependencies: ['setup'],
