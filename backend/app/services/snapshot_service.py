@@ -154,6 +154,8 @@ def _validate_no_silent_history_gap(
     历史到账在各自 confirm_date 当日被捕获）。目标日即最早到账日的真正
     首次生成（confirm_date == target_date 不受影响）与无持仓跳过路径保持。
     重算路径（check_continuity=False）从最早 confirm_date 起逐日重建，不经此守卫。
+    confirm_date 为 NULL 的异常数据回退按 apply_date/trade_date 判断，
+    与 `_check_pending_transactions` 的兜底口径对齐（防静默绕过守卫）。
     """
     has_snapshot = (
         db.query(PortfolioValueSnapshot.id)
@@ -167,7 +169,13 @@ def _validate_no_silent_history_gap(
         .filter(
             Subscription.portfolio_code == portfolio_code,
             Subscription.status == "confirmed",
-            Subscription.confirm_date < target_date,
+            or_(
+                Subscription.confirm_date < target_date,
+                and_(
+                    Subscription.confirm_date.is_(None),
+                    Subscription.apply_date < target_date,
+                ),
+            ),
         )
         .first()
     )
@@ -176,7 +184,13 @@ def _validate_no_silent_history_gap(
         .filter(
             Trade.portfolio_code == portfolio_code,
             Trade.status == "confirmed",
-            Trade.confirm_date < target_date,
+            or_(
+                Trade.confirm_date < target_date,
+                and_(
+                    Trade.confirm_date.is_(None),
+                    Trade.trade_date < target_date,
+                ),
+            ),
         )
         .first()
     )
