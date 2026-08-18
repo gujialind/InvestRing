@@ -51,11 +51,12 @@ import type { DateRange } from "react-day-picker";
 import { isSameDay, subYears } from "date-fns";
 import { ApiException } from "@/lib/api";
 import type { TradeListParams } from "@/lib/api";
-import type { Trade, TradeCreate } from "@/types/trade";
+import type { Trade, TradeCreate, TradeUpdate } from "@/types/trade";
 import { cashOrphanLabel, cashSubMeta, groupTradeRows } from "@/lib/tradePairs";
 import {
   useTradeList,
   useCreateTrade,
+  useUpdateTrade,
   useConfirmTrade,
   useCancelTrade,
   useUnconfirmTrade,
@@ -204,8 +205,20 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     trade_date: toDateOnly(new Date()),
   });
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-  // 编辑提示（原 alert 改为内部状态展示）
+  // 编辑提示（confirmed 行原 alert 改为内部状态展示）
   const [editHint, setEditHint] = useState(false);
+  // pending 交易编辑（#174）：editingTrade 非空即打开编辑 Dialog
+  const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    amount: "",
+    shares: "",
+    price: "",
+    fee: "",
+    trade_date: toDateOnly(new Date()),
+    notes: "",
+  });
+  // 顶层无条件调用（hooks 规则）；id=0 时 mutate 不会被触发（Dialog 打开时 editingTrade 必有 id）
+  const updateTrade = useUpdateTrade(editingTrade?.id ?? 0);
   // 命中 DUPLICATE_TRADE 时暂存待重试的交易，由确认框引导 allow_duplicate 重试
   const [duplicateTrade, setDuplicateTrade] = useState<TradeCreate | null>(null);
 
@@ -239,6 +252,38 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
         }
       },
     });
+  };
+
+  // 打开编辑 Dialog 并按方向预填（#174）：买入预填金额、卖出预填份额
+  const openEditDialog = (trade: Trade) => {
+    setEditingTrade(trade);
+    setEditFormData({
+      amount: trade.trade_type === "buy" ? String(trade.amount ?? "") : "",
+      shares: trade.trade_type === "sell" ? String(trade.shares ?? "") : "",
+      price: trade.price != null ? String(trade.price) : "",
+      fee: trade.fee ? String(trade.fee) : "",
+      trade_date: trade.trade_date,
+      notes: trade.notes ?? "",
+    });
+  };
+
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTrade) return;
+    // 仅组装非空字段：空串不入 payload（exclude_unset 语义下避免误清）
+    const payload: TradeUpdate = {};
+    if (editingTrade.trade_type === "buy" && editFormData.amount) {
+      payload.amount = parseFloat(editFormData.amount);
+    }
+    if (editingTrade.trade_type === "sell" && editFormData.shares) {
+      payload.shares = parseFloat(editFormData.shares);
+    }
+    if (editFormData.price) payload.price = parseFloat(editFormData.price);
+    if (editFormData.fee) payload.fee = parseFloat(editFormData.fee);
+    if (editFormData.trade_date) payload.trade_date = editFormData.trade_date;
+    if (editFormData.notes) payload.notes = editFormData.notes;
+    // 失败时 hook 已 toast，Dialog 保持打开可重试（不挂 onError 关闭逻辑）
+    updateTrade.mutate(payload, { onSuccess: () => setEditingTrade(null) });
   };
 
   const runConfirm = () => {
@@ -415,6 +460,14 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
             与后端 cancel_trade 的 CANNOT_CANCEL_EXCHANGE 一致）；confirmed=取消确认/修改引导，无删除 */}
         {trade.status === "pending" && (
           <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openEditDialog(trade)}
+              title="编辑"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -774,6 +827,116 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           />
         </CardContent>
       </Card>
+
+      {/* pending 交易编辑 Dialog（#174）：产品/平台/方向后端不支持改，只读展示 */}
+      <Dialog open={!!editingTrade} onOpenChange={(open) => !open && setEditingTrade(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑交易</DialogTitle>
+            <DialogDescription>仅待确认交易可编辑，产品/平台/方向不可修改</DialogDescription>
+          </DialogHeader>
+          {editingTrade && (
+            <form onSubmit={handleEditSubmit}>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">产品</span>
+                    <span>
+                      {editingTrade.product_name || editingTrade.product_code}（{editingTrade.product_code}）
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">平台</span>
+                    <span>
+                      {editingTrade.platform_code
+                        ? `${platformNameMap.get(editingTrade.platform_code) ?? editingTrade.platform_code}（${editingTrade.platform_code}）`
+                        : "-"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">方向</span>
+                    <Badge variant="neutral">
+                      <span
+                        className="mr-1.5 h-1.5 w-1.5 rounded-full"
+                        style={{ background: TRADE_DIRECTION_COLORS[editingTrade.trade_type === "buy" ? "buy" : "sell"] }}
+                      />
+                      {editingTrade.trade_type === "buy" ? "买入" : "卖出"}
+                    </Badge>
+                  </div>
+                </div>
+                {editingTrade.trade_type === "buy" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_amount">金额（元）</Label>
+                    <Input
+                      id="edit_amount"
+                      type="number"
+                      step="0.01"
+                      value={editFormData.amount}
+                      onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_shares">份额</Label>
+                    <Input
+                      id="edit_shares"
+                      type="number"
+                      step="0.01"
+                      value={editFormData.shares}
+                      onChange={(e) => setEditFormData({ ...editFormData, shares: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="edit_price">价格</Label>
+                  <Input
+                    id="edit_price"
+                    type="number"
+                    step="0.0001"
+                    value={editFormData.price}
+                    onChange={(e) => setEditFormData({ ...editFormData, price: e.target.value })}
+                    placeholder="可选，确认时填写"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_fee">手续费（元）</Label>
+                  <Input
+                    id="edit_fee"
+                    type="number"
+                    step="0.01"
+                    value={editFormData.fee}
+                    onChange={(e) => setEditFormData({ ...editFormData, fee: e.target.value })}
+                    placeholder="默认 0"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_trade_date">交易日期</Label>
+                  <DatePicker
+                    date={parseDateOnly(editFormData.trade_date)}
+                    onSelect={(date) => {
+                      setEditFormData({ ...editFormData, trade_date: toDateOnly(date) });
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_notes">备注</Label>
+                  <Input
+                    id="edit_notes"
+                    value={editFormData.notes}
+                    onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={updateTrade.isPending}>
+                  {updateTrade.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  保存修改
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!confirmState} onOpenChange={(open) => !open && setConfirmState(null)}>
         <AlertDialogContent>
