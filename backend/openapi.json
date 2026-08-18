@@ -11622,6 +11622,17 @@
               }
             ],
             "title": "Updated At"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
           }
         },
         "type": "object",

@@ -88,9 +88,13 @@ export function useUpdateTrade(id: number) {
 
   return useMutation({
     mutationFn: (data: TradeUpdate) => tradeApi.update(id, data),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: [TRADE_QUERY_KEY, id] });
       queryClient.invalidateQueries({ queryKey: [TRADE_QUERY_KEY, "list"] });
+      // 改金额/日期后可用现金可能变化，与 create/confirm 对齐失效持仓缓存（#174）
+      queryClient.invalidateQueries({
+        queryKey: ["positions", data.portfolio_code],
+      });
       addToast({
         type: "success",
         title: "更新成功",
@@ -198,11 +202,24 @@ export function useUnconfirmTrade() {
 // 删除交易 Hook
 export function useDeleteTrade() {
   const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
 
   return useMutation({
     mutationFn: (id: number) => tradeApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [TRADE_QUERY_KEY, "list"] });
+      addToast({
+        type: "success",
+        title: "删除成功",
+        message: "交易及其配对记录已删除",
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "删除失败",
+        message: getErrorMessage(error, "操作失败，请重试"),
+      });
     },
   });
 }
