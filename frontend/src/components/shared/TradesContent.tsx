@@ -88,7 +88,7 @@ const CONFIRM_TEXT: Record<ConfirmState extends infer S ? S extends { action: st
   confirm: { title: "确认交易", desc: "确定要确认该交易吗？" },
   cancel: { title: "取消交易", desc: "确定要取消该交易吗？" },
   unconfirm: { title: "取消确认", desc: "取消后可以修改或删除。是否继续？" },
-  delete: { title: "删除交易", desc: "删除后将影响后续快照数据，建议先取消确认再删除。是否继续？" },
+  delete: { title: "删除交易", desc: "删除将同时删除配对的现金记录，且不可恢复。是否继续？" },
 };
 
 /** 默认交易日期区间 = 快捷项「近1年」（#126 决策⑤，区间语义与 DateRangePicker 快捷项一致） */
@@ -411,6 +411,8 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
         </Badge>
       </TableCell>
       <TableCell className="text-right">
+        {/* 操作按钮对齐后端允许矩阵（#176）：pending=确认/删除（场内无取消，
+            与后端 cancel_trade 的 CANNOT_CANCEL_EXCHANGE 一致）；confirmed=取消确认/修改引导，无删除 */}
         {trade.status === "pending" && (
           <>
             <Button
@@ -418,16 +420,29 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
               size="sm"
               onClick={() => setConfirmState({ action: "confirm", id: trade.id })}
               disabled={confirmTrade.isPending}
+              title="确认"
             >
               <CheckCircle className="h-4 w-4" />
             </Button>
+            {trade.market !== "CN_EXCHANGE" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmState({ action: "cancel", id: trade.id })}
+                disabled={cancelTrade.isPending}
+                title="取消"
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setConfirmState({ action: "cancel", id: trade.id })}
-              disabled={cancelTrade.isPending}
+              onClick={() => setConfirmState({ action: "delete", id: trade.id })}
+              disabled={deleteTradeMutation.isPending}
+              title="删除"
             >
-              <XCircle className="h-4 w-4" />
+              <Trash2 className="h-4 w-4" />
             </Button>
           </>
         )}
@@ -443,14 +458,6 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setEditHint(true)} title="修改">
               <Pencil className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setConfirmState({ action: "delete", id: trade.id })}
-              title="删除"
-            >
-              <Trash2 className="h-4 w-4" />
             </Button>
           </>
         )}

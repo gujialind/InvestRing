@@ -198,11 +198,24 @@ export function useUnconfirmTrade() {
 // 删除交易 Hook
 export function useDeleteTrade() {
   const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
 
   return useMutation({
     mutationFn: (id: number) => tradeApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [TRADE_QUERY_KEY, "list"] });
+      addToast({
+        type: "success",
+        title: "删除成功",
+        message: "交易及其配对记录已删除",
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "删除失败",
+        message: getErrorMessage(error, "操作失败，请重试"),
+      });
     },
   });
 }
