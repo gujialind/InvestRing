@@ -56,7 +56,7 @@ class PositionResponse(PositionBase):
     segment_code: Optional[str] = None
     segment_name: Optional[str] = None
     # daily_profit 为当日收益（首个快照日 / IN_TRANSIT 在途行 → None）；
-    # is_qdii 来自 product 表（QDII 按 T-1 净值估值，前端提示日收益滞后一天）
+    # is_qdii 来自 product 表（场外 QDII 按 T-1 净值估值，前端提示日收益滞后一天；场内 QDII 取当日收盘价）
     daily_profit: Optional[float] = None
     is_qdii: Optional[bool] = None
     # platform_name 来自 platform 表（批量 enrich，防 N+1，issue #106）
