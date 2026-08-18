@@ -289,6 +289,11 @@ def unconfirm_single_subscription(
         Trade.transfer_group == f"sub_{subscription.id}"
     ).delete(synchronize_session=False)
 
+    # 生产 session 为 autoflush=False（app/database.py）：上面的 status/confirm_date
+    # 回退仍在 ORM 内存态，下面的 min 聚合直接走 SQL 会把本条仍算作 confirmed
+    # （级联循环中前序兄弟记录同理），导致 started_at 重算脏读——查询前显式 flush。
+    db.flush()
+
     # started_at 重算（issue #180）：started_at = 现存 confirmed 申购的最小
     # confirm_date（到账事实），无则 NULL。只查申购即可：「无 confirmed 申购 ⟹
     # 无 confirmed 赎回」（赎回需快照→持仓→申购，快照保护阻断反向删除）。

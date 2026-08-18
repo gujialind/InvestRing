@@ -729,6 +729,37 @@ class TestStartedAtInvariant:
         p = test_db.query(Portfolio).filter(Portfolio.code == "SR_P3").first()
         assert p.status == "draft" and p.started_at is None
 
+    def test_unconfirm_recomputes_started_at_without_autoflush(self, test_db):
+        """回归：生产 session autoflush=False 时 started_at 重算不得脏读
+
+        生产 SessionLocal 配置 autoflush=False（app/database.py），而测试会话默认
+        autoflush=True 会掩盖「status=pending 未落库、min 聚合把本条仍算作
+        confirmed」的脏读。本用例用同连接上的 autoflush=False 会话直连 service，
+        模拟生产行为。
+        """
+        from sqlalchemy.orm import sessionmaker
+        from app.models.portfolio import Portfolio
+        from app.models.subscription import Subscription
+        from app.services.subscription_service import unconfirm_single_subscription
+        create_portfolio(test_db, code="SR_P5", status="active")
+        create_investor(test_db, code="SR_I5")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 2), is_open=True)
+        s1 = _confirmed_sub_with_cash_leg(
+            test_db, "SR_P5", "SR_I5", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
+        test_db.commit()
+
+        NoAutoflush = sessionmaker(
+            bind=test_db.get_bind(), autoflush=False, expire_on_commit=False)
+        db2 = NoAutoflush()
+        try:
+            sub = db2.query(Subscription).filter(Subscription.id == s1.id).first()
+            unconfirm_single_subscription(db2, sub, check_snapshot=False)
+            p = db2.query(Portfolio).filter(Portfolio.code == "SR_P5").first()
+            assert p.started_at is None and p.status == "draft"
+        finally:
+            db2.close()
+
     def test_closed_not_reverted_by_cascade_unconfirm(self, test_db):
         """closed 组合经级联回退（check_snapshot=False）至零确认时保持 closed"""
         from app.models.portfolio import Portfolio
@@ -859,9 +890,9 @@ class TestSnapshotHistoryGapGuard:
         assert exc_info.value.code == "SNAPSHOT_REQUIRES_RECALCULATE"
 
     def test_generate_at_earliest_confirm_date_allowed(self, test_db):
-        """目标日即最早到账日的真正首次生成不受守卫影响"""
+        """目标日即最早到账日的真正首次生成不受守卫影响（须真实生成成功）"""
+        from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
         from app.services.snapshot_service import generate_daily_snapshots
-        from app.services.exceptions import BusinessError
         create_portfolio(test_db, code="SG_P2", status="active")
         create_investor(test_db, code="SG_I2")
         ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
@@ -869,10 +900,14 @@ class TestSnapshotHistoryGapGuard:
         _confirmed_sub_with_cash_leg(
             test_db, "SG_P2", "SG_I2", 10000.0, date(2025, 9, 1), date(2025, 9, 2))
 
-        try:
-            generate_daily_snapshots(test_db, "SG_P2", date(2025, 9, 2))
-        except BusinessError as e:
-            assert e.code != "SNAPSHOT_REQUIRES_RECALCULATE"
+        # 不捕获异常：任何 BusinessError 都直接使测试失败
+        generate_daily_snapshots(test_db, "SG_P2", date(2025, 9, 2))
+
+        snap = test_db.query(PortfolioValueSnapshot).filter(
+            PortfolioValueSnapshot.portfolio_code == "SG_P2",
+            PortfolioValueSnapshot.snapshot_date == date(2025, 9, 2),
+        ).first()
+        assert snap is not None
 
     def test_recalculate_captures_history_cash(self, test_db):
         """recalculate 从最早 confirm_date 逐日重建，首张快照含历史 CASH 到账"""
