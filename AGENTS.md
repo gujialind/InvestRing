@@ -88,7 +88,7 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 
 ### 2.4 净值·成本·市值
 
-* **初始净值固定 1.0000**：首次申购确认时净值 = 1.0000，份额 = 金额（无需行情）。
+* **初始净值固定 1.0000**：首次申购确认时净值 = 1.0000，份额 = 金额（无需行情）。**首窗统一处理**（#179）：确认时申请日无快照且不存在 `confirm_date <= apply_date` 的 confirmed 申购（申购是现金唯一来源，故等价于申请日零持仓、净值结构性恒 1.0）时同样按 1.0000 计价，覆盖首日多平台/分笔申购；已有资金到账则必须有申请日快照，否则报 `NAV_NOT_AVAILABLE`（禁止回退旧净值/当前净值）。**乱序补录闸门**：申购确认日早于组合首笔到账日（`started_at`）拒绝 `CONFIRM_BEFORE_STARTED`（`confirm_date == started_at` 放行，同日多平台生命线），封死对首窗 1.0 定价的回溯污染；乱序单在 auto\_confirm 下记 `auto_confirm_failed`、需手动按序处理。
 * **净值稳定性**：申购/赎回/现金分红/份额拆分合并 → 净值不变；调仓 → 净值可能变化。
 * **市值** = Σ(场内份额 × 收盘价) + Σ(场外份额 × 净值) + Σ(非净值型资产金额)。非净值型资产金额即 `portfolio_position` 中 `cash_amount IS NOT NULL` 的行（含 CASH 与 IN\_TRANSIT 两类现金行），故 `total_value = Σ(fund market_value) + Σ(CASH cash_amount) + Σ(IN_TRANSIT cash_amount)`；`portfolio_value_snapshot.in_transit_total` 单独记录在途合计。
 * **净值** `unit_price = total_value / total_shares`（4 位小数）。
@@ -110,9 +110,12 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 
 ```
 draft ──首次申购确认──▶ active ──close──▶ closed ──reactivate──▶ active
+          ▲                        │
+          └─unconfirm 至零确认申购─┘
 ```
 
-* 创建时为 `draft`；首次申购确认后自动置 `active`（`started_at` 记录）。
+* 创建时为 `draft`；首次申购确认后自动置 `active`。
+* **`started_at` = 现存 confirmed 申购的最小 `confirm_date`**（#180，到账事实，与激活轮次正交）：确认时写入（条件为 `started_at is None`，reactivate 空组合后新首购不漏设）；unconfirm 时取最小值重算（非仅零确认时清空，避免 unconfirm 最早那笔后悬空）；close/reactivate 不触碰。重算后若无 confirmed 申购且 `status == active` 回退 `draft`（`closed` 不回退——用户意图态，级联删快照是数据修复副作用）。
 * 关闭前检查：存在 pending 申赎或 pending trade → `PENDING_TRANSACTIONS_EXIST`；已关闭再关 → `PORTFOLIO_ALREADY_CLOSED`；仅 `closed` 可 `reactivate`（否则 `PORTFOLIO_NOT_CLOSED`）。
 * 已关闭组合禁止申赎/调仓，但可查询历史。
 
@@ -121,7 +124,7 @@ draft ──首次申购确认──▶ active ──close──▶ closed ─�
 三者共用 `pending / confirmed / cancelled`，均支持 confirm / unconfirm / cancel：
 
 * **确认（confirm）**：申赎确认时计算份额/金额并生成配对 CASH trade；trade 确认时按 `product.confirm_days` 计算 `confirm_date`（可传参覆盖，用于补录），并取 T 日净值/收盘价；事件确认时从 `entitlement_date` 快照回写 `entitlement_shares` 并计算变动值。
-* **取消确认（unconfirm）**：回退至 pending。**快照保护**——若 `confirm_date`（trade/subscription）或 `ex_date`（event）及之后已有快照，拒绝并返回 `SNAPSHOT_DEPENDENCY`。申赎 unconfirm 会物理删除配对 CASH trade（`transfer_group="sub_{id}"`）。
+* **取消确认（unconfirm）**：回退至 pending。**快照保护**——若 `confirm_date`（trade/subscription）或 `ex_date`（event）及之后已有快照，拒绝并返回 `SNAPSHOT_DEPENDENCY`。申赎 unconfirm 会物理删除配对 CASH trade（`transfer_group="sub_{id}"`）。**负现金防护**（#180）：申购 unconfirm 前校验删除配对 CASH 腿后平台现金不为负（入金可能已被后续交易消耗），否则拒绝 `UNCONFIRM_WOULD_NEGATIVE_CASH`（拒绝而非级联回滚下游交易）。
 * **取消（cancel）**：仅 pending 可取消，置 `cancelled`。场内 trade 不可 cancel（`CANNOT_CANCEL_EXCHANGE`）。已 confirmed 的 trade/subscription 不可直接 PUT/DELETE（`CANNOT_MODIFY_CONFIRMED` / `CANNOT_DELETE_CONFIRMED`），须先 unconfirm。
 
 ### 3.3 transfer\_group 原子翻转
@@ -139,6 +142,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 * **删除快照**（`_delete_existing_snapshots`）自动级联回退：`confirm_date==D` 的申购退回 pending 并删除关联 CASH trade；`ex_date==D` 或 `entitlement_date==D` 的 confirmed 事件退回 pending；基金级父事件的子记录（`parent_event_id`）被物理删除。批量删除从最新日倒序、逐日 commit。
 * 遵循**快照连续原则**，不能仅删除中间的快照，删除某日的快照其后的快照也一并删除。
 * **重算**（`recalculate_snapshots`）为**单一事务**：删除任何快照前先对整区间做净值完整性预校验，失败直接拒绝、不删任何快照；随后逐交易日「删旧快照 → 级联回退 → 重建 → auto\_confirm」全程不 commit，任一日失败记录 error 并停止，由调用方按 errors 统一 rollback/commit——对外表现为「要么完整成功，要么无变化」。`auto_confirm_after_snapshot` 每日后自动重确认 `apply_date==D` 的申购、`confirm_date==D` 的 trade、`ex_date==D` 的事件，单笔失败仅记录为 `auto_confirm_failed`、不阻断当日流程。
+* **零快照 + 目标日前已有确认交易**（#180）：无任何快照但存在 `confirm_date < target_date` 的确认申赎/交易时，单日 `generate` 拒绝 `SNAPSHOT_REQUIRES_RECALCULATE`——增量窗口无前序快照时退化为仅目标日，早期到账会被静默漏掉（首快照「失忆」）；须用 `recalculate` 从最早 `confirm_date` 逐日重建。目标日即最早到账日的真正首次生成不受影响。
 
 ***
 

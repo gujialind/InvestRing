@@ -9,6 +9,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.subscription import Subscription
@@ -22,11 +23,20 @@ from app.services.trading_utils import (
     is_trading_day,
     get_latest_snapshot_date,
 )
-from app.services.position_service import calculate_investor_available_shares
+from app.services.position_service import (
+    calculate_investor_available_shares,
+    compute_cash_balance,
+)
 from app.services.exceptions import BusinessError, NotFoundError
 from app.utils.quantize import quantize_amount, quantize_shares
 
 logger = logging.getLogger(__name__)
+
+
+def _as_date(value):
+    """归一为 date：portfolio.started_at 是 DateTime 列但承载日期语义，
+    驱动读回类型不稳定（date/datetime），与 confirm_date 比较前先归一。"""
+    return value.date() if hasattr(value, "date") and callable(value.date) else value
 
 
 class NavNotAvailableError(BusinessError):
@@ -72,6 +82,7 @@ def confirm_single_subscription(
     Raises:
         InvalidStatusError: 状态不是 pending
         NavNotAvailableError: 申请日快照不存在
+        BusinessError: CONFIRM_BEFORE_STARTED——申购确认日早于组合首笔到账日（issue #179 硬闸门）
     """
     if subscription.status != "pending":
         raise InvalidStatusError("仅 pending 状态可确认")
@@ -86,6 +97,18 @@ def confirm_single_subscription(
         .first()
     )
 
+    # 2.5 乱序补录硬闸门（issue #179）：申购确认日不得早于组合首笔到账日。
+    # #180 不变量保证 started_at = 现存最小 confirm_date，闸门封死「后来者把
+    # 到账日插到已按 1.0 定价申购的申请日之前」的污染空间。
+    # confirm_date == started_at 放行（同日多平台申购生命线）；started_at 为空豁免。
+    if subscription.sub_type == "subscribe" and portfolio and portfolio.started_at:
+        if confirm_date < _as_date(portfolio.started_at):
+            raise BusinessError(
+                "CONFIRM_BEFORE_STARTED",
+                f"申购确认日 {confirm_date} 早于组合首笔到账日 {portfolio.started_at}，"
+                f"如需补录更早的申购，请先取消确认该首笔申购后依序重录",
+            )
+
     is_first = (
         db.query(Subscription)
         .filter(
@@ -97,23 +120,38 @@ def confirm_single_subscription(
         == 0
     )
 
-    # 3. 净值确定
-    if is_first:
-        nav = Decimal("1.0000")
+    # 3. 净值三级决策（issue #179）
+    snapshot = (
+        db.query(PortfolioValueSnapshot)
+        .filter(
+            PortfolioValueSnapshot.portfolio_code == subscription.portfolio_code,
+            PortfolioValueSnapshot.snapshot_date == subscription.apply_date,
+        )
+        .first()
+    )
+    if snapshot:
+        nav = Decimal(str(snapshot.unit_price))
     else:
-        snapshot = (
-            db.query(PortfolioValueSnapshot)
+        # 初始窗口例外：申购是组合现金的唯一来源（CASH trade 受 CASH_TRADE_FORBIDDEN
+        # 限制、现金转移只搬运存量、事件需先有持仓），故「不存在 confirm_date <=
+        # apply_date 的 confirmed 申购」⟺ 申请日零持仓 ⟺ 净值结构性恒为 1.0000。
+        # 动态计算，天然覆盖任意 confirm/unconfirm 顺序；赎回分支自然免疫
+        # （有可用份额必存在更早到账的申购，此查询必然命中）。
+        cash_arrived = (
+            db.query(Subscription.id)
             .filter(
-                PortfolioValueSnapshot.portfolio_code == subscription.portfolio_code,
-                PortfolioValueSnapshot.snapshot_date == subscription.apply_date,
+                Subscription.portfolio_code == subscription.portfolio_code,
+                Subscription.sub_type == "subscribe",
+                Subscription.status == "confirmed",
+                Subscription.confirm_date <= subscription.apply_date,
             )
             .first()
         )
-        if not snapshot:
+        if cash_arrived:
             raise NavNotAvailableError(
                 subscription.portfolio_code, subscription.apply_date
             )
-        nav = Decimal(str(snapshot.unit_price))
+        nav = Decimal("1.0000")
 
     # 4. 计算份额/金额
     if subscription.sub_type == "subscribe":
@@ -150,9 +188,13 @@ def confirm_single_subscription(
     )
     db.add(cash_trade)
 
-    # 6. 首次申购激活组合
+    # 6. 首次申购激活组合（激活轮次与 started_at 是两个正交概念，issue #180）
     if is_first and subscription.sub_type == "subscribe" and portfolio and portfolio.status == "draft":
         portfolio.status = "active"
+    # started_at = 现存最小 confirm_date（到账事实）：写入条件放宽为 started_at is
+    # None（reactivate 空组合后新首购不漏设）；闸门保证后续申购 confirm_date >=
+    # started_at，故首次写入的必然是最小值
+    if subscription.sub_type == "subscribe" and portfolio and portfolio.started_at is None:
         portfolio.started_at = confirm_date
 
     if auto_flush:
@@ -191,7 +233,8 @@ def unconfirm_single_subscription(
 
     Raises:
         InvalidStatusError: 状态不是 confirmed
-        BusinessError: 确认日及之后已有快照（SNAPSHOT_DEPENDENCY）
+        BusinessError: 确认日及之后已有快照（SNAPSHOT_DEPENDENCY）；
+            申购入金已被后续交易消耗（UNCONFIRM_WOULD_NEGATIVE_CASH，issue #180）
     """
     if subscription.status != "confirmed":
         raise InvalidStatusError("仅 confirmed 状态可取消确认")
@@ -213,6 +256,22 @@ def unconfirm_single_subscription(
                 f"请先删除 {subscription.confirm_date} 及之后的快照",
             )
 
+    # 负现金防护（issue #180 回滚链）：申购的 CASH buy 腿删除后，若该入金已被
+    # 后续交易消耗将使平台现金为负——拒绝而非级联回滚下游（不隐式破坏已确认
+    # 交易）。赎回的 CASH sell 腿只会加现金，无需校验。
+    # 位于任何回退赋值之前，避免抛错后残留脏 ORM 状态。
+    if subscription.sub_type == "subscribe":
+        as_of = max(date.today(), subscription.confirm_date)
+        balance = compute_cash_balance(
+            db, subscription.portfolio_code, subscription.platform_code, as_of
+        )
+        if balance - Decimal(str(subscription.amount)) < 0:
+            raise BusinessError(
+                "UNCONFIRM_WOULD_NEGATIVE_CASH",
+                f"取消确认将使平台 {subscription.platform_code} 现金为负"
+                f"（该笔入金已被后续交易消耗），请先取消依赖该现金的交易",
+            )
+
     subscription.status = "pending"
     # 重算期望确认日（申赎恒 T+1）而非置 None，保持 pending 记录 confirm_date 非空，
     # 避免快照校验 confirm_date <= target 因 SQL NULL 比较漏检（与 unconfirm_trade 对齐）
@@ -229,6 +288,29 @@ def unconfirm_single_subscription(
     db.query(Trade).filter(
         Trade.transfer_group == f"sub_{subscription.id}"
     ).delete(synchronize_session=False)
+
+    # started_at 重算（issue #180）：started_at = 现存 confirmed 申购的最小
+    # confirm_date（到账事实），无则 NULL。只查申购即可：「无 confirmed 申购 ⟹
+    # 无 confirmed 赎回」（赎回需快照→持仓→申购，快照保护阻断反向删除）。
+    # 状态回退仅 active→draft（closed 是用户意图态，级联删快照是数据修复副作用）。
+    portfolio = (
+        db.query(Portfolio)
+        .filter(Portfolio.code == subscription.portfolio_code)
+        .first()
+    )
+    if portfolio:
+        min_confirm = (
+            db.query(func.min(Subscription.confirm_date))
+            .filter(
+                Subscription.portfolio_code == subscription.portfolio_code,
+                Subscription.sub_type == "subscribe",
+                Subscription.status == "confirmed",
+            )
+            .scalar()
+        )
+        portfolio.started_at = min_confirm
+        if min_confirm is None and portfolio.status == "active":
+            portfolio.status = "draft"
 
     if auto_flush:
         db.flush()
