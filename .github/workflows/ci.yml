@@ -280,13 +280,22 @@ jobs:
       # 桌面 chromium + 移动 webkit（mobile 用 iPhone 13 描述符，
       # 见 playwright.config.ts 注释；PR #169 遗留的 webkit 307 取消问题
       # 已定位为 dev 竞态并修复，恢复真实 Safari 内核覆盖）。
-      # --with-deps 内部会 apt-get update，若首选镜像（azure.archive.ubuntu.com）
-      # 不可达会长时间重试卡死，故先单独 update 让 apt 完成镜像回退
-      - name: Install Playwright browsers
+      # 拆步 + 预置 apt-get update：--with-deps 内置 update 遇首选镜像
+      # （azure.archive.ubuntu.com）不可达时会长时间重试卡死；先单独
+      # update 让 apt 完成镜像回退，后续内置 update 全 Hit 很快。
+      # timeout-minutes 兼作快速失败护栏（正常 ≤5 分钟）。
+      - name: Update apt index
+        run: sudo apt-get update
+
+      - name: Install Playwright chromium
         working-directory: frontend
-        run: |
-          sudo apt-get update
-          npx playwright install --with-deps chromium webkit
+        timeout-minutes: 15
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright webkit
+        working-directory: frontend
+        timeout-minutes: 15
+        run: npx playwright install --with-deps webkit
 
       - name: Run Playwright tests
         working-directory: frontend
