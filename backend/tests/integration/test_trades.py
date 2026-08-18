@@ -12,6 +12,7 @@ from tests.factories import (
 )
 from app.models.trade import Trade
 from app.models.portfolio import Portfolio
+from app.schemas.trade import TradeResponse
 
 
 class TestBuyTrade:
@@ -1267,6 +1268,37 @@ class TestListTradeProductName:
         assert name_by_leg[("ETF_PN", "buy")] == "测试ETF产品"
         assert name_by_leg[("CASH", "sell")] == "现金类资产"
         assert name_by_leg[("CASH", "buy")] == "现金类资产"
+        # 字段完整性（issue #183）：挂 response_model 后字段过滤以 TradeResponse
+        # 为准，断言实际响应键与 schema 声明一一对应、无字段丢失
+        assert set(data["items"][0].keys()) == set(TradeResponse.model_fields.keys())
+
+
+class TestTradesOpenApiContract:
+    """openapi 契约守护（issue #183）：GET /api/trades 分页响应结构化"""
+
+    def test_trades_list_openapi_references_paginated_schema(self, client):
+        """openapi.json 中 /api/trades GET 200 应引用 PaginatedTradeResponse，
+        且 items 元素指向 TradeResponse（含 product_name），而非空 schema。"""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        spec = resp.json()
+
+        get_op = spec["paths"]["/api/trades"]["get"]
+        schema_ref = get_op["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema_ref == {"$ref": "#/components/schemas/PaginatedTradeResponse"}
+
+        schemas = spec["components"]["schemas"]
+        paginated = schemas["PaginatedTradeResponse"]
+        assert set(paginated["required"]) == {"items", "total", "page", "page_size"}
+        assert set(paginated["properties"].keys()) == {
+            "items", "total", "page", "page_size",
+        }
+        assert paginated["properties"]["items"]["items"] == {
+            "$ref": "#/components/schemas/TradeResponse"
+        }
+
+        trade_props = schemas["TradeResponse"]["properties"]
+        assert "product_name" in trade_props  # 防止误删读侧派生字段声明
 
 
 class TestUpdateTradeValidation:
