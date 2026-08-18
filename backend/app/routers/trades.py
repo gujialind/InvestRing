@@ -17,19 +17,14 @@ from app.dependencies import get_current_user, get_current_admin
 from app.services.trade_service import (
     confirm_single_trade,
     calculate_confirm_preview,
-    sync_transfer_group,
     create_trade as create_trade_service,
+    update_trade as update_trade_service,
     cancel_trade as cancel_trade_service,
     unconfirm_trade as unconfirm_trade_service,
     list_trades,
 )
-from app.services.trading_utils import get_next_trading_day
-from app.utils.quantize import quantize_amount
 
 router = APIRouter()
-
-# PUT 直改路径中的金额字段：用户输入统一量化到 2 位（issue #94）
-_AMOUNT_FIELDS = {"amount", "actual_amount", "fee"}
 
 
 @router.get("")
@@ -66,8 +61,26 @@ def get_trades(
         page=page,
         page_size=page_size,
     )
+    # 读侧派生 product_name（#175）：批量查当页产品建 name_map（防 N+1，
+    # 同 positions.py 模式）；(code, market) 双键天然覆盖 LOF 与 CASH 虚拟产品
+    pairs = {(t.product_code, t.market) for t in items}
+    name_map = {}
+    if pairs:
+        codes = {c for c, _ in pairs}
+        name_map = {
+            (p.code, p.market): p.name
+            for p in db.query(Product.code, Product.market, Product.name)
+            .filter(Product.code.in_(codes))
+            .all()
+            if (p.code, p.market) in pairs
+        }
+    enriched = []
+    for t in items:
+        row = TradeResponse.model_validate(t).model_dump()
+        row["product_name"] = name_map.get((t.product_code, t.market))
+        enriched.append(row)
     return {
-        "items": items,
+        "items": enriched,
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -239,56 +252,7 @@ def update_trade(
     if not db_trade:
         raise HTTPException(status_code=404, detail="Trade not found")
 
-    if db_trade.status == "confirmed":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "error": "CANNOT_MODIFY_CONFIRMED",
-                "message": "已确认的交易不可直接修改，请先取消确认后再修改"
-            }
-        )
-
-    update_data = trade.dict(exclude_unset=True)
-    # 记录是否改动与配对同步相关的字段（status/confirm_date 不开放直改，见 TradeUpdate）
-    sync_fields = {"trade_date"}
-    needs_sync = bool(update_data.keys() & sync_fields)
-
-    for field, value in update_data.items():
-        # 金额字段量化到 2 位，防止直改路径写入 4 位金额（issue #94）
-        if field in _AMOUNT_FIELDS and value is not None:
-            value = quantize_amount(value)
-        setattr(db_trade, field, value)
-
-    # trade_date 变更时按产品 confirm_days 联动重算 confirm_date，避免确认日错位
-    if "trade_date" in update_data:
-        product = db.query(Product).filter(
-            Product.code == db_trade.product_code, Product.market == db_trade.market
-        ).first()
-        db_trade.confirm_date = get_next_trading_day(
-            db, db_trade.trade_date,
-            days=(product.confirm_days or 0) if product else 0,
-        )
-
-    # 若改动涉及配对同步相关字段，同步 transfer_group 配对 CASH 腿
-    if needs_sync and db_trade.transfer_group:
-        sync_transfer_group(db, db_trade, db_trade.status, db_trade.confirm_date)
-
-    # 金额字段变动时，同步配对 CASH 腿金额（#46）
-    # 此处 amount 指 trade.amount（交易金额），与 portfolio_position.cash_amount 无关
-    amount_fields = {"actual_amount", "amount", "fee", "shares", "price"}
-    if db_trade.transfer_group and db_trade.product_code != "CASH":
-        if update_data.keys() & amount_fields:
-            paired = db.query(Trade).filter(
-                Trade.transfer_group == db_trade.transfer_group,
-                Trade.id != db_trade.id,
-                Trade.product_code == "CASH",
-            ).first()
-            if paired:
-                # CASH 腿金额 = 基金腿 actual_amount（买入=支出，卖出=收入）
-                new_amount = db_trade.actual_amount or db_trade.amount
-                paired.amount = new_amount
-                paired.actual_amount = new_amount
-
+    update_trade_service(db, db_trade, trade.dict(exclude_unset=True))
     db.commit()
     db.refresh(db_trade)
     return db_trade

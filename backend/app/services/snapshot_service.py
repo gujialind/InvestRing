@@ -1514,9 +1514,9 @@ def auto_confirm_after_snapshot(
                 Product.market == trade.market,
             ).first()
             # 走公共确认逻辑：净值型产品按 T 日净值重算 shares/amount，
-            # 并原子同步 transfer_group 配对腿（#29）；重算历史时现金基线
-            # 尚未逐日重建，跳过买入确认的可用现金校验（#78）
-            confirm_single_trade(db, trade, product, skip_cash_check=True)
+            # 并原子同步 transfer_group 配对腿（#29）；重算历史时现金/份额基线
+            # 尚未逐日重建，跳过可用量校验（#78；#182 起含卖出份额校验）
+            confirm_single_trade(db, trade, product, skip_available_check=True)
             results.append({
                 "id": trade.id,
                 "type": "trade",
