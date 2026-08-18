@@ -4,6 +4,8 @@
 # issue #96：快照生成净值必须严格与快照日一致——普通基金严格取 target_date
 # 当日净值、QDII 严格取 T-1（前一交易日）净值；取不到即拒绝生成（MISSING_NAV），
 # 禁止静默回退到更早净值。
+# issue #178：场内 QDII 与普通场内产品一致取 target_date 当日收盘价（T+0），
+# 仅场外 QDII 保持 T-1 滞后口径（见 TestExchangeQdiiPricing）。
 #
 # 覆盖验收断言：
 # 1. 缺 target_date 当日净值 → generate 422 MISSING_NAV，指出缺失产品与日期
@@ -236,3 +238,144 @@ class TestSnapshotNavStrict:
         assert exc.value.code == "MISSING_NAV"
         assert "STRICTD.OF" in exc.value.message
         assert "2025-06-09" in exc.value.message
+
+
+class TestExchangeQdiiPricing:
+    """#178 场内 QDII 快照取价：与普通场内产品一致取 target_date 当日收盘价（T+0），
+    仅场外 QDII 保持 T-1 滞后口径"""
+
+    def test_exchange_qdii_uses_target_date_close_price(self, client, admin_headers, test_db):
+        """T1：场内 QDII 取当日收盘价；T-1 与当日双价并存时不用 T-1（防回退歧义）"""
+        port = create_portfolio(test_db, code="NAV_E1", status="active")
+        create_product(test_db, code="EQDIIA.SZ", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
+                       confirm_days=0, is_qdii=True)
+        _setup_fund_snapshot(test_db, port.code, "EQDIIA.SZ", "CN_EXCHANGE", D0)
+        # T-1（D0）与当日（NEXT_DAY）均有价且不同值，确认取当日
+        create_price_record(test_db, "EQDIIA.SZ", "CN_EXCHANGE", D0, 1.7)
+        create_price_record(test_db, "EQDIIA.SZ", "CN_EXCHANGE", NEXT_DAY, 1.5)
+
+        resp = client.post(
+            "/api/snapshots/generate",
+            json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, f"Response: {resp.status_code} {resp.json()}"
+
+        pos = test_db.query(PortfolioPosition).filter(
+            PortfolioPosition.portfolio_code == port.code,
+            PortfolioPosition.product_code == "EQDIIA.SZ",
+            PortfolioPosition.snapshot_date == NEXT_DAY,
+        ).first()
+        assert pos is not None
+        assert Decimal(str(pos.unit_price)) == Decimal("1.5")
+        assert Decimal(str(pos.market_value)) == Decimal("150.0")
+
+    def test_exchange_qdii_missing_target_date_price_rejected(self, client, admin_headers, test_db):
+        """T2：场内 QDII 缺当日收盘价（仅 T-1 有价）-> MISSING_NAV，message 标注 [T=当日]，不产生快照"""
+        port = create_portfolio(test_db, code="NAV_E2", status="active")
+        create_product(test_db, code="EQDIIB.SZ", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
+                       confirm_days=0, is_qdii=True)
+        _setup_fund_snapshot(test_db, port.code, "EQDIIB.SZ", "CN_EXCHANGE", D0)
+        # 仅 T-1（D0）有价，NEXT_DAY 当日缺失（旧逻辑按 QDII T-1 会放行）
+        create_price_record(test_db, "EQDIIB.SZ", "CN_EXCHANGE", D0, 1.8)
+        ids_before = _snapshot_ids(test_db, port.code)
+
+        resp = client.post(
+            "/api/snapshots/generate",
+            json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "MISSING_NAV"
+        assert "EQDIIB.SZ(CN_EXCHANGE)" in detail["message"]
+        assert "[T=2025-06-09]" in detail["message"]  # 指向当日而非 T-1
+
+        # 目标日无快照行、已有快照原样保留（复用 _snapshot_ids 断言模式）
+        assert test_db.query(PortfolioValueSnapshot).filter(
+            PortfolioValueSnapshot.portfolio_code == port.code,
+            PortfolioValueSnapshot.snapshot_date == NEXT_DAY,
+        ).first() is None
+        assert _snapshot_ids(test_db, port.code) == ids_before
+
+    def test_validation_check_matches_generation_rule(self, client, admin_headers, test_db):
+        """T3：completeness 校验与生成口径同步--场内 QDII 仅当日无价 -> failed 指向当日；补齐 -> passed"""
+        port = create_portfolio(test_db, code="NAV_E3", status="active")
+        create_product(test_db, code="EQDIIC.SZ", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK",
+                       confirm_days=0, is_qdii=True)
+        _setup_fund_snapshot(test_db, port.code, "EQDIIC.SZ", "CN_EXCHANGE", D0)
+        create_price_record(test_db, "EQDIIC.SZ", "CN_EXCHANGE", D0, 1.8)
+
+        def _price_check():
+            resp = client.get(
+                "/api/snapshots/validation",
+                params={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
+                headers=admin_headers,
+            )
+            assert resp.status_code == 200
+            checks = resp.json()["checks"]
+            return next(c for c in checks if c["check_type"] == "price_data")
+
+        # 当日无价：price_data failed 且 message 指向当日（旧逻辑按 T-1 会误报 passed）
+        check = _price_check()
+        assert check["status"] == "failed"
+        assert "EQDIIC.SZ(CN_EXCHANGE)" in check["message"]
+        assert "[T=2025-06-09]" in check["message"]
+
+        # 补齐当日价：passed
+        create_price_record(test_db, "EQDIIC.SZ", "CN_EXCHANGE", NEXT_DAY, 1.5)
+        check = _price_check()
+        assert check["status"] == "passed"
+
+    def test_mixed_portfolio_three_pricing_rules(self, client, admin_headers, test_db):
+        """T4：混合组合三口径互不串扰--场内 QDII=当日收盘、场外 QDII=T-1、普通场外=当日净值"""
+        port = create_portfolio(test_db, code="NAV_E4", status="active")
+        products = [
+            # (code, market, is_qdii, T-1 价, 当日价, 期望 unit_price)
+            ("EQDIID.SZ", "CN_EXCHANGE", True, 2.0, 2.5, Decimal("2.5")),
+            ("QDIID.OF", "CN_OTC", True, 3.0, 4.0, Decimal("3.0")),
+            ("PLAIND.OF", "CN_OTC", False, 1.0, 1.5, Decimal("1.5")),
+        ]
+        for code, market, is_qdii, _, _, _ in products:
+            create_product(
+                test_db, code=code, market=market,
+                product_type="ETF" if market == "CN_EXCHANGE" else "OEF",
+                asset_class_code="ASSET_STOCK",
+                confirm_days=0 if market == "CN_EXCHANGE" else 1,
+                is_qdii=is_qdii,
+            )
+            # D0 三表快照：三产品各 100 份（value/holding 仅一条，防唯一约束冲突）
+            create_position_snapshot(
+                test_db, port.code, code, market,
+                snapshot_date=D0, shares=100.0, unit_price=1.0,
+                cost_price=1.0, market_value=100.0, platform_code="MYCF",
+            )
+        create_value_snapshot(
+            test_db, port.code, D0, total_value=300.0, total_shares=300.0, unit_price=1.0,
+        )
+        create_investor_holding(test_db, port.code, "VIEWER", D0, shares=300.0)
+
+        for code, market, _, t1_price, t0_price, _ in products:
+            create_price_record(test_db, code, market, D0, t1_price)
+            create_price_record(test_db, code, market, NEXT_DAY, t0_price)
+
+        resp = client.post(
+            "/api/snapshots/generate",
+            json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, f"Response: {resp.status_code} {resp.json()}"
+
+        for code, market, _, _, _, expected in products:
+            pos = test_db.query(PortfolioPosition).filter(
+                PortfolioPosition.portfolio_code == port.code,
+                PortfolioPosition.product_code == code,
+                PortfolioPosition.snapshot_date == NEXT_DAY,
+            ).first()
+            assert pos is not None, f"{code} 快照行缺失"
+            assert Decimal(str(pos.unit_price)) == expected, (
+                f"{code}({market}) unit_price={pos.unit_price}，期望 {expected}"
+            )

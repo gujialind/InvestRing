@@ -1118,9 +1118,10 @@ def _generate_portfolio_position(
             # 现金/在途资产：市值即金额
             market_value = pos_data["cash_amount"]
         elif product:
-            # issue #96 严格净值匹配：普通基金=target_date 当日，QDII=T-1 交易日，禁止向前回退
-            if product.is_qdii:
-                # QDII：严格取前一交易日净值
+            # issue #96 严格净值匹配：普通基金=target_date 当日，场外 QDII=T-1 交易日，禁止向前回退
+            # issue #178：场内 QDII 与普通场内产品一致取当日收盘价，仅场外 QDII 滞后一天
+            if product.is_qdii and product.market == "CN_OTC":
+                # 场外 QDII：严格取前一交易日净值
                 nav_date = _prev_trading_day(db, target_date, 1)
                 nav_rule = "T-1(QDII)"
             else:
@@ -1690,7 +1691,7 @@ def _check_price_data_completeness(
     portfolio_code: str,
     target_date: date
 ) -> Dict[str, Any]:
-    """检查净值数据完整性（#96 严格匹配：普通基金=当日净值、QDII=T-1 交易日净值，禁止回退）"""
+    """检查净值数据完整性（#96 严格匹配：普通基金=当日净值、场外 QDII=T-1 交易日净值，禁止回退；#178 场内 QDII=当日收盘价）"""
     # 获取该组合的最新持仓产品
     latest_position_date = db.query(func.max(PortfolioPosition.snapshot_date)).filter(
         PortfolioPosition.portfolio_code == portfolio_code
@@ -1723,7 +1724,8 @@ def _check_price_data_completeness(
         if not product:
             continue
         
-        if product.is_qdii:
+        # issue #178：仅场外 QDII 取 T-1，场内 QDII 与生成口径一致走当日收盘价分支
+        if product.is_qdii and product.market == "CN_OTC":
             # QDII基金：检查T-1日净值
             prev_date = _prev_trading_day(db, target_date, 1)
             price = db.query(PriceRecord).filter(
@@ -1731,7 +1733,7 @@ def _check_price_data_completeness(
                 PriceRecord.market == market,
                 PriceRecord.price_date == prev_date
             ).first()
-            
+
             if not price:
                 qdii_missing.append(f"{product_code}({market}) [T-1={prev_date}]")
         else:
@@ -1741,13 +1743,13 @@ def _check_price_data_completeness(
                 PriceRecord.market == market,
                 PriceRecord.price_date == target_date
             ).first()
-            
+
             if not price:
                 missing_prices.append(f"{product_code}({market}) [T={target_date}]")
-    
+
     all_missing = []
     if missing_prices:
-        all_missing.append(f"普通基金缺少当日净值: {', '.join(missing_prices)}")
+        all_missing.append(f"缺少当日净值: {', '.join(missing_prices)}")
     if qdii_missing:
         all_missing.append(f"QDII基金缺少T-1日净值: {', '.join(qdii_missing)}")
     
