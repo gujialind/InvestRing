@@ -42,7 +42,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatNumber, formatNav, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
+import { formatCurrency, formatShares, formatNav, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TRADE_DIRECTION_COLORS } from "@/lib/colors";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo, Filter } from "lucide-react";
@@ -200,6 +200,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     shares: "",
     amount: "",
     price: "",
+    fee: "",
     trade_date: toDateOnly(new Date()),
   });
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
@@ -210,7 +211,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
 
   const resetTradeForm = () => {
     setIsDialogOpen(false);
-    setFormData({ product_code: "", market: "", platform_code: "", cash_platform_code: "", shares: "", amount: "", price: "", trade_date: toDateOnly(new Date()) });
+    setFormData({ product_code: "", market: "", platform_code: "", cash_platform_code: "", shares: "", amount: "", price: "", fee: "", trade_date: toDateOnly(new Date()) });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -224,6 +225,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
       trade_type: tradeType,
       trade_date: formData.trade_date,
       price: formData.price ? parseFloat(formData.price) : undefined,
+      fee: formData.fee ? parseFloat(formData.fee) : 0,
       ...(tradeType === "buy"
         ? { amount: parseFloat(formData.amount) }
         : { shares: parseFloat(formData.shares) }),
@@ -375,8 +377,16 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           {trade.trade_type === "buy" ? "买入" : "卖出"}
         </Badge>
       </TableCell>
+      {/* 金额=净额 amount（#173 口径：买入 金额+手续费=实扣、卖出 金额−手续费=实到）；
+          truthy 判断使 pending 卖出（amount≈0/fee、确认后才回填）显示 "-" */}
       <TableCell className="text-right">
-        {trade.amount ? formatCurrency(trade.amount) : formatNumber(trade.shares || 0)}
+        {trade.amount ? formatCurrency(trade.amount) : "-"}
+      </TableCell>
+      <TableCell className="text-right">
+        {trade.shares ? formatShares(trade.shares) : "-"}
+      </TableCell>
+      <TableCell className="text-right">
+        {trade.fee ? formatCurrency(trade.fee) : "-"}
       </TableCell>
       <TableCell className="text-right">{formatNav(trade.price)}</TableCell>
       <TableCell>{trade.trade_date}</TableCell>
@@ -470,6 +480,9 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
             {formatCurrency(sub.amount ?? 0)}
           </span>
         </TableCell>
+        {/* 份额/手续费列空占位，对齐主行 12 列（#173） */}
+        <TableCell />
+        <TableCell />
         <TableCell />
         <TableCell />
         <TableCell />
@@ -634,6 +647,17 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="fee">手续费（元）</Label>
+                  <Input
+                    id="fee"
+                    type="number"
+                    step="0.01"
+                    value={formData.fee}
+                    onChange={(e) => setFormData({ ...formData, fee: e.target.value })}
+                    placeholder="默认 0"
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="trade_date">交易日期</Label>
                   <DatePicker
                     date={parseDateOnly(formData.trade_date)}
@@ -692,7 +716,9 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                   <TableHead>市场</TableHead>
                   <TableHead>平台</TableHead>
                   <TableHead>类型</TableHead>
-                  <TableHead className="text-right">金额/份额</TableHead>
+                  <TableHead className="text-right">金额</TableHead>
+                  <TableHead className="text-right">份额</TableHead>
+                  <TableHead className="text-right">手续费</TableHead>
                   <TableHead className="text-right">价格</TableHead>
                   <TableHead>交易日期</TableHead>
                   <TableHead>确认日期</TableHead>
