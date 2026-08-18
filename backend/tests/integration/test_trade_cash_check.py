@@ -1,9 +1,9 @@
 # ============================================================================
 # 集成测试：交易确认现金校验与自然键防重 (test_trade_cash_check.py)
 # ============================================================================
-# 覆盖 issue #70/#78/#82：
+# 覆盖 issue #70/#78/#82/#182：
 # - 可用现金时点口径（流出锚定 trade_date）下的创建拦截（事故复刻）
-# - confirm_single_trade 买入确认现金校验（含 skip_cash_check 与自身腿加回）
+# - confirm_single_trade 买入现金/卖出份额可用量校验（含 skip_available_check 与自身加回）
 # - create_trade 自然键防重（DUPLICATE_TRADE / allow_duplicate）
 # ============================================================================
 
@@ -128,11 +128,46 @@ class TestConfirmCashCheck:
         assert Decimal(exc.value.details["available"]) == Decimal("2000")
         assert t1.status == "pending"
 
-    def test_skip_cash_check_allows_confirm(self, test_db):
-        """skip_cash_check=True（auto_confirm 场景）跳过校验可确认"""
+    def test_skip_available_check_allows_confirm(self, test_db):
+        """skip_available_check=True（auto_confirm 场景）跳过校验可确认"""
         t1 = self._seed_pending_buy_and_drain(test_db, "CF_P2", "CF_PL2")
         product = _get_product(test_db, "000300.OF", "CN_OTC")
-        confirm_single_trade(test_db, t1, product, skip_cash_check=True)
+        confirm_single_trade(test_db, t1, product, skip_available_check=True)
+        test_db.flush()
+        assert t1.status == "confirmed"
+
+    def test_auto_confirm_oversell_skipped_not_raised(self, test_db):
+        """auto_confirm 路径（skip_available_check=True）超卖不抛、照常确认
+        （#182：confirm 卖出份额校验不破坏 auto_confirm_failed 部分成功语义）"""
+        create_portfolio(test_db, code="CF_P6", status="active")
+        create_platform(test_db, code="CF_PL6")
+        create_value_snapshot(test_db, "CF_P6", SNAP,
+                              total_value=1500, total_shares=1000, unit_price=1.5)
+        create_position_snapshot(
+            test_db, "CF_P6", "510300.SH", "CN_EXCHANGE", SNAP,
+            shares=100, platform_code="CF_PL6",
+        )
+        # 份额 100 已被另一笔 pending 卖出占用，本笔 100 为超卖
+        # （两笔均经工厂直插，绕过创建侧校验以构造超卖存量）
+        create_trade(
+            test_db, "CF_P6", "510300.SH", "CN_EXCHANGE",
+            trade_type="sell", shares=100, price=1.5, status="pending",
+            trade_date=T, confirm_date=T, platform_code="CF_PL6",
+            transfer_group="test_oversell_other",
+        )
+        t1 = create_trade(
+            test_db, "CF_P6", "510300.SH", "CN_EXCHANGE",
+            trade_type="sell", shares=100, price=1.5, status="pending",
+            trade_date=T, confirm_date=T, platform_code="CF_PL6",
+            transfer_group="test_oversell_self",
+        )
+        product = _get_product(test_db, "510300.SH", "CN_EXCHANGE")
+        # 手动确认路径应被拦截
+        with pytest.raises(BusinessError) as exc:
+            confirm_single_trade(test_db, t1, product)
+        assert exc.value.code == "INSUFFICIENT_SHARES"
+        # auto_confirm 路径跳过校验，不抛异常
+        confirm_single_trade(test_db, t1, product, skip_available_check=True)
         test_db.flush()
         assert t1.status == "confirmed"
 
