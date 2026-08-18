@@ -27,6 +27,135 @@ from app.utils.quantize import quantize_amount, quantize_shares
 logger = logging.getLogger(__name__)
 
 
+def validate_trade_date(db: Session, portfolio_code: str, trade_date: date) -> None:
+    """交易日与快照日校验（#182 从 create_trade 抽取，创建/编辑共用）。
+
+    纯查询、不触碰 ORM，供「先校验后写入」路径复用：
+    - 非交易日 -> NON_TRADING_DAY（编辑路径废除静默滚交易日，D4）
+    - trade_date <= 最新快照日 -> DATE_BEFORE_SNAPSHOT
+    """
+    if not is_trading_day(db, trade_date):
+        raise BusinessError("NON_TRADING_DAY", "非交易日，请等待交易日再提交")
+    latest_snapshot_date = get_latest_snapshot_date(db, portfolio_code)
+    if latest_snapshot_date and trade_date <= latest_snapshot_date:
+        raise BusinessError(
+            "DATE_BEFORE_SNAPSHOT",
+            f"交易日必须晚于最新快照日（{latest_snapshot_date}）",
+        )
+
+
+def _pending_cash_sell_legs(db: Session, trade: Trade) -> list:
+    """查 trade 所在 transfer_group 的 pending CASH sell 腿（买入扣款腿，#91）"""
+    if not trade or not trade.transfer_group:
+        return []
+    return db.query(Trade).filter(
+        Trade.transfer_group == trade.transfer_group,
+        Trade.product_code == "CASH",
+        Trade.trade_type == "sell",
+        Trade.status == "pending",
+    ).all()
+
+
+def validate_buy_cash_with_addback(
+    db: Session,
+    portfolio_code: str,
+    new_cash_out,
+    *,
+    as_of: Optional[date] = None,
+    cash_platform: Optional[str] = None,
+    self_trade: Optional[Trade] = None,
+) -> Decimal:
+    """买入含费现金支出校验（#182 从 create_trade/confirm 抽取，创建/编辑/确认共用）。
+
+    - new_cash_out 量化 2 位后须 > 0（INVALID_AMOUNT）
+    - 扣款平台：self_trade 的配对 pending CASH sell 腿平台（#91 跨平台扣款，
+      同 confirm_single_trade 模式），无配对腿时回退 cash_platform
+      （创建场景 = cash_platform_code or 基金腿平台），再回退 self_trade 平台
+    - 可用现金 = calculate_available_cash(as_of) + 自身 pending CASH sell 腿
+      当前 DB 金额（编辑/确认场景该腿已被计提预留，加回防双重计数；创建加回 0）
+    - 超限抛 INSUFFICIENT_CASH（details 含 required/available/deficit）
+
+    Returns:
+        量化后的含费现金支出（2 位）
+    """
+    if new_cash_out is None:
+        raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
+    # 用户输入金额先量化到 2 位（四舍五入），再做精确比较（issue #94）
+    cash_out_d = quantize_amount(Decimal(str(new_cash_out)))
+    if cash_out_d <= 0:
+        raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
+
+    own_legs = _pending_cash_sell_legs(db, self_trade) if self_trade else []
+    check_platform = cash_platform
+    if own_legs:
+        check_platform = own_legs[0].platform_code
+    if check_platform is None and self_trade is not None:
+        check_platform = self_trade.platform_code
+
+    available = calculate_available_cash(
+        db, portfolio_code, check_platform, as_of_date=as_of
+    )
+    # 加回自身在途 CASH sell 腿：该腿已作为 pending sell 计提预留，
+    # 不加回会与新支出双重计数导致误拒
+    own_addback = sum(
+        (Decimal(str(leg.amount or 0)) for leg in own_legs), Decimal("0")
+    )
+    available_excl_own = available + own_addback
+    if cash_out_d > available_excl_own:
+        platform_label = check_platform if check_platform else "组合"
+        raise BusinessError(
+            "INSUFFICIENT_CASH",
+            f"平台 {platform_label} 可用现金不足"
+            f"（需 {cash_out_d}，可用 {available_excl_own}）",
+            details={
+                "deficit": str(cash_out_d - available_excl_own),
+                "required": str(cash_out_d),
+                "available": str(available_excl_own),
+            },
+        )
+    return cash_out_d
+
+
+def validate_sell_shares_with_addback(
+    db: Session,
+    portfolio_code: str,
+    product_code: str,
+    market: Optional[str],
+    new_shares,
+    *,
+    as_of: Optional[date] = None,
+    self_trade: Optional[Trade] = None,
+) -> Decimal:
+    """卖出份额校验（#182 从 create_trade 抽取，创建/编辑/确认共用）。
+
+    - new_shares 量化 2 位后须 > 0（INVALID_SHARES）
+    - 可用份额 = calculate_available_shares(as_of) + 自身 pending 卖出旧份额
+      （该函数扣减全部 pending 卖出含自身，加回防编辑/确认场景误拒；创建加回 0）
+    - 超限抛 INSUFFICIENT_SHARES
+
+    Returns:
+        量化后的卖出份额（2 位）
+    """
+    if new_shares is None:
+        raise BusinessError("INVALID_SHARES", "卖出份额必须大于0")
+    # 用户输入份额先量化到 2 位（四舍五入），再做精确比较（issue #94）
+    shares_d = quantize_shares(Decimal(str(new_shares)))
+    if shares_d <= 0:
+        raise BusinessError("INVALID_SHARES", "卖出份额必须大于0")
+    available_shares = calculate_available_shares(
+        db, portfolio_code, product_code, market, as_of_date=as_of
+    )
+    if (
+        self_trade is not None
+        and self_trade.status == "pending"
+        and self_trade.trade_type == "sell"
+    ):
+        available_shares += Decimal(str(self_trade.shares or 0))
+    if shares_d > available_shares:
+        raise BusinessError("INSUFFICIENT_SHARES", "卖出份额超过可用份额")
+    return shares_d
+
+
 def get_nav_for_trade_confirmation(
     db: Session, product_code: str, market: str, trade_date: date
 ) -> Optional[Decimal]:
@@ -317,7 +446,7 @@ def confirm_single_trade(
     *,
     confirm_date: Optional[date] = None,
     price: Optional[Decimal] = None,
-    skip_cash_check: bool = False,
+    skip_available_check: bool = False,
     sync_nav: bool = False,
 ) -> Trade:
     """
@@ -333,8 +462,10 @@ def confirm_single_trade(
     - 场外基金若传入 price 仅作一致性校验：须与 T 日净值相等，否则抛 PRICE_NAV_MISMATCH，
       手动价不覆盖净值（不传则直接取净值）
     - 场内基金不取净值，使用创建时录入的成交价（成交价录入时必填，见 trades.py 创建校验）
-    - 基金买入确认时按生效确认日口径校验可用现金（加回自身在途 CASH 腿防双重计数），
-      不足抛 INSUFFICIENT_CASH；skip_cash_check=True 跳过（auto_confirm 重算历史场景）
+    - 可用量校验（#70/#78 按生效确认日时点口径，#182 卖出份额对称补齐）：
+      买入按扣款平台校验可用现金、卖出校验可用份额（均加回自身 pending 旧值
+      防双重计数），不足抛 INSUFFICIENT_CASH / INSUFFICIENT_SHARES；
+      skip_available_check=True 跳过（auto_confirm 重算历史场景）
     - 置 status=confirmed 并原子同步配对 CASH 腿
 
     Args:
@@ -344,7 +475,7 @@ def confirm_single_trade(
         confirm_date: 覆盖确认日（补录场景）
         price: 手动价格；场外基金仅用于与 T 日净值一致性校验（不覆盖净值），
             场内基金作为覆盖成交价
-        skip_cash_check: 跳过买入确认时的可用现金校验（auto_confirm 专用）
+        skip_available_check: 跳过买入现金/卖出份额可用量校验（auto_confirm 专用）
         sync_nav: MISSING_NAV 时自动回填净值并重试一次（显式选择，会访问外部数据源）
 
     Returns:
@@ -371,52 +502,29 @@ def confirm_single_trade(
             db, trade, product, confirm_date=confirm_date, price=price
         )
 
-    # 基金买入确认时校验可用现金（#70/#78：按生效确认日时点口径）
-    if (
-        not skip_cash_check
-        and trade.trade_type == "buy"
-        and trade.product_code != "CASH"
-    ):
+    # 可用量校验（#70/#78：按生效确认日时点口径；#182 卖出份额对称补齐）
+    if not skip_available_check and trade.product_code != "CASH":
         effective_confirm_date = (
             confirm_date if confirm_date is not None else trade.confirm_date
         )
-        # #91：扣款平台 = 配对 CASH sell 腿的平台（跨平台扣款时与基金腿不同），
-        # 无配对腿时回退基金腿平台
-        cash_check_platform = trade.platform_code
-        own_legs = []
-        if trade.transfer_group:
-            own_legs = db.query(Trade).filter(
-                Trade.transfer_group == trade.transfer_group,
-                Trade.product_code == "CASH",
-                Trade.trade_type == "sell",
-                Trade.status == "pending",
-            ).all()
-            if own_legs:
-                cash_check_platform = own_legs[0].platform_code
-        available = calculate_available_cash(
-            db, trade.portfolio_code, cash_check_platform,
-            as_of_date=effective_confirm_date,
-        )
-        # 加回自身在途 CASH sell 腿：该腿已作为 pending sell 计提预留，
-        # 若不加回会与 paired_cash_amount 双重计数导致误拒
-        own_leg_amount = Decimal("0")
-        for leg in own_legs:
-            own_leg_amount += Decimal(str(leg.amount or 0))
-        available_excl_own = available + own_leg_amount
-        paired = preview["paired_cash_amount"]
-        if paired is not None:
-            paired_d = Decimal(str(paired))
-            if paired_d > available_excl_own:
-                raise BusinessError(
-                    "INSUFFICIENT_CASH",
-                    f"平台 {cash_check_platform} 可用现金不足"
-                    f"（需 {paired_d}，可用 {available_excl_own}）",
-                    details={
-                        "deficit": str(paired_d - available_excl_own),
-                        "required": str(paired_d),
-                        "available": str(available_excl_own),
-                    },
+        if trade.trade_type == "buy":
+            # 买入：按扣款平台校验可用现金（配对 pending CASH sell 腿平台 + 自身腿加回，
+            # 与创建/编辑共用同一实现；金额缺失的异常数据维持旧口径跳过）
+            if preview["paired_cash_amount"] is not None:
+                validate_buy_cash_with_addback(
+                    db, trade.portfolio_code,
+                    preview["paired_cash_amount"],
+                    as_of=effective_confirm_date,
+                    self_trade=trade,
                 )
+        elif trade.trade_type == "sell":
+            # 卖出：校验可用份额（自身 pending 卖出加回；#182 封超卖确认漏洞）
+            validate_sell_shares_with_addback(
+                db, trade.portfolio_code, trade.product_code, trade.market,
+                trade.shares,
+                as_of=effective_confirm_date,
+                self_trade=trade,
+            )
 
     # confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
     if confirm_date is not None:
@@ -473,22 +581,14 @@ def create_trade(
     attach_paired_cash_leg 按基金腿方向推导（买入=T日扣款，卖出=基金确认日）。
     不 commit，事务由调用方控制。返回基金腿 Trade。
     """
-    if not is_trading_day(db, trade_date):
-        raise BusinessError("NON_TRADING_DAY", "非交易日，请等待交易日再提交")
-
     portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
     if not portfolio:
         raise NotFoundError("NOT_FOUND", "组合不存在")
     if portfolio.status != "active":
         raise BusinessError("PORTFOLIO_NOT_ACTIVE", "组合未激活")
 
-    # 交易日必须晚于最新快照日
-    latest_snapshot_date = get_latest_snapshot_date(db, portfolio_code)
-    if latest_snapshot_date and trade_date <= latest_snapshot_date:
-        raise BusinessError(
-            "DATE_BEFORE_SNAPSHOT",
-            f"交易日必须晚于最新快照日（{latest_snapshot_date}）",
-        )
+    # 交易日 + 快照日校验（#182 起与 PUT 编辑路径共用同一实现）
+    validate_trade_date(db, portfolio_code, trade_date)
 
     # #83：market 省略时按产品唯一市场自动补全；LOF 一码多市场抛 MARKET_AMBIGUOUS
     product_code, market = resolve_product_market(db, product_code, market)
@@ -540,24 +640,13 @@ def create_trade(
     price_d = Decimal(str(price)) if price else None
 
     if trade_type == "buy":
-        # 买入现金口径：actual_amount 优先，否则 amount
+        # 买入现金口径：actual_amount 优先，否则 amount（含费现金支出）
         cash_out = actual_amount if actual_amount is not None else amount
-        if cash_out is None or Decimal(str(cash_out)) <= 0:
-            raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
-        # 用户输入金额先量化到 2 位（四舍五入），再做精确比较（issue #94）
-        cash_out_d = quantize_amount(Decimal(str(cash_out)))
-        if cash_out_d <= 0:
-            raise BusinessError("INVALID_AMOUNT", "买入金额必须大于0")
-        # #91：可用现金按扣款平台校验（缺省同基金腿平台）
-        cash_check_platform = cash_platform_code or platform_code
-        available_cash = calculate_available_cash(
-            db, portfolio_code, cash_check_platform, as_of_date=trade_date
+        # 正值 + 量化 + 按扣款平台校验可用现金（#182 起与编辑/确认共用同一实现）
+        cash_out_d = validate_buy_cash_with_addback(
+            db, portfolio_code, cash_out,
+            as_of=trade_date, cash_platform=cash_platform_code or platform_code,
         )
-        if cash_out_d > available_cash:
-            msg = "买入金额超过可用现金"
-            if cash_check_platform:
-                msg = f"平台 {cash_check_platform} 的可用现金不足"
-            raise BusinessError("INSUFFICIENT_CASH", msg)
         net_amount = cash_out_d - fee_d
         shares_d = quantize_shares(net_amount / price_d) if price_d else Decimal("0")
         actual_amount_final = cash_out_d
@@ -569,17 +658,10 @@ def create_trade(
             confirm_date=expected_confirm_date, status="pending", notes=notes,
         )
     elif trade_type == "sell":
-        if shares is None or Decimal(str(shares)) <= 0:
-            raise BusinessError("INVALID_SHARES", "卖出份额必须大于0")
-        # 用户输入份额先量化到 2 位（四舍五入），再做精确比较
-        shares_d = quantize_shares(Decimal(str(shares)))
-        if shares_d <= 0:
-            raise BusinessError("INVALID_SHARES", "卖出份额必须大于0")
-        available_shares = calculate_available_shares(
-            db, portfolio_code, product_code, market, as_of_date=trade_date
+        # 正值 + 量化 + 可用份额校验（#182 起与编辑/确认共用同一实现）
+        shares_d = validate_sell_shares_with_addback(
+            db, portfolio_code, product_code, market, shares, as_of=trade_date,
         )
-        if shares_d > available_shares:
-            raise BusinessError("INSUFFICIENT_SHARES", "卖出份额超过可用份额")
         # 用户输入金额先量化到 2 位（四舍五入）（issue #94）
         actual_amount_final = quantize_amount(actual_amount) if actual_amount else Decimal("0")
         net_amount = actual_amount_final + fee_d
@@ -632,6 +714,224 @@ def create_trade(
         cash_confirm_date=cash_confirm_date,
     )
     return new_trade
+
+
+def update_trade(db: Session, trade: Trade, update_data: dict) -> Trade:
+    """PUT 直改 pending 交易（#182：校验全部通过前零 setattr，不 commit）。
+
+    校验与联动与 create_trade 同口径（消除旁路实现漂移）：
+    - 状态拦截：confirmed -> CANNOT_MODIFY_CONFIRMED；cancelled -> INVALID_STATUS；
+      CASH 腿仅 notes 放行（CASH_TRADE_FORBIDDEN，防止配对腿金额被旁路改写）；
+      组合须 active（PORTFOLIO_NOT_ACTIVE）
+    - 金额语义（D1，与创建对齐）：buy 的 amount/actual_amount 均视为含费现金
+      支出 X（actual_amount 优先），联动 actual_amount=X、amount=X−fee、配对
+      CASH 腿=X；sell 的 amount/actual_amount 视为实际金额（到手净额），
+      联动 actual_amount=X、amount=X+fee、配对 CASH 腿=X
+    - 可用量校验（amount/actual_amount/shares/trade_date 实际变动时触发，
+      price/fee/notes-only 改动跳过）：trade_date 变动须为交易日且晚于最新
+      快照日（D4，废除静默滚交易日）；buy 按 as_of=新 trade_date 校验扣款
+      平台可用现金、sell 校验可用份额，均加回自身 pending 旧值
+    - 自然键防重（D5）：trade_date/金额（买）/份额（卖）变动时按创建同口径
+      比对，排除自身 id，无 allow_duplicate 逃生口（编辑撞车属误操作）
+    - trade_date 变动联动重算 confirm_date，并经 sync_transfer_group 同步
+      配对 CASH 腿（日期/状态/金额镜像）
+
+    Args:
+        db: 数据库会话
+        trade: 待修改交易（须为 pending）
+        update_data: PUT 请求体（exclude_unset 后的字典）
+
+    Returns:
+        修改后的 trade 对象（未 commit，事务由调用方控制）
+    """
+    # ---- 1. 状态拦截（纯校验，尚未写入任何字段）----
+    if trade.status == "confirmed":
+        raise BusinessError(
+            "CANNOT_MODIFY_CONFIRMED", "已确认的交易不可直接修改，请先取消确认后再修改"
+        )
+    if trade.status == "cancelled":
+        raise BusinessError("INVALID_STATUS", "已取消的交易不可修改")
+    if trade.product_code == "CASH" and set(update_data) - {"notes"}:
+        raise BusinessError(
+            "CASH_TRADE_FORBIDDEN",
+            "CASH 腿不可直接修改，请编辑对应基金腿（仅 notes 放行）",
+        )
+    portfolio = db.query(Portfolio).filter(
+        Portfolio.code == trade.portfolio_code
+    ).first()
+    if not portfolio:
+        raise NotFoundError("NOT_FOUND", "组合不存在")
+    if portfolio.status != "active":
+        raise BusinessError("PORTFOLIO_NOT_ACTIVE", "组合未激活")
+
+    if not update_data:
+        return trade
+
+    # ---- 2. 语义归一（D1）与量化：数值字段 None 视为未提供 ----
+    def _dec(key: str) -> Optional[Decimal]:
+        value = update_data.get(key)
+        return Decimal(str(value)) if value is not None else None
+
+    amount_input = _dec("actual_amount")  # 同创建口径：actual_amount 优先
+    if amount_input is None:
+        amount_input = _dec("amount")
+    shares_input = _dec("shares")
+    fee_input = _dec("fee")
+    price_input = _dec("price")
+    trade_date_input = update_data.get("trade_date")
+
+    old_fee = Decimal(str(trade.fee)) if trade.fee is not None else Decimal("0")
+    new_fee = quantize_amount(fee_input) if fee_input is not None else quantize_amount(old_fee)
+    new_trade_date = trade_date_input if trade_date_input is not None else trade.trade_date
+
+    date_changed = trade_date_input is not None and trade_date_input != trade.trade_date
+    amount_changed = amount_input is not None and (
+        trade.actual_amount is None
+        or quantize_amount(amount_input) != Decimal(str(trade.actual_amount))
+    )
+    shares_changed = shares_input is not None and (
+        trade.shares is None
+        or quantize_shares(shares_input) != Decimal(str(trade.shares))
+    )
+
+    # ---- 3. 校验（全部通过前零 setattr）----
+    if date_changed:
+        validate_trade_date(db, trade.portfolio_code, trade_date_input)
+
+    if trade.trade_type == "buy" and (amount_changed or shares_changed or date_changed):
+        # 待校验的含费现金支出：有输入用输入，否则沿用现有 actual_amount
+        # （amount 列为净额，仅在 actual_amount 缺失时加 fee 反推）
+        if amount_input is not None:
+            base_cash_out = quantize_amount(amount_input)
+        elif trade.actual_amount is not None:
+            base_cash_out = Decimal(str(trade.actual_amount))
+        elif trade.amount is not None:
+            base_cash_out = Decimal(str(trade.amount)) + old_fee
+        else:
+            base_cash_out = None
+        validate_buy_cash_with_addback(
+            db, trade.portfolio_code, base_cash_out,
+            as_of=new_trade_date, self_trade=trade,
+        )
+    elif trade.trade_type == "sell" and (amount_changed or shares_changed or date_changed):
+        base_shares = shares_input if shares_input is not None else trade.shares
+        validate_sell_shares_with_addback(
+            db, trade.portfolio_code, trade.product_code, trade.market,
+            base_shares, as_of=new_trade_date, self_trade=trade,
+        )
+
+    # 自然键防重（D5）：买比对含费支出（actual_amount）、卖比份额，排除自身
+    dup_relevant = date_changed or (
+        trade.trade_type == "buy" and amount_changed
+    ) or (
+        trade.trade_type == "sell" and shares_changed
+    )
+    if dup_relevant:
+        if trade.trade_type == "buy":
+            compare_value = (
+                quantize_amount(amount_input) if amount_input is not None
+                else Decimal(str(trade.actual_amount or 0))
+            )
+        else:
+            compare_value = (
+                quantize_shares(shares_input) if shares_input is not None
+                else Decimal(str(trade.shares or 0))
+            )
+        candidates = db.query(Trade).filter(
+            Trade.portfolio_code == trade.portfolio_code,
+            Trade.product_code == trade.product_code,
+            Trade.market == trade.market,
+            Trade.platform_code == trade.platform_code,
+            Trade.trade_type == trade.trade_type,
+            Trade.trade_date == new_trade_date,
+            Trade.status.in_(["pending", "confirmed"]),
+            Trade.id != trade.id,
+        ).all()
+        for c in candidates:
+            hit = False
+            if trade.trade_type == "buy":
+                hit = (
+                    c.actual_amount is not None
+                    and Decimal(str(c.actual_amount)) == compare_value
+                )
+            else:
+                hit = (
+                    c.shares is not None
+                    and Decimal(str(c.shares)) == compare_value
+                )
+            if hit:
+                raise BusinessError(
+                    "DUPLICATE_TRADE",
+                    f"存在相同参数的交易（id={c.id}），编辑后将与其他交易重复，请核对",
+                    details={"existing_trade_id": c.id},
+                )
+
+    # ---- 4. 写入与联动（校验全部通过，此时才 setattr）----
+    if "notes" in update_data:
+        trade.notes = update_data["notes"]
+    if price_input is not None:
+        trade.price = price_input
+    if fee_input is not None:
+        trade.fee = new_fee
+    if shares_input is not None:
+        trade.shares = quantize_shares(shares_input)
+
+    # D1 金额联动：buy actual_amount=X（含费支出）、amount=X−fee；
+    # sell actual_amount=X（实际金额）、amount=X+fee
+    if amount_input is not None or fee_input is not None:
+        if amount_input is not None:
+            x = quantize_amount(amount_input)
+        elif trade.actual_amount is not None:
+            x = Decimal(str(trade.actual_amount))
+        elif trade.amount is not None:
+            # actual_amount 缺失时按方向从 amount 列反推（净额+fee / 毛额−fee）
+            if trade.trade_type == "buy":
+                x = Decimal(str(trade.amount)) + old_fee
+            else:
+                x = Decimal(str(trade.amount)) - old_fee
+        else:
+            x = None
+        if x is not None:
+            trade.actual_amount = x
+            trade.amount = x - new_fee if trade.trade_type == "buy" else x + new_fee
+
+    # trade_date 变动：联动重算 confirm_date（输入必为交易日，不再吞非交易日）
+    if date_changed:
+        trade.trade_date = trade_date_input
+        product = db.query(Product).filter(
+            Product.code == trade.product_code, Product.market == trade.market
+        ).first()
+        trade.confirm_date = get_next_trading_day(
+            db, trade.trade_date,
+            days=(product.confirm_days or 0) if product else 0,
+        )
+
+    # trade_date 变动 -> 同步配对 CASH 腿（trade_date/状态/确认日回退/金额镜像）
+    if date_changed and trade.transfer_group:
+        sync_transfer_group(db, trade, trade.status, trade.confirm_date)
+
+    # 金额相关字段变动 -> 镜像配对 CASH 腿金额
+    # （CASH 腿金额恒等于基金腿 actual_amount，与 sync_transfer_group 镜像规则一致）
+    mirror_fields = {"amount", "actual_amount", "fee", "shares", "price"}
+    if (
+        trade.transfer_group
+        and trade.product_code != "CASH"
+        and set(update_data) & mirror_fields
+    ):
+        paired = db.query(Trade).filter(
+            Trade.transfer_group == trade.transfer_group,
+            Trade.id != trade.id,
+            Trade.product_code == "CASH",
+        ).first()
+        if paired:
+            mirror_amount = (
+                trade.actual_amount if trade.actual_amount is not None else trade.amount
+            )
+            if mirror_amount is not None:
+                paired.amount = mirror_amount
+                paired.actual_amount = mirror_amount
+
+    return trade
 
 
 def cancel_trade(db: Session, trade: Trade) -> Trade:

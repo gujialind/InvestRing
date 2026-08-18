@@ -255,10 +255,12 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   };
 
   // 打开编辑 Dialog 并按方向预填（#174）：买入预填金额、卖出预填份额
+  // 买入预填 actual_amount（#182 D1：提交与后端均为含费现金支出口径，预填净额会造成编辑即变值）
   const openEditDialog = (trade: Trade) => {
     setEditingTrade(trade);
     setEditFormData({
-      amount: trade.trade_type === "buy" ? String(trade.amount ?? "") : "",
+      amount:
+        trade.trade_type === "buy" ? String(trade.actual_amount ?? trade.amount ?? "") : "",
       shares: trade.trade_type === "sell" ? String(trade.shares ?? "") : "",
       price: trade.price != null ? String(trade.price) : "",
       fee: trade.fee ? String(trade.fee) : "",

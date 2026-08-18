@@ -658,6 +658,28 @@ ir trade cancel <ID>
 ir trade unconfirm <ID>
 ```
 
+#### `ir trade update`
+
+编辑交易（仅 `pending` 状态可改，`confirmed` 需先 `unconfirm`；`cancelled` 不可改）。
+
+```bash
+ir trade update <ID> [--shares <份额>] [--amount <金额>] [--price <价格>] \
+  [--fee <手续费>] [--actual-amount <实际金额>] [--trade-date YYYY-MM-DD] [--notes <备注>]
+```
+
+| 参数 | 说明 |
+|------|------|
+| `--amount` / `--actual-amount` | 含费实际金额，两参同义（`--actual-amount` 优先）：buy=含费现金支出（联动 `actual_amount=X`、`amount=X−fee`、CASH 腿=X）；sell=到手净额（联动 `actual_amount=X`、`amount=X+fee`、CASH 腿=X） |
+| `--shares` | 卖出份额（先量化到 2 位小数再校验，不超过可用份额） |
+| `--price` / `--fee` / `--notes` | 直改字段；仅改这些字段不触发可用量校验 |
+| `--trade-date` | 新交易日期（必须是交易日且晚于最新快照日，非交易日直接报错不静默滚交易日；联动重算 confirm_date 并同步 CASH 腿） |
+
+> **业务规则**（issue #182，与创建同口径校验）：
+> - 改金额/份额/日期时实时校验可用量：buy 按扣款平台可用现金、sell 按可用份额（均加回自身 pending 旧值），不足返回 `INSUFFICIENT_CASH` / `INSUFFICIENT_SHARES`
+> - 编辑成与另一笔交易撞自然键（同组合/产品/市场/平台/方向/交易日且金额或份额相同）返回 `DUPLICATE_TRADE`，无 `allow_duplicate` 逃生口
+> - CASH 腿（配对现金腿）仅允许改 `--notes`，其余字段返回 `CASH_TRADE_FORBIDDEN`
+> - 校验失败零部分写入，交易保持原值
+
 ---
 
 ### 4.7 `ir share-event` — 份额变动事件管理

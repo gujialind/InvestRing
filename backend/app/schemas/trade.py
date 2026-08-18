@@ -32,8 +32,10 @@ class TradeCreate(TradeBase):
 
 class TradeUpdate(BaseModel):
     # confirm_date 不开放直改：创建/unconfirm 按 confirm_days 自动维护，
-    # 改 trade_date 时由 router 联动重算；补录覆盖走 confirm 端点传参
+    # 改 trade_date 时由 service 联动重算；补录覆盖走 confirm 端点传参
     # status 不开放直改：状态流转走 confirm/cancel/unconfirm 端点
+    # amount 语义（#182 D1，与创建同口径）：buy/sell 输入均视为实际金额
+    # （buy=含费现金支出、sell=到手净额），actual_amount 优先，service 联动重算
     shares: Optional[float] = None
     amount: Optional[float] = None
     price: Optional[float] = None
