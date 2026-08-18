@@ -10,6 +10,7 @@ from app.schemas.trade import (
     TradeCreate,
     TradeUpdate,
     TradeResponse,
+    PaginatedTradeResponse,
     TradePreviewResult,
     TradePreviewResponse,
 )
@@ -32,7 +33,7 @@ router = APIRouter()
 _AMOUNT_FIELDS = {"amount", "actual_amount", "fee"}
 
 
-@router.get("")
+@router.get("", response_model=PaginatedTradeResponse)
 def get_trades(
     portfolio_code: Optional[str] = None,
     status: Optional[str] = None,
@@ -79,17 +80,15 @@ def get_trades(
             .all()
             if (p.code, p.market) in pairs
         }
-    enriched = []
-    for t in items:
-        row = TradeResponse.model_validate(t).model_dump()
-        row["product_name"] = name_map.get((t.product_code, t.market))
-        enriched.append(row)
-    return {
-        "items": enriched,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
+    enriched = [
+        TradeResponse.model_validate(t).model_copy(
+            update={"product_name": name_map.get((t.product_code, t.market))}
+        )
+        for t in items
+    ]
+    return PaginatedTradeResponse(
+        items=enriched, total=total, page=page, page_size=page_size
+    )
 
 
 @router.post("", response_model=TradeResponse)

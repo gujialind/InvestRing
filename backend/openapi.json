@@ -3489,7 +3489,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedTradeResponse"
+                }
               }
             }
           },
@@ -7635,6 +7637,38 @@
           "page_size"
         ],
         "title": "PaginatedTaskLogResponse"
+      },
+      "PaginatedTradeResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TradeResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "PaginatedTradeResponse",
+        "description": "交易列表分页响应（issue #183）。items 元素复用 TradeResponse：\nproduct_name 仅 list 端点填充，单对象端点恒为 None（见 TradeResponse 注释）。"
       },
       "PlatformCreate": {
         "properties": {
