@@ -522,7 +522,9 @@ ir sub confirm <ID> [--confirm-date YYYY-MM-DD] [--unit-price <净值>]
 > **业务规则**：
 > - 仅 `pending` 状态可确认
 > - **首次申购**：净值固定为 `1.0000`，无需提供 `--unit-price`，同时自动将组合从 `draft` 激活为 `active`
-> - **非首次申购/赎回**：必须提供 `--unit-price`
+> - **首窗申购**（issue #179）：申请日无快照且当日无任何已到账申购资金时同样按 `1.0000` 计价（覆盖首日多平台/分笔申购）；已有资金到账则需先生成申请日快照，否则报 `NAV_NOT_AVAILABLE`
+> - **乱序补录闸门**（issue #179）：确认日早于组合首笔到账日（`started_at`）报 `CONFIRM_BEFORE_STARTED`，需先 unconfirm 首笔申购后依序重录
+> - **非首次申购/赎回**：净值取申请日组合快照，快照未生成时报 `NAV_NOT_AVAILABLE`
 
 #### `ir sub cancel`
 
@@ -539,6 +541,10 @@ ir sub cancel <ID>
 ```bash
 ir sub unconfirm <ID>
 ```
+
+> - 确认日及之后已有快照时报 `SNAPSHOT_DEPENDENCY`，需先删除对应快照
+> - **负现金防护**（issue #180）：申购入金已被后续交易消耗时报 `UNCONFIRM_WOULD_NEGATIVE_CASH`，需先取消依赖该现金的交易
+> - **状态回退**（issue #180）：回退后组合 `started_at` 重算为现存最小确认日；无任何确认申购时组合回退 `draft`（`closed` 组合保持 `closed`）
 
 ---
 
@@ -965,6 +971,7 @@ ir snapshot generate --portfolio-code <组合> --target-date YYYY-MM-DD
 
 > - 净值严格匹配（issue #96）：普通基金严格取 target_date 当日净值，QDII 严格取 T-1（前一交易日）净值，禁止向前回退；任一持仓缺失即失败并返回 `MISSING_NAV`（错误信息列出缺失产品与所需日期），先用 `ir market sync-history <product_code> <market>` 回填净值后重试
 > - 生成失败不产生任何快照数据（目标日仍缺失，可修复数据后安全重试）
+> - **零快照防呆**（issue #180）：组合尚无任何快照且目标日之前已有确认交易时报 `SNAPSHOT_REQUIRES_RECALCULATE`（单日生成会漏掉早期到账记录），改用 `ir snapshot recalculate` 从最早确认日起逐日重建
 
 #### `ir snapshot recalculate`
 
