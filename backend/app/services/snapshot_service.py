@@ -141,6 +141,70 @@ def _compute_in_transit_amounts(
     return result
 
 
+def _validate_no_silent_history_gap(
+    db: Session, portfolio_code: str, target_date: date
+) -> None:
+    """零快照组合的单日生成守卫（issue #180）。
+
+    无前序快照时 `_generate_portfolio_position` 的 start_apply_date 退化为
+    target_date，只累加目标日当天交易；目标日之前已到账的确认交易会被静默
+    漏掉（首张快照「失忆」，现金/持仓凭空消失）。故零快照且存在
+    confirm_date < target_date 的确认申赎/交易时拒绝单日生成，必须用
+    recalculate 从最早 confirm_date 逐日重建（每天 start_apply_date = 当天，
+    历史到账在各自 confirm_date 当日被捕获）。目标日即最早到账日的真正
+    首次生成（confirm_date == target_date 不受影响）与无持仓跳过路径保持。
+    重算路径（check_continuity=False）从最早 confirm_date 起逐日重建，不经此守卫。
+    confirm_date 为 NULL 的异常数据回退按 apply_date/trade_date 判断，
+    与 `_check_pending_transactions` 的兜底口径对齐（防静默绕过守卫）。
+    """
+    has_snapshot = (
+        db.query(PortfolioValueSnapshot.id)
+        .filter(PortfolioValueSnapshot.portfolio_code == portfolio_code)
+        .first()
+    )
+    if has_snapshot:
+        return
+    earlier_sub = (
+        db.query(Subscription.id)
+        .filter(
+            Subscription.portfolio_code == portfolio_code,
+            Subscription.status == "confirmed",
+            or_(
+                Subscription.confirm_date < target_date,
+                and_(
+                    Subscription.confirm_date.is_(None),
+                    Subscription.apply_date < target_date,
+                ),
+            ),
+        )
+        .first()
+    )
+    earlier_trade = (
+        db.query(Trade.id)
+        .filter(
+            Trade.portfolio_code == portfolio_code,
+            Trade.status == "confirmed",
+            or_(
+                Trade.confirm_date < target_date,
+                and_(
+                    Trade.confirm_date.is_(None),
+                    Trade.trade_date < target_date,
+                ),
+            ),
+        )
+        .first()
+    )
+    if earlier_sub or earlier_trade:
+        raise BusinessError(
+            code="SNAPSHOT_REQUIRES_RECALCULATE",
+            message=(
+                f"组合在 {target_date} 之前存在已确认交易但尚无快照，"
+                f"单日生成会漏掉早期到账记录；"
+                f"请用 recalculate 从最早交易日逐日重建"
+            ),
+        )
+
+
 def generate_daily_snapshots(
     db: Session,
     portfolio_code: str,
@@ -172,6 +236,8 @@ def generate_daily_snapshots(
     _validate_trading_day(db, target_date)
     if check_continuity:
         _validate_snapshot_continuity(db, portfolio_code, target_date)
+        # 零快照 + 目标日前有已确认交易 → 拒绝单日生成（issue #180，防首快照失忆）
+        _validate_no_silent_history_gap(db, portfolio_code, target_date)
     
     if failed_checks := [
         v for v in validate_snapshot_dependencies(db, portfolio_code, target_date)
@@ -439,7 +505,7 @@ def catch_up_snapshots(
     if latest is None:
         raise BusinessError(
             code="NO_SNAPSHOT_BASELINE",
-            message="组合尚无快照基线，请先用 snapshot generate 生成首日快照",
+            message="组合尚无快照基线，请用 recalculate 从最早交易日逐日重建",
         )
 
     # 幂等：已追平（或 to_date 早于最新快照日）直接返回，零副作用
@@ -525,7 +591,7 @@ def generate_next_snapshot(
     if latest is None:
         raise BusinessError(
             code="NO_SNAPSHOT_BASELINE",
-            message="组合尚无快照基线，请先用 snapshot generate 生成首日快照",
+            message="组合尚无快照基线，请用 recalculate 从最早交易日逐日重建",
         )
 
     next_day = get_next_trading_day(db, latest, days=1)
@@ -1357,6 +1423,9 @@ def auto_confirm_after_snapshot(
     此时 snapshot_date 的快照已存在，NAV 可获取。
     单笔失败不影响整批，失败记录到结果中。
 
+    乱序补录的早期申购可能抛 CONFIRM_BEFORE_STARTED（issue #179 闸门），
+    被捕获为 auto_confirm_failed、不阻断整批，需手动按序处理。
+
     Args:
         db: 数据库会话
         portfolio_code: 组合代码
@@ -1445,9 +1514,9 @@ def auto_confirm_after_snapshot(
                 Product.market == trade.market,
             ).first()
             # 走公共确认逻辑：净值型产品按 T 日净值重算 shares/amount，
-            # 并原子同步 transfer_group 配对腿（#29）；重算历史时现金基线
-            # 尚未逐日重建，跳过买入确认的可用现金校验（#78）
-            confirm_single_trade(db, trade, product, skip_cash_check=True)
+            # 并原子同步 transfer_group 配对腿（#29）；重算历史时现金/份额基线
+            # 尚未逐日重建，跳过可用量校验（#78；#182 起含卖出份额校验）
+            confirm_single_trade(db, trade, product, skip_available_check=True)
             results.append({
                 "id": trade.id,
                 "type": "trade",

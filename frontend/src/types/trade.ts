@@ -18,6 +18,8 @@ export interface Trade {
   notes?: string;
   created_at?: string;
   updated_at?: string;
+  /** 读侧派生（#175）：仅 list 响应有值；create/get/update 恒为 undefined */
+  product_name?: string;
 }
 
 export interface TradeCreate {
@@ -43,6 +45,8 @@ export interface TradeCreate {
 // 不含 confirm_date/status（后端会静默丢弃）；改状态请走 confirm/unconfirm/cancel 端点
 export interface TradeUpdate {
   shares?: number;
+  // amount 语义（#182 D1，与创建同口径）：buy/sell 均为实际金额口径
+  // （buy=含费现金支出、sell=到手净额），与 actual_amount 同义、后者优先
   amount?: number;
   price?: number;
   fee?: number;

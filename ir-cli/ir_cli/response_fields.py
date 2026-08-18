@@ -68,7 +68,7 @@ RESPONSE_FIELDS: dict = {
     "trade": {
         "list": {
             "shape": "list",
-            "fields": "*portfolio_code:str,*product_code:str,*market:str?,*platform_code:str?,*trade_type:str,transfer_group:str?,*shares:num?,*amount:num?,*price:num?,fee:num,actual_amount:num?,*trade_date:date,*confirm_date:date?,*status:str,notes:str?,*id:int,created_at:datetime?,updated_at:datetime?"
+            "fields": "*portfolio_code:str,*product_code:str,*market:str?,*platform_code:str?,*trade_type:str,transfer_group:str?,*shares:num?,*amount:num?,*price:num?,fee:num,actual_amount:num?,*trade_date:date,*confirm_date:date?,*status:str,notes:str?,*id:int,created_at:datetime?,updated_at:datetime?,product_name:str?"
         }
     },
     "sub": {

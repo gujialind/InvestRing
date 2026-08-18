@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from datetime import date, datetime
 
 
@@ -32,8 +32,10 @@ class TradeCreate(TradeBase):
 
 class TradeUpdate(BaseModel):
     # confirm_date 不开放直改：创建/unconfirm 按 confirm_days 自动维护，
-    # 改 trade_date 时由 router 联动重算；补录覆盖走 confirm 端点传参
+    # 改 trade_date 时由 service 联动重算；补录覆盖走 confirm 端点传参
     # status 不开放直改：状态流转走 confirm/cancel/unconfirm 端点
+    # amount 语义（#182 D1，与创建同口径）：buy/sell 输入均视为实际金额
+    # （buy=含费现金支出、sell=到手净额），actual_amount 优先，service 联动重算
     shares: Optional[float] = None
     amount: Optional[float] = None
     price: Optional[float] = None
@@ -47,9 +49,21 @@ class TradeResponse(TradeBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # product_name 读侧派生（非 DB 列）：仅 list 端点批量 join 产品表填充，
+    # create/get/update/preview 响应恒为 None；同 positions 模式（#175）
+    product_name: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class PaginatedTradeResponse(BaseModel):
+    """交易列表分页响应（issue #183）。items 元素复用 TradeResponse：
+    product_name 仅 list 端点填充，单对象端点恒为 None（见 TradeResponse 注释）。"""
+    items: List[TradeResponse]
+    total: int
+    page: int
+    page_size: int
 
 
 class TradePreviewResult(BaseModel):
