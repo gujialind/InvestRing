@@ -56,4 +56,43 @@ warmup('预编译 E2E 涉及的路由', async ({ request }) => {
         .catch(() => {})
     )
   );
+
+  // 4. 组合详情子路由（动态段）：从 /portfolio 列表 HTML 提取首个组合 code，
+  //    预热 E2E 会 goto 的全部子路由（桌面 + 移动端各一份编译产物）。
+  //    不预热时并行测试中首个访问触发按需编译，webpack 广播重建会取消
+  //    其他客户端进行中的导航（同 PR #169 根因，#191 spec 曾因此批量失败）
+  const listHtml = await (
+    await request.get('http://localhost:3000/portfolio', {
+      headers: { cookie: `token=${token}` },
+    })
+  ).text();
+  const code = listHtml.match(/\/portfolio\/([A-Za-z0-9_-]+)/)?.[1];
+  if (code) {
+    const SUB_ROUTES = ['', '/snapshots', '/trades', '/subscriptions', '/share-change-events', '/positions'];
+    await Promise.all(
+      SUB_ROUTES.flatMap((sub) => {
+        const reqs = [
+          request
+            .get(`http://localhost:3000/portfolio/${code}${sub}`, {
+              headers: { cookie: `token=${token}` },
+            })
+            .catch(() => {}),
+        ];
+        // 移动端无 share-change-events 子路由（app/m/portfolio/[code]/ 下不存在）
+        if (sub !== '/share-change-events') {
+          reqs.push(
+            request
+              .get(`http://localhost:3000/m/portfolio/${code}${sub}`, {
+                headers: {
+                  cookie: `token=${token}`,
+                  'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile',
+                },
+              })
+              .catch(() => {})
+          );
+        }
+        return reqs;
+      })
+    );
+  }
 });
