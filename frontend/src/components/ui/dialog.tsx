@@ -40,7 +40,7 @@ const DialogContent = React.forwardRef<
   // 合并 forwardedRef 与本地 ref callback：把已挂载节点经 context 暴露给
   // 子树内的 Popover（见 DialogPortalContainerContext 注释）
   const [contentNode, setContentNode] = React.useState<HTMLElement | null>(null)
-  const setRefs = (node: HTMLElement | null) => {
+  const setRefs = (node: HTMLDivElement | null) => {
     setContentNode(node)
     if (typeof forwardedRef === "function") forwardedRef(node)
     else if (forwardedRef) forwardedRef.current = node
