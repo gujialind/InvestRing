@@ -549,6 +549,48 @@ def confirm_single_trade(
     return trade
 
 
+def _derive_sell_amounts(
+    shares_d: Decimal,
+    price_d: Optional[Decimal],
+    fee_d: Decimal,
+    input_actual: Optional[float],
+    market: str,
+) -> tuple[Decimal, Decimal]:
+    """卖出金额纯派生量（#190）：返回 (毛额 amount, 到手净额 actual_amount)。
+
+    创建（create_trade）与编辑（update_trade）共用，保证两路径口径一致：
+    - 有价格：毛额 = quantize(shares × price)、净额 = 毛额 − fee；
+      净额非正抛 INVALID_AMOUNT（fee 不小于毛额属录入错误）。
+      input_actual（amount/actual_amount 两参同义、调用方已择一传入）仅作对账：
+      场内（CN_EXCHANGE）差超 0.01 抛 AMOUNT_MISMATCH；场外传价只推导展示、
+      不强对账（参考价与预估净值天然有偏差，确认时 T 日净值重算覆盖兜底）。
+    - 无价格（场外未传价）：创建期占位（显式输入暂存否则 0），
+      毛额 = 净额 + fee，确认时按净值重算自愈。
+    """
+    if price_d is not None:
+        gross_amount = quantize_amount(shares_d * price_d)      # 毛额
+        actual_amount_final = gross_amount - fee_d              # 到手净额
+        if actual_amount_final <= 0:
+            raise BusinessError(
+                "INVALID_AMOUNT",
+                f"手续费 {fee_d} 不小于卖出毛额 {gross_amount}，到手净额非正，"
+                f"请核对 fee/price",
+            )
+        if input_actual is not None and market == "CN_EXCHANGE":
+            input_actual_d = quantize_amount(input_actual)
+            if abs(input_actual_d - actual_amount_final) > Decimal("0.01"):
+                raise BusinessError(
+                    "AMOUNT_MISMATCH",
+                    f"到账金额 {input_actual_d} 与 shares×price−fee="
+                    f"{actual_amount_final} 不一致，请核对份额/价格/手续费",
+                )
+        return gross_amount, actual_amount_final
+    actual_amount_final = (
+        quantize_amount(input_actual) if input_actual is not None else Decimal("0")
+    )
+    return actual_amount_final + fee_d, actual_amount_final
+
+
 def create_trade(
     db: Session,
     *,
@@ -631,11 +673,17 @@ def create_trade(
             "PLATFORM_NOT_FOUND", f"现金平台 {cash_platform_code} 不存在"
         )
 
-    # 场内交易必须提供有效价格（实时撮合价，不能用收盘价替代）
-    if product.market == "CN_EXCHANGE" and (price is None or Decimal(str(price)) <= 0):
+    # 场内交易必须提供有效价格（实时撮合价，不能用收盘价替代）；
+    # 任意市场显式传价均须为正数（卖出传价参与金额推导，负价会污染推导结果）
+    if product.market == "CN_EXCHANGE" and price is None:
         raise BusinessError(
             "MISSING_OR_INVALID_PRICE",
             "场内交易必须提供有效的正数交易价格（--price）",
+        )
+    if price is not None and Decimal(str(price)) <= 0:
+        raise BusinessError(
+            "MISSING_OR_INVALID_PRICE",
+            "交易价格必须为正数（--price）",
         )
 
     confirm_days = product.confirm_days or 0
@@ -667,38 +715,16 @@ def create_trade(
         shares_d = validate_sell_shares_with_addback(
             db, portfolio_code, product_code, market, shares, as_of=trade_date,
         )
-        # 卖出金额为纯派生量（#190）：毛额 amount = shares × price，
-        # 到手净额 actual_amount = amount − fee。
-        # 输入层 amount / actual_amount 两参同义，均指「实际金额（到手净额）」，
-        # actual_amount 优先（与 buy 分支、PUT 侧对齐），仅作对账（一致性校验），
-        # 落库恒用推导值，保证四字段自洽（金额即 shares/price/fee 的「校验和」）。
+        # 卖出金额为纯派生量（#190）：推导 + 对账口径单一实现于 _derive_sell_amounts
+        # （与 PUT 侧共用）；输入层 amount / actual_amount 两参同义、actual_amount 优先
         input_actual = actual_amount if actual_amount is not None else amount
-        if price_d is not None:
-            # 有价格（场内必传；场外若显式传价也走此分支，pending 期展示更准，
-            # 确认时按净值重算覆盖）→ 推导金额
-            net_amount = quantize_amount(shares_d * price_d)      # 毛额
-            actual_amount_final = net_amount - fee_d              # 到手净额
-            # 一致性校验：显式传入的「实际金额」与推导值对账，
-            # 差值超 0.01（金额 2 位量化舍入容差）报 AMOUNT_MISMATCH，逼回查错
-            if input_actual is not None:
-                input_actual_d = quantize_amount(input_actual)
-                if abs(input_actual_d - actual_amount_final) > Decimal("0.01"):
-                    raise BusinessError(
-                        "AMOUNT_MISMATCH",
-                        f"到账金额 {input_actual_d} 与 shares×price−fee="
-                        f"{actual_amount_final} 不一致，请核对份额/价格/手续费",
-                    )
-        else:
-            # 无价格（场外卖出创建未传价）：金额待确认时按 T 日净值重算，
-            # 创建期仅作占位（显式输入暂存，否则 0），确认时净值覆盖自愈
-            actual_amount_final = (
-                quantize_amount(input_actual) if input_actual is not None else Decimal("0")
-            )
-            net_amount = actual_amount_final + fee_d
+        gross_amount, actual_amount_final = _derive_sell_amounts(
+            shares_d, price_d, fee_d, input_actual, market,
+        )
         new_trade = Trade(
             portfolio_code=portfolio_code, product_code=product_code, market=market,
             platform_code=platform_code, trade_type="sell",
-            shares=shares_d, amount=net_amount, price=price_d, fee=fee_d,
+            shares=shares_d, amount=gross_amount, price=price_d, fee=fee_d,
             actual_amount=actual_amount_final, trade_date=trade_date,
             confirm_date=expected_confirm_date, status="pending", notes=notes,
         )
@@ -755,8 +781,10 @@ def update_trade(db: Session, trade: Trade, update_data: dict) -> Trade:
       组合须 active（PORTFOLIO_NOT_ACTIVE）
     - 金额语义（D1，与创建对齐）：buy 的 amount/actual_amount 均视为含费现金
       支出 X（actual_amount 优先），联动 actual_amount=X、amount=X−fee、配对
-      CASH 腿=X；sell 的 amount/actual_amount 视为实际金额（到手净额），
-      联动 actual_amount=X、amount=X+fee、配对 CASH 腿=X
+      CASH 腿=X；sell 有价格时与创建同口径（#190）：按新 shares/price/fee 重推导
+      amount=quantize(shares×price)、actual_amount=amount−fee，显式金额仅作对账
+      （场内超差拒绝、场外静默）；sell 无价格占位单保持输入为准
+      （actual=X、amount=X+fee）
     - 可用量校验（amount/actual_amount/shares/trade_date 实际变动时触发，
       price/fee/notes-only 改动跳过）：trade_date 变动须为交易日且晚于最新
       快照日（D4，废除静默滚交易日）；buy 按 as_of=新 trade_date 校验扣款
@@ -843,7 +871,9 @@ def update_trade(db: Session, trade: Trade, update_data: dict) -> Trade:
             db, trade.portfolio_code, base_cash_out,
             as_of=new_trade_date, self_trade=trade,
         )
-    elif trade.trade_type == "sell" and (amount_changed or shares_changed or date_changed):
+    elif trade.trade_type == "sell" and (shares_changed or date_changed):
+        # sell 金额输入不再改落库值（有价格时仅对账、无价格时占位本就待覆盖），
+        # 无需因 amount_changed 触发份额校验
         base_shares = shares_input if shares_input is not None else trade.shares
         validate_sell_shares_with_addback(
             db, trade.portfolio_code, trade.product_code, trade.market,
@@ -907,23 +937,50 @@ def update_trade(db: Session, trade: Trade, update_data: dict) -> Trade:
         trade.shares = quantize_shares(shares_input)
 
     # D1 金额联动：buy actual_amount=X（含费支出）、amount=X−fee；
-    # sell actual_amount=X（实际金额）、amount=X+fee
-    if amount_input is not None or fee_input is not None:
+    # sell 有价格：与创建同口径按新 shares/price/fee 重推导（#190），
+    # 显式金额仅作对账；sell 无价格占位单：actual_amount=X、amount=X+fee
+    if trade.trade_type == "sell" and trade.product_code != "CASH":
+        # CASH 腿（基金买的配对现金腿 trade_type 恰为 sell）金额由镜像维护，
+        # 且仅 notes 放行，不参与派生重算
+        final_shares = (
+            quantize_shares(shares_input) if shares_input is not None
+            else Decimal(str(trade.shares or 0))
+        )
+        final_price = price_input if price_input is not None else trade.price
+        final_price = (
+            Decimal(str(final_price)) if final_price is not None else None
+        )
+        if final_price is not None:
+            # shares/price/fee 任一变动均自动随动；amount_input 仅对账
+            trade.amount, trade.actual_amount = _derive_sell_amounts(
+                final_shares, final_price, new_fee, amount_input, trade.market,
+            )
+        elif amount_input is not None or fee_input is not None:
+            if amount_input is not None:
+                x = quantize_amount(amount_input)
+            elif trade.actual_amount is not None:
+                x = Decimal(str(trade.actual_amount))
+            elif trade.amount is not None:
+                # actual_amount 缺失时按净额+fee 反推
+                x = Decimal(str(trade.amount)) - old_fee
+            else:
+                x = None
+            if x is not None:
+                trade.actual_amount = x
+                trade.amount = x + new_fee
+    elif amount_input is not None or fee_input is not None:
         if amount_input is not None:
             x = quantize_amount(amount_input)
         elif trade.actual_amount is not None:
             x = Decimal(str(trade.actual_amount))
         elif trade.amount is not None:
-            # actual_amount 缺失时按方向从 amount 列反推（净额+fee / 毛额−fee）
-            if trade.trade_type == "buy":
-                x = Decimal(str(trade.amount)) + old_fee
-            else:
-                x = Decimal(str(trade.amount)) - old_fee
+            # actual_amount 缺失时按净额+fee 反推
+            x = Decimal(str(trade.amount)) + old_fee
         else:
             x = None
         if x is not None:
             trade.actual_amount = x
-            trade.amount = x - new_fee if trade.trade_type == "buy" else x + new_fee
+            trade.amount = x - new_fee
 
     # trade_date 变动：联动重算 confirm_date（输入必为交易日，不再吞非交易日）
     if date_changed:

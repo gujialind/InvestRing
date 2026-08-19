@@ -25,7 +25,7 @@ class TradeCreate(TradeBase):
     # 「实际金额」= 一笔基金交易真正进出账户的现金（方向敏感）：
     #   买入 = 含费现金支出（资金流出，含手续费）；卖出 = 到手净额（资金流入，已扣手续费）。
     # 输入层 amount / actual_amount 两参同义、均指「实际金额」，actual_amount 优先；
-    # service 据此联动落库 amount = actual_amount ∓ fee（买减卖加）。
+    # 买入按 actual_amount − fee 联动落库；卖出为纯派生量（见下）。
     # 卖出金额为纯派生量（#190）：有价格时 amount = shares × price、
     #   actual_amount = amount − fee；显式传入的「实际金额」仅作一致性校验
     #   （差值超 0.01 报 AMOUNT_MISMATCH），落库恒用推导值。
