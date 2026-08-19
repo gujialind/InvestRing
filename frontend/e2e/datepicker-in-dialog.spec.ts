@@ -357,10 +357,13 @@ test.describe('弹窗内 DatePicker 矮视口（评审新增）', () => {
     } catch {
       test.skip(true, '环境中无 pending 交易可编辑（编辑弹窗矮视口断言跳过）');
     }
+    // 编辑交易弹窗（字段最多的弹窗）：内容超高时经 DialogContent 内层滚动容器
+    // 可达（#191 高度兜底），滚动到位后执行按钮应落在视口内
     await editBtn.click();
     const dlg = dialogByTitle(page, '编辑交易');
     await dlg.waitFor();
     const save = dlg.getByRole('button', { name: '保存修改' });
+    await save.scrollIntoViewIfNeeded();
     await expect(save).toBeVisible();
     const box = await save.boundingBox();
     expect(box, '编辑交易「保存修改」无 boundingBox').not.toBeNull();
