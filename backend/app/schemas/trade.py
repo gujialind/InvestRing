@@ -22,6 +22,13 @@ class TradeBase(BaseModel):
 
 
 class TradeCreate(TradeBase):
+    # 「实际金额」= 一笔基金交易真正进出账户的现金（方向敏感）：
+    #   买入 = 含费现金支出（资金流出，含手续费）；卖出 = 到手净额（资金流入，已扣手续费）。
+    # 输入层 amount / actual_amount 两参同义、均指「实际金额」，actual_amount 优先；
+    # service 据此联动落库 amount = actual_amount ∓ fee（买减卖加）。
+    # 卖出金额为纯派生量（#190）：有价格时 amount = shares × price、
+    #   actual_amount = amount − fee；显式传入的「实际金额」仅作一致性校验
+    #   （差值超 0.01 报 AMOUNT_MISMATCH），落库恒用推导值。
     # 自然键防重（#82）：命中同参数 pending/confirmed 交易时需显式传 True 强制创建
     allow_duplicate: bool = False
     # 跨平台现金腿（#91）：买=扣款平台、卖=到账平台，缺省同基金腿平台
@@ -34,8 +41,9 @@ class TradeUpdate(BaseModel):
     # confirm_date 不开放直改：创建/unconfirm 按 confirm_days 自动维护，
     # 改 trade_date 时由 service 联动重算；补录覆盖走 confirm 端点传参
     # status 不开放直改：状态流转走 confirm/cancel/unconfirm 端点
-    # amount 语义（#182 D1，与创建同口径）：buy/sell 输入均视为实际金额
-    # （buy=含费现金支出、sell=到手净额），actual_amount 优先，service 联动重算
+    # amount 语义（#182 D1，与创建同口径）：「实际金额」= 真正进出账户的现金
+    # （买入=含费现金支出、卖出=到手净额）；amount/actual_amount 两参同义、
+    # actual_amount 优先，service 联动重算净额列并镜像 CASH 腿
     shares: Optional[float] = None
     amount: Optional[float] = None
     price: Optional[float] = None

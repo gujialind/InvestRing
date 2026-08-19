@@ -572,6 +572,11 @@ def create_trade(
 
     买入现金口径统一：cash_out = actual_amount 优先，否则 amount
     （前端传 amount、CLI 传 actual_amount，两者行为一致）。
+    卖出金额为纯派生量（#190）：有价格时 amount = quantize(shares × price)、
+    actual_amount = amount − fee；显式传入的 amount/actual_amount（两参同义、
+    actual_amount 优先，与 buy 分支、PUT 侧对齐）仅作一致性校验
+    （差值超 0.01 报 AMOUNT_MISMATCH），落库恒用推导值；
+    无价格（场外未传价）时创建期占位，确认按净值重算。
     自然键防重（#82）：同组合/产品/市场/平台/方向/交易日且金额（买）或份额（卖）
     相同的 pending/confirmed 交易视为重复，抛 DUPLICATE_TRADE；
     allow_duplicate=True 强制放行，cancelled 记录不算重复。
@@ -658,13 +663,38 @@ def create_trade(
             confirm_date=expected_confirm_date, status="pending", notes=notes,
         )
     elif trade_type == "sell":
-        # 正值 + 量化 + 可用份额校验（#182 起与编辑/确认共用同一实现）
+        # 份额校验（锚）：正值 + 量化 + 可用份额校验（#182 起与编辑/确认共用同一实现）
         shares_d = validate_sell_shares_with_addback(
             db, portfolio_code, product_code, market, shares, as_of=trade_date,
         )
-        # 用户输入金额先量化到 2 位（四舍五入）（issue #94）
-        actual_amount_final = quantize_amount(actual_amount) if actual_amount else Decimal("0")
-        net_amount = actual_amount_final + fee_d
+        # 卖出金额为纯派生量（#190）：毛额 amount = shares × price，
+        # 到手净额 actual_amount = amount − fee。
+        # 输入层 amount / actual_amount 两参同义，均指「实际金额（到手净额）」，
+        # actual_amount 优先（与 buy 分支、PUT 侧对齐），仅作对账（一致性校验），
+        # 落库恒用推导值，保证四字段自洽（金额即 shares/price/fee 的「校验和」）。
+        input_actual = actual_amount if actual_amount is not None else amount
+        if price_d is not None:
+            # 有价格（场内必传；场外若显式传价也走此分支，pending 期展示更准，
+            # 确认时按净值重算覆盖）→ 推导金额
+            net_amount = quantize_amount(shares_d * price_d)      # 毛额
+            actual_amount_final = net_amount - fee_d              # 到手净额
+            # 一致性校验：显式传入的「实际金额」与推导值对账，
+            # 差值超 0.01（金额 2 位量化舍入容差）报 AMOUNT_MISMATCH，逼回查错
+            if input_actual is not None:
+                input_actual_d = quantize_amount(input_actual)
+                if abs(input_actual_d - actual_amount_final) > Decimal("0.01"):
+                    raise BusinessError(
+                        "AMOUNT_MISMATCH",
+                        f"到账金额 {input_actual_d} 与 shares×price−fee="
+                        f"{actual_amount_final} 不一致，请核对份额/价格/手续费",
+                    )
+        else:
+            # 无价格（场外卖出创建未传价）：金额待确认时按 T 日净值重算，
+            # 创建期仅作占位（显式输入暂存，否则 0），确认时净值覆盖自愈
+            actual_amount_final = (
+                quantize_amount(input_actual) if input_actual is not None else Decimal("0")
+            )
+            net_amount = actual_amount_final + fee_d
         new_trade = Trade(
             portfolio_code=portfolio_code, product_code=product_code, market=market,
             platform_code=platform_code, trade_type="sell",

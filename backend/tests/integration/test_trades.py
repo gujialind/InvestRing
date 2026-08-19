@@ -211,6 +211,107 @@ class TestSellTrade:
         assert resp.status_code == 422
 
 
+class TestExchangeSellAmountDerivation:
+    """#190 场内卖出金额推导 + 一致性校验"""
+
+    def _setup(self, client, test_db, code="ES_P1", product="ETF_ES", plat="ES_PLAT"):
+        create_portfolio(test_db, code=code, status="active")
+        create_product(test_db, code=product, market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
+        create_platform(test_db, code=plat)
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        create_position_snapshot(
+            test_db, code, product, "CN_EXCHANGE",
+            snapshot_date=date(2025, 10, 3),
+            shares=10000.0, unit_price=0.8, cost_price=0.8,
+            market_value=8000.0, platform_code=plat,
+        )
+
+    def _sell_payload(self, **overrides):
+        payload = {
+            "portfolio_code": "ES_P1",
+            "product_code": "ETF_ES",
+            "market": "CN_EXCHANGE",
+            "trade_type": "sell",
+            "shares": 7800.0,
+            "price": 0.802,
+            "fee": 0.63,
+            "platform_code": "ES_PLAT",
+            "trade_date": "2025-10-06",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _cash_leg(self, test_db):
+        return test_db.query(Trade).filter(
+            Trade.portfolio_code == "ES_P1", Trade.product_code == "CASH"
+        ).first()
+
+    def test_create_derives_amount_and_cash_leg(self, client, admin_headers, test_db):
+        """不传 actual_amount：amount/actual_amount 由 shares×price 推导，CASH 腿镜像净额"""
+        self._setup(client, test_db)
+        resp = client.post("/api/trades", json=self._sell_payload(), headers=admin_headers)
+        assert resp.status_code in (200, 201), resp.json()
+        data = resp.json()
+        assert data["amount"] == 6255.60
+        assert data["actual_amount"] == 6254.97
+
+        cash_leg = self._cash_leg(test_db)
+        assert cash_leg is not None
+        assert float(cash_leg.amount) == 6254.97
+        assert cash_leg.status == "pending"
+
+    def test_confirm_keeps_derived_amount_and_cash_leg(self, client, admin_headers, test_db):
+        """确认（不传价）：金额保持推导值，CASH 腿 confirmed 且 = 净额"""
+        self._setup(client, test_db)
+        resp = client.post("/api/trades", json=self._sell_payload(), headers=admin_headers)
+        trade_id = resp.json()["id"]
+
+        conf = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
+        assert conf.status_code == 200, conf.json()
+        assert conf.json()["trade"]["amount"] == 6255.60
+        assert conf.json()["trade"]["actual_amount"] == 6254.97
+
+        cash_leg = self._cash_leg(test_db)
+        assert cash_leg.status == "confirmed"
+        assert float(cash_leg.amount) == 6254.97
+
+    def test_explicit_actual_amount_consistent_passes(self, client, admin_headers, test_db):
+        """显式传与推导一致的 actual_amount：通过，落库仍为推导值"""
+        self._setup(client, test_db)
+        resp = client.post(
+            "/api/trades",
+            json=self._sell_payload(actual_amount=6254.97),
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), resp.json()
+        assert resp.json()["amount"] == 6255.60
+        assert resp.json()["actual_amount"] == 6254.97
+
+    def test_explicit_actual_amount_mismatch_rejected(self, client, admin_headers, test_db):
+        """显式传与推导不一致的 actual_amount：抛 AMOUNT_MISMATCH"""
+        self._setup(client, test_db)
+        resp = client.post(
+            "/api/trades",
+            json=self._sell_payload(actual_amount=6000.0),
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "AMOUNT_MISMATCH"
+
+    def test_amount_alias_acts_as_actual_amount(self, client, admin_headers, test_db):
+        """amount 与 actual_amount 同义（#190 意见2）：仅传 amount 也作校验基准"""
+        self._setup(client, test_db)
+        resp = client.post(
+            "/api/trades",
+            json=self._sell_payload(amount=6254.97),
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), resp.json()
+        assert resp.json()["amount"] == 6255.60
+        assert resp.json()["actual_amount"] == 6254.97
+
+
 class TestTradePermissions:
     """调仓交易权限测试"""
 
