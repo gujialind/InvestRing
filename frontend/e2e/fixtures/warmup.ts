@@ -19,6 +19,10 @@ const PROTECTED_ROUTES = [
   '/dashboard',
   '/m/dashboard',
   '/portfolio',
+  // 移动端 middleware 重定向目标：goto('/portfolio') 在移动 UA 下落到 /m/portfolio，
+  // 漏预热时首个移动用例触发按需编译，dev server 报
+  // 「Invariant: Expected clientReferenceManifest to be defined」500 致移动端批量 skip
+  '/m/portfolio',
   '/m/products',
   '/settings/tasks',
 ];
