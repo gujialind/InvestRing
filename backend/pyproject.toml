@@ -24,6 +24,7 @@ dependencies = [
     "apscheduler>=3.10.4",
     "alembic>=1.13.1",
     "tushare>=1.4.14",
+    "akshare>=1.18.92",
     "lxml>=6.0.0",
     "simplejson>=4.1.0",
     "click>=8.0.0",
@@ -41,3 +42,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+# pytest 配置收纳（issue #172）：此前 --strict-markers 依赖 CI 命令行传递，
+# 本地裸跑 pytest 无此保护。当前无自定义 marker（仅内建 parametrize），
+# 新增自定义 marker 时须在此登记，否则 --strict-markers 会拒绝运行。
+[tool.pytest.ini_options]
+addopts = "--strict-markers"

@@ -18,19 +18,23 @@ numpy==2.4.4
 python-dateutil==2.9.0.post0
 
 # HTTP & Network
-httpx>=0.26.0,<0.28.0
+httpx==0.27.2
 requests==2.33.1
 urllib3==2.6.3
 certifi==2026.4.22
 
 # Scheduling
-apscheduler>=3.10.4
+apscheduler==3.11.3
 
 # Database migration
-alembic>=1.13.1
+alembic==1.19.1
 
 # External data
 tushare==1.4.14
+# 钉版原因：1.18.90+ 依赖 jsonpath（仅发布 sdist），构建侧需 Dockerfile
+# --no-binary jsonpath 豁免（已加）；钉版防上游后续版本再引入新 sdist 依赖
+# 破环镜像构建（issue #170 冒烟门禁发现，#196 引入 akshare 后构建即断）
+akshare==1.18.92
 lxml==6.1.0
 simplejson==4.1.1
 
@@ -40,9 +44,10 @@ click==8.3.3
 # Auth
 python-dotenv==1.2.2
 
-# Dev / Testing
-pytest>=7.0
-pytest-asyncio>=0.23.0
-pytest-cov>=4.1.0
-pytest-mock>=3.12.0
-factory-boy>=3.3.0
+# Dev / Testing（issue #172 全锁：以干净环境实际解析版本为准，
+# 本地 + CI 全量测试验证通过；升级需配套重验）
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+pytest-mock==3.15.1
+factory-boy==3.3.3

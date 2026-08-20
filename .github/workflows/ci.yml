@@ -27,6 +27,7 @@ jobs:
   backend-test:
     name: "Backend Tests"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend
@@ -48,19 +49,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # SQLite 模式运行全量测试（unit + integration + e2e）
+      # SQLite 模式运行全量测试（unit + integration + e2e）；
+      # 覆盖率仅在本 job 收集（不设阈值，先度量观察基线，issue #171）
       - name: Run tests with pytest
         env:
           SECRET_KEY: test-secret-key-for-ci
           SCHEDULER_ENABLED: "false"
         run: |
-          pytest tests/ -q --tb=short --strict-markers
+          pytest tests/ -q --tb=short --strict-markers --cov=app --cov-report=xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          retention-days: 14
 
   # MySQL 门禁：覆盖 SQLite 测不出的方言差异（VARCHAR 长度、DECIMAL 截断、
   # 隐式排序、排序规则等），并验证生产启动顺序（create_all → alembic upgrade head）
   backend-test-mysql:
     name: "Backend Tests (MySQL)"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend
@@ -108,10 +119,21 @@ jobs:
           SECRET_KEY: test-secret-key-for-ci
           SCHEDULER_ENABLED: "false"
           DEBUG: "false"
+          # 可逆性豁免开关：仅限引入不可逆迁移（如 DROP 列）的 PR 临时置 true，
+          # 合入后必须改回 false（issue #170）
+          SKIP_DOWNGRADE: "false"
         run: |
           python -c "from app.database import engine, Base; import app.models; Base.metadata.create_all(bind=engine)"
           alembic upgrade head
           alembic current | grep "(head)"
+          # 可逆性验证：downgrade -1 只回退最新一条迁移（已知不可逆的 0006/0008 不会被触碰）
+          if [ "${SKIP_DOWNGRADE}" != "true" ]; then
+            alembic downgrade -1
+            alembic upgrade head
+            alembic current | grep "(head)"
+          else
+            echo "::warning::SKIP_DOWNGRADE=true，跳过迁移可逆性验证，合入后请移除此豁免"
+          fi
 
       - name: Run tests with pytest (MySQL)
         env:
@@ -122,10 +144,14 @@ jobs:
         run: |
           pytest tests/ -q --tb=short --strict-markers
 
-  # ir-cli 响应字段契约防漂移校验：纯 stdlib 脚本，无需安装依赖/启动后端
+  # CLI 契约防漂移校验（issue #170 扩展）：
+  #   1. openapi.json 漂移门禁——进程内生成 schema 与已提交契约比对
+  #   2. ir-cli 响应字段契约校验
+  #   3. ir-cli 单元测试
   cli-contract-check:
     name: "CLI Contract Check"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -135,17 +161,38 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      # openapi.json 漂移门禁：改 router/schema 忘记重新导出时 exit 1
+      # （import app.main 会对临时 sqlite 执行 create_all + init_scheduled_tasks，无需起服务）
+      - name: Check openapi.json drift
+        env:
+          SECRET_KEY: test-secret-key-for-ci
+          SCHEDULER_ENABLED: "false"
+        run: python backend/check_openapi.py
 
       # 不一致时 exit 1：请运行 `python ir-cli/scripts/gen_response_fields.py` 重新生成并提交
       - name: Check response fields contract
         run: |
           python ir-cli/scripts/gen_response_fields.py --check
 
+      - name: Install ir-cli and run unit tests
+        run: |
+          pip install -e ir-cli pytest
+          pytest ir-cli/tests -q
+
   # 前端门禁：前端已容器化部署，类型/语法错误与构建失败必须在 CI 拦住
   # （历史上因无前端门禁漏过任务页 map 崩溃等问题）
   frontend-check:
     name: "Frontend Lint & Build"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -188,6 +235,7 @@ jobs:
   frontend-e2e:
     name: "Frontend E2E"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     services:
       mysql:
@@ -265,7 +313,7 @@ jobs:
           done
           curl -sf http://127.0.0.1:8000/health
 
-      # ---- 前端：webServer 由 playwright.config.ts 自动起 npm run dev（:3000）----
+      # ---- 前端：生产构建 + webServer 由 playwright.config.ts 自动起 standalone server.js（:3000）----
       - name: Setup Node 24
         uses: actions/setup-node@v4
         with:
@@ -276,6 +324,28 @@ jobs:
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      # E2E 跑生产构建形态（issue #171）：standalone server.js 与 Docker
+      # 容器完全同形态（next start 与 output:'standalone' 不兼容）；
+      # API_BASE_URL 默认 localhost:8000，build 时固化的 rewrites 恰与
+      # 本 job 后端地址一致，无需额外传参。
+      # standalone 不包含 public/ 与 .next/static/，组装步骤与 Dockerfile 一致。
+      - name: Build frontend (production)
+        working-directory: frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          npm run build
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
+
+      # 浏览器二进制缓存（issue #172）：key 绑定 package-lock.json
+      # （@playwright/test 版本决定所需浏览器构建）；未命中时回退全新安装
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
       # 桌面 chromium + 移动 webkit（mobile 用 iPhone 13 描述符，
       # 见 playwright.config.ts 注释；PR #169 遗留的 webkit 307 取消问题
@@ -303,7 +373,8 @@ jobs:
           CI: "true"
         run: npx playwright test
 
-      # 失败证据（trace/截图/视频）供定位，always 上传保证失败时也能取到
+      # 失败证据（trace/截图/视频）+ 后端启动日志（后端启动失败时的定位证据，
+      # issue #172），always 上传保证失败时也能取到
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
@@ -312,4 +383,47 @@ jobs:
           path: |
             frontend/playwright-report/
             frontend/test-results/
+            backend-e2e.log
           retention-days: 14
+
+  # Dockerfile 构建冒烟（issue #170）：每个 PR 验证两个 Dockerfile 可构建，
+  # 避免「构建问题合入 main 触发 CD 才暴露」（#141 ACR 拒推 provenance 即此类）。
+  # 与 deploy.yml 共用 gha 缓存 scope（相互预热）；push: false 不产生 ACR tag。
+  docker-build-smoke:
+    name: "Docker Build Smoke (${{ matrix.service }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        include:
+          - service: backend
+            context: .
+            dockerfile: backend/Dockerfile
+            build_args: ""
+          - service: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+            # rewrites 在 build 时固化，与 deploy.yml 保持一致
+            build_args: |
+              API_BASE_URL=http://backend:8000
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build ${{ matrix.service }} image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          build-args: ${{ matrix.build_args }}
+          tags: investring-${{ matrix.service }}:smoke
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          # 与 deploy.yml 一致：ACR 个人版不支持 OCI attestation（issue #141）
+          provenance: false
+          sbom: false
