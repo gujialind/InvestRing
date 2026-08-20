@@ -23,8 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 先复制依赖文件，利用 Docker 层缓存
 COPY backend/requirements.txt .
 
-# 安装 Python 依赖（使用阿里云 PyPI 镜像，国内加速）
-RUN pip install --no-cache-dir --prefix=/install --only-binary :all: \
+# 安装 Python 依赖（使用阿里云 PyPI 镜像，国内加速）。
+# --no-binary jsonpath 豁免：akshare>=1.18.90 依赖 jsonpath，该包仅发布
+# sdist（纯 Python，无需编译），与 --only-binary :all: 冲突，
+# 由 docker-build-smoke 门禁发现（issue #170，#196 引入 akshare 后构建即断）
+RUN pip install --no-cache-dir --prefix=/install --only-binary :all: --no-binary jsonpath \
     -i https://mirrors.aliyun.com/pypi/simple/ \
     -r requirements.txt
 
