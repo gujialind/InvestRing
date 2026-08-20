@@ -593,9 +593,10 @@ ir trade create --portfolio-code <组合> --product-code <产品> [--market <市
 | `--product-code` | 是 | 产品代码 |
 | `--market` | 否 | 市场类型：`CN_OTC` / `CN_EXCHANGE` / `HK_MUTUAL`；省略时自动解析，一码多市场（如 LOF）返回 `MARKET_AMBIGUOUS`，需显式指定 |
 | `--type` | 是 | `buy`（买入）或 `sell`（卖出） |
-| `--actual-amount` | 买入时必填 | 实际支付金额（必须 > 0，不超过扣款平台可用现金） |
+| `--actual-amount` | 买入时必填、卖出可选 | 实际金额（方向敏感）：买入=含费现金支出（必须 > 0，不超过扣款平台可用现金）；卖出=到手净额（#190 起为纯派生量，有价格时按 `shares×price−fee` 推导，显式传入仅作对账校验，对不上报 `AMOUNT_MISMATCH`） |
+| `--amount` | 否 | 与 `--actual-amount` 同义（`--actual-amount` 优先）；卖出时仅作对账校验 |
 | `--fee` | 否（默认0） | 手续费 |
-| `--price` | 否 | 交易价格 |
+| `--price` | 场内必填 | 交易价格；场内（CN_EXCHANGE）必填；任意市场显式传价均须为正数（`MISSING_OR_INVALID_PRICE`）；卖出传价将按 `shares×price` 推导金额（场内对账超差报 `AMOUNT_MISMATCH`，场外仅推导展示不强对账，确认时仅与 T 日净值做一致性校验，不覆盖净值） |
 | `--shares` | 卖出时必填 | 卖出份额（必须 > 0；先量化到 2 位小数再校验，不超过可用份额） |
 | `--platform-code` | 否 | 平台代码 |
 | `--cash-platform-code` | 否 | 现金腿平台（issue #91）：买=扣款平台、卖=到账平台，缺省同基金腿平台；买入可用现金按扣款平台校验，两腿同 transfer_group 原子翻转 |
@@ -669,7 +670,7 @@ ir trade update <ID> [--shares <份额>] [--amount <金额>] [--price <价格>] 
 
 | 参数 | 说明 |
 |------|------|
-| `--amount` / `--actual-amount` | 含费实际金额，两参同义（`--actual-amount` 优先）：buy=含费现金支出（联动 `actual_amount=X`、`amount=X−fee`、CASH 腿=X）；sell=到手净额（联动 `actual_amount=X`、`amount=X+fee`、CASH 腿=X） |
+| `--amount` / `--actual-amount` | 实际金额，两参同义（`--actual-amount` 优先）：buy=含费现金支出（联动 `actual_amount=X`、`amount=X−fee`、CASH 腿=X）；sell 有价格时与创建同口径（#190）：按 shares×price 重推导、显式金额仅作对账（场内超差报 `AMOUNT_MISMATCH`），无价格占位单仍输入为准（联动 `actual_amount=X`、`amount=X+fee`、CASH 腿=X） |
 | `--shares` | 卖出份额（先量化到 2 位小数再校验，不超过可用份额） |
 | `--price` / `--fee` / `--notes` | 直改字段；仅改这些字段不触发可用量校验 |
 | `--trade-date` | 新交易日期（必须是交易日且晚于最新快照日，非交易日直接报错不静默滚交易日；联动重算 confirm_date 并同步 CASH 腿） |
