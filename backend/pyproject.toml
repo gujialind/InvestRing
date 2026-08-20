@@ -24,6 +24,7 @@ dependencies = [
     "apscheduler>=3.10.4",
     "alembic>=1.13.1",
     "tushare>=1.4.14",
+    "akshare>=1.18.92",
     "lxml>=6.0.0",
     "simplejson>=4.1.0",
     "click>=8.0.0",
