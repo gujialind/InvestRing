@@ -51,9 +51,11 @@ import Link from "next/link";
 import type { DateRange } from "react-day-picker";
 import { isSameDay, subYears } from "date-fns";
 import type { SubscriptionListParams } from "@/lib/api";
+import type { Subscription, SubscriptionUpdate } from "@/types/subscription";
 import {
   useSubscriptionList,
   useCreateSubscription,
+  useUpdateSubscription,
   useConfirmSubscription,
   useCancelSubscription,
   useUnconfirmSubscription,
@@ -198,6 +200,16 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
   });
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [editHint, setEditHint] = useState(false);
+  // pending 申赎编辑（issue #202）：editingSub 非空即打开编辑 Dialog
+  const [editingSub, setEditingSub] = useState<Subscription | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    amount: "",
+    shares: "",
+    apply_date: toDateOnly(new Date()),
+    notes: "",
+  });
+  // 顶层无条件调用（hooks 规则）；id=0 时 mutate 不会被触发（Dialog 打开时 editingSub 必有 id）
+  const updateSubscription = useUpdateSubscription(editingSub?.id ?? 0);
 
   // 投资人可用份额（赎回口径，issue #67）：仅赎回模式且已选投资人时查询
   const { data: availableData, isFetching: availableFetching } = useInvestorAvailableShares(
@@ -243,6 +255,34 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     else if (action === "unconfirm") unconfirmSubscription.mutate(id);
     else if (action === "delete") deleteSubscriptionMutation.mutate(id);
     setConfirmState(null);
+  };
+
+  // 打开编辑 Dialog 并按类型预填（issue #202）：申购预填金额、赎回预填份额
+  const openEditDialog = (sub: Subscription) => {
+    setEditingSub(sub);
+    setEditFormData({
+      amount: sub.sub_type === "subscribe" ? String(sub.amount ?? "") : "",
+      shares: sub.sub_type === "redeem" ? String(sub.shares ?? "") : "",
+      apply_date: sub.apply_date,
+      notes: sub.notes ?? "",
+    });
+  };
+
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSub) return;
+    // 仅组装非空字段：空串不入 payload（exclude_unset 语义下避免误清）
+    const payload: SubscriptionUpdate = {};
+    if (editingSub.sub_type === "subscribe" && editFormData.amount) {
+      payload.amount = parseFloat(editFormData.amount);
+    }
+    if (editingSub.sub_type === "redeem" && editFormData.shares) {
+      payload.shares = parseFloat(editFormData.shares);
+    }
+    if (editFormData.apply_date) payload.apply_date = editFormData.apply_date;
+    if (editFormData.notes) payload.notes = editFormData.notes;
+    // 失败时 hook 已 toast，Dialog 保持打开可重试（不挂 onError 关闭逻辑）
+    updateSubscription.mutate(payload, { onSuccess: () => setEditingSub(null) });
   };
 
   // 筛选栏控件（visual-spec §9）：顺序 = 申购日期区间 → 确认日期区间 → 状态 → 投资人 → 平台 → 类型；
@@ -598,13 +638,24 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
+                      {/* 操作按钮对齐后端允许矩阵（issue #202）：pending=编辑/确认/取消/删除；
+                          confirmed=取消确认/修改引导，无删除（后端 CANNOT_DELETE_CONFIRMED） */}
                       {sub.status === "pending" && (
                         <>
                           <Button
                             variant="ghost"
                             size="sm"
+                            onClick={() => openEditDialog(sub)}
+                            title="编辑"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => setConfirmState({ action: "confirm", id: sub.id })}
                             disabled={confirmSubscription.isPending}
+                            title="确认"
                           >
                             <CheckCircle className="h-4 w-4" />
                           </Button>
@@ -613,8 +664,18 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                             size="sm"
                             onClick={() => setConfirmState({ action: "cancel", id: sub.id })}
                             disabled={cancelSubscription.isPending}
+                            title="取消"
                           >
                             <XCircle className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setConfirmState({ action: "delete", id: sub.id })}
+                            disabled={deleteSubscriptionMutation.isPending}
+                            title="删除"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </>
                       )}
@@ -630,14 +691,6 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                           </Button>
                           <Button variant="ghost" size="sm" onClick={() => setEditHint(true)} title="修改">
                             <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmState({ action: "delete", id: sub.id })}
-                            title="删除"
-                          >
-                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </>
                       )}
@@ -674,6 +727,93 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
           />
         </CardContent>
       </Card>
+
+      {/* pending 申赎编辑 Dialog（issue #202）：投资人/平台/类型后端不支持改，只读展示 */}
+      <Dialog open={!!editingSub} onOpenChange={(open) => !open && setEditingSub(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑申请</DialogTitle>
+            <DialogDescription>仅待确认申请可编辑，投资人/平台/类型不可修改</DialogDescription>
+          </DialogHeader>
+          {editingSub && (
+            <form onSubmit={handleEditSubmit}>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">投资人</span>
+                    <span>
+                      {investorNameMap.get(editingSub.investor_code) ?? editingSub.investor_code}（{editingSub.investor_code}）
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">平台</span>
+                    <span>
+                      {platformNameMap.get(editingSub.platform_code) ?? editingSub.platform_code}（{editingSub.platform_code}）
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">类型</span>
+                    <Badge variant="neutral">
+                      <span
+                        className="mr-1.5 h-1.5 w-1.5 rounded-full"
+                        style={{ background: TRADE_DIRECTION_COLORS[editingSub.sub_type === "subscribe" ? "buy" : "sell"] }}
+                      />
+                      {editingSub.sub_type === "subscribe" ? "申购" : "赎回"}
+                    </Badge>
+                  </div>
+                </div>
+                {editingSub.sub_type === "subscribe" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_amount">金额（元）</Label>
+                    <Input
+                      id="edit_amount"
+                      type="number"
+                      step="0.01"
+                      value={editFormData.amount}
+                      onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_shares">份额</Label>
+                    <Input
+                      id="edit_shares"
+                      type="number"
+                      step="0.01"
+                      value={editFormData.shares}
+                      onChange={(e) => setEditFormData({ ...editFormData, shares: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="edit_apply_date">申请日期</Label>
+                  <DatePicker
+                    date={parseDateOnly(editFormData.apply_date)}
+                    onSelect={(date) => {
+                      setEditFormData({ ...editFormData, apply_date: toDateOnly(date) });
+                    }}
+                    showTradingDays
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_notes">备注</Label>
+                  <Input
+                    id="edit_notes"
+                    value={editFormData.notes}
+                    onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={updateSubscription.isPending}>
+                  {updateSubscription.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  保存修改
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!confirmState} onOpenChange={(open) => !open && setConfirmState(null)}>
         <AlertDialogContent>

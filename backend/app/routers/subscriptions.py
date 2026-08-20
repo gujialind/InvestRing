@@ -12,6 +12,7 @@ from app.services.subscription_service import (
     confirm_single_subscription,
     unconfirm_single_subscription,
     create_subscription as create_subscription_service,
+    update_subscription as update_subscription_service,
     list_subscriptions,
 )
 from app.schemas.subscription import SubscriptionCreate, SubscriptionUpdate, SubscriptionResponse
@@ -174,17 +175,8 @@ def update_subscription(
     if not db_subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
-    if db_subscription.status == "confirmed":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "error": "CANNOT_MODIFY_CONFIRMED",
-                "message": "已确认的申购赎回事件不可直接修改，请先取消确认后再修改"
-            }
-        )
-
-    for field, value in subscription.dict(exclude_unset=True).items():
-        setattr(db_subscription, field, value)
+    # 业务校验单一实现于 service 层（issue #202：apply_date 编辑支持）
+    update_subscription_service(db, db_subscription, subscription.dict(exclude_unset=True))
 
     db.commit()
     db.refresh(db_subscription)

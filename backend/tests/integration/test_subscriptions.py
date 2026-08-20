@@ -963,3 +963,146 @@ class TestAutoConfirmOutOfOrder:
         assert "首笔到账日" in failed[0]["error"]  # CONFIRM_BEFORE_STARTED 闸门文案
         test_db.refresh(s0)
         assert s0.status == "pending"
+
+
+class TestSubscriptionUpdate:
+    """申赎编辑测试（issue #202：PUT /api/subscriptions/{id} 支持 apply_date 编辑）"""
+
+    def test_update_pending_amount_quantized(self, client, admin_headers, test_db):
+        """pending 申购改金额：量化 2 位落库"""
+        create_portfolio(test_db, code="UPD_P1", status="active")
+        create_investor(test_db, code="UPD_I1")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        sub = create_subscription(
+            test_db, "UPD_P1", "UPD_I1", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 1),
+        )
+
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"amount": 12000.555},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        test_db.refresh(sub)
+        assert sub.amount == Decimal("12000.56")  # ROUND_HALF_UP
+
+    def test_update_apply_date_recomputes_confirm_date(self, client, admin_headers, test_db):
+        """改申请日：预计确认日按 T+1 重算"""
+        create_portfolio(test_db, code="UPD_P2", status="active")
+        create_investor(test_db, code="UPD_I2")
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        sub = create_subscription(
+            test_db, "UPD_P2", "UPD_I2", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 1),
+            confirm_date=date(2025, 9, 2),
+        )
+
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"apply_date": "2025-09-02"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        test_db.refresh(sub)
+        assert sub.apply_date == date(2025, 9, 2)
+        assert sub.confirm_date == date(2025, 9, 3)
+
+    def test_update_apply_date_non_trading_day_rejected(self, client, admin_headers, test_db):
+        """改到非交易日拒绝 NON_TRADING_DAY"""
+        create_portfolio(test_db, code="UPD_P3", status="active")
+        create_investor(test_db, code="UPD_I3")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        ensure_trading_day(test_db, date(2025, 9, 6), is_open=False)
+        sub = create_subscription(
+            test_db, "UPD_P3", "UPD_I3", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 1),
+        )
+
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"apply_date": "2025-09-06"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "NON_TRADING_DAY"
+
+    def test_update_apply_date_before_snapshot_rejected(self, client, admin_headers, test_db):
+        """改到最新快照日及之前拒绝 DATE_BEFORE_SNAPSHOT"""
+        create_portfolio(test_db, code="UPD_P4", status="active")
+        create_investor(test_db, code="UPD_I4")
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        create_value_snapshot(test_db, "UPD_P4", date(2025, 9, 2), 10000, 10000, 1.0)
+        sub = create_subscription(
+            test_db, "UPD_P4", "UPD_I4", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 3),
+        )
+
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"apply_date": "2025-09-02"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "DATE_BEFORE_SNAPSHOT"
+
+    def test_update_confirmed_rejected(self, client, admin_headers, test_db):
+        """confirmed 拒绝修改 CANNOT_MODIFY_CONFIRMED"""
+        create_portfolio(test_db, code="UPD_P5", status="active")
+        create_investor(test_db, code="UPD_I5")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        sub = create_subscription(
+            test_db, "UPD_P5", "UPD_I5", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 1),
+            confirm_date=date(2025, 9, 2), status="confirmed",
+        )
+
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"amount": 20000.0},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "CANNOT_MODIFY_CONFIRMED"
+
+    def test_update_cancelled_rejected(self, client, admin_headers, test_db):
+        """cancelled 拒绝修改 INVALID_STATUS（终态不可复活改值，与 update_trade 同口径）"""
+        create_portfolio(test_db, code="UPD_P7", status="active")
+        create_investor(test_db, code="UPD_I7")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        sub = create_subscription(
+            test_db, "UPD_P7", "UPD_I7", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 1), status="cancelled",
+        )
+
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"apply_date": "2025-09-01"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_STATUS"
+
+    def test_update_redeem_shares_adds_back_own_pending(self, client, admin_headers, test_db):
+        """赎回改份额：加回自身 pending 旧份额后与可用份额精确比较"""
+        create_portfolio(test_db, code="UPD_P6", status="active")
+        create_investor(test_db, code="UPD_I6")
+        for d in (1, 2):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        create_investor_holding(
+            test_db, "UPD_P6", "UPD_I6", snapshot_date=date(2025, 9, 1), shares=1000,
+        )
+        sub = create_subscription(
+            test_db, "UPD_P6", "UPD_I6", sub_type="redeem",
+            shares=500.0, apply_date=date(2025, 9, 1),
+        )
+
+        # 可用 = 1000 - 500(自身) + 500(加回) = 1000，改到 1000 应放行
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"shares": 1000},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+        # 超出 1 分即拒 INSUFFICIENT_SHARES（精确比较无容差）
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"shares": 1000.01},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INSUFFICIENT_SHARES"
