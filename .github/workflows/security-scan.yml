@@ -1,0 +1,58 @@
+# ============================================================================
+# 依赖安全扫描（issue #172）：每周定时 + 手动触发，不阻塞 PR 反馈
+# ============================================================================
+# 决策记录：并入 CI 每 PR 跑被否决（拖慢反馈、初期噪音大），
+# 独立 weekly workflow 成本极小。存在漏洞时 workflow 红，人工评估处理。
+# pytest-xdist 与前端单元测试层本次仅留档不实现（见 issue #172）。
+# ============================================================================
+
+name: Security Scan
+
+on:
+  schedule:
+    # 每周一 08:00 UTC
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+jobs:
+  backend-audit:
+    name: "pip-audit (backend)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # 注：pip-audit 按 requirements.txt 声明解析依赖扫描（非实际安装版本）；
+      # requirements.txt 已全锁（issue #172），解析结果与 CI/生产一致。
+      # 发现已知漏洞即 exit 1（比 --audit-level=high 更严格，宁可人工排除误报）。
+      - name: Run pip-audit
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r backend/requirements.txt
+
+  frontend-audit:
+    name: "npm audit (frontend)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # Node 版本与 ci.yml / frontend/.nvmrc 保持一致
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # 仅扫生产依赖；high 及以上漏洞时 workflow 红
+      - name: Run npm audit
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high

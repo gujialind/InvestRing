@@ -16,6 +16,7 @@
 - [ ] MySQL 迁移链检查（CI backend-test-mysql）
 - [ ] ir-cli 契约检查（CI cli-contract-check）
 - [ ] 前端 lint / build（CI frontend-check）
+- [ ] 前端 E2E（CI frontend-e2e）
 - [ ] 上线冒烟（health check + `ir portfolio list` + 关键数据抽查）
 
 ## 部署影响
