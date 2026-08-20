@@ -18,9 +18,10 @@ export default defineConfig({
   // CI 中失败自动重试 2 次
   retries: process.env.CI ? 2 : 0,
 
-  // 并行执行
+  // 并行执行：CI 下 2 workers（ubuntu-latest runner 2 核，不贪多），
+  // 本地默认按 CPU 核数自适应
   fullyParallel: true,
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 2 : undefined,
 
   // 报告器
   reporter: [
@@ -35,27 +36,26 @@ export default defineConfig({
     video: 'on-first-retry',
   },
 
-  // 自动启动开发服务器
+  // 自动启动生产构建服务（issue #171）：E2E 直接跑 standalone server.js，
+  // 与 Docker 容器完全同形态（next start 与 output:'standalone' 不兼容）。
+  // CI/本地运行前需先 npm run build 并组装 standalone 静态资源
+  // （cp .next/static 与 public 入 .next/standalone，见 ci.yml / Dockerfile）。
+  // 历史上曾跑在 next dev 上，按需编译/Fast Refresh full reload 竞态
+  // 是 PR #169 类 flaky 的根因，切生产构建后此类竞态结构性消失。
   webServer: {
-    command: 'npm run dev',
+    command: 'PORT=3000 node .next/standalone/server.js',
     port: 3000,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },
 
   projects: [
-    // 路由预热：先编译 E2E 涉及的全部路由（next dev 按需编译会向已连接
-    // 客户端广播重建、触发 full reload 取消其他客户端进行中的导航，
-    // 即 PR #169 「webkit 307 跳转被取消」的根因，详见 fixtures/warmup.ts）
-    {
-      name: 'warmup',
-      testMatch: /warmup\.ts/,
-    },
-    // 认证状态设置（登录一次，所有测试共享）
+    // 认证状态设置（登录一次，所有测试共享）。
+    // 生产构建下路由已预编译，原「路由预热 warmup project」（专为
+    // next dev 按需编译设计，见 issue #171 评审）已移除。
     {
       name: 'setup',
       testMatch: /.*\.setup\.ts/,
-      dependencies: ['warmup'],
     },
     // 桌面端 Chrome
     {
