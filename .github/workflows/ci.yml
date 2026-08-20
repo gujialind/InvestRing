@@ -27,6 +27,7 @@ jobs:
   backend-test:
     name: "Backend Tests"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend
@@ -48,19 +49,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # SQLite 模式运行全量测试（unit + integration + e2e）
+      # SQLite 模式运行全量测试（unit + integration + e2e）；
+      # 覆盖率仅在本 job 收集（不设阈值，先度量观察基线，issue #171）
       - name: Run tests with pytest
         env:
           SECRET_KEY: test-secret-key-for-ci
           SCHEDULER_ENABLED: "false"
         run: |
-          pytest tests/ -q --tb=short --strict-markers
+          pytest tests/ -q --tb=short --strict-markers --cov=app --cov-report=xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          retention-days: 14
 
   # MySQL 门禁：覆盖 SQLite 测不出的方言差异（VARCHAR 长度、DECIMAL 截断、
   # 隐式排序、排序规则等），并验证生产启动顺序（create_all → alembic upgrade head）
   backend-test-mysql:
     name: "Backend Tests (MySQL)"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend
@@ -140,6 +151,7 @@ jobs:
   cli-contract-check:
     name: "CLI Contract Check"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -180,6 +192,7 @@ jobs:
   frontend-check:
     name: "Frontend Lint & Build"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -222,6 +235,7 @@ jobs:
   frontend-e2e:
     name: "Frontend E2E"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     services:
       mysql:
@@ -299,7 +313,7 @@ jobs:
           done
           curl -sf http://127.0.0.1:8000/health
 
-      # ---- 前端：webServer 由 playwright.config.ts 自动起 npm run dev（:3000）----
+      # ---- 前端：生产构建 + webServer 由 playwright.config.ts 自动起 standalone server.js（:3000）----
       - name: Setup Node 24
         uses: actions/setup-node@v4
         with:
@@ -310,6 +324,20 @@ jobs:
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      # E2E 跑生产构建形态（issue #171）：standalone server.js 与 Docker
+      # 容器完全同形态（next start 与 output:'standalone' 不兼容）；
+      # API_BASE_URL 默认 localhost:8000，build 时固化的 rewrites 恰与
+      # 本 job 后端地址一致，无需额外传参。
+      # standalone 不包含 public/ 与 .next/static/，组装步骤与 Dockerfile 一致。
+      - name: Build frontend (production)
+        working-directory: frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          npm run build
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
 
       # 桌面 chromium + 移动 webkit（mobile 用 iPhone 13 描述符，
       # 见 playwright.config.ts 注释；PR #169 遗留的 webkit 307 取消问题
@@ -354,6 +382,7 @@ jobs:
   docker-build-smoke:
     name: "Docker Build Smoke (${{ matrix.service }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         include:
