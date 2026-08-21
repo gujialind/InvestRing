@@ -263,15 +263,15 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 > 单人 + AI 编程协作的工作流约定。**代码是唯一事实来源**；本约定只约束动作边界，不做过度流程。
 
-### 8.1 分支模型
+### 8.1 分支模型（GitHub Flow，单长期分支，issue #211）
 
 | 分支 | 角色 | 规则 |
 | --- | --- | --- |
-| `dev` | 开发草稿线 | 日常小修直接 push；可随时推翻重来 |
-| `main` | 生产交付线 | 合入即触发 CI → CD 自动部署上线 |
+| `main` | 唯一长期分支（生产交付线） | 受 ruleset 保护：禁删除/禁强推 + require PR + required check `CI OK`；合入即触发 CI → CD 自动部署上线 |
 
-* **合 `main` 永远走 PR**（CI 全量门禁：SQLite pytest + MySQL 8.4 方言/迁移链 + ir-cli 契约 + 前端 lint/build）。
-* **分支命名**：`feature/<issue号>-<简述>`、`hotfix/<issue号>-<简述>`、`release/<版本>`；AI 代理干活可用 `trae/xxx`、`codex/xxx` 前缀。**合完即删**，不堆积。改动前先 `git fetch` 确认基线：dev 是开发草稿线，**常态领先于 main**；仅 hotfix 场景（先合 main 再合 dev）下 main 会暂时含有 dev 尚未合入的提交。
+* **一切改动经 `feature/` → PR → `main`**：从最新 `origin/main` 拉短命分支（`feature/<issue号>-<简述>`、`hotfix/<issue号>-<简述>`；AI 代理可用 `trae/xxx`、`codex/xxx` 前缀），PR **squash 合并**，合并后由仓库级 `delete_branch_on_merge` 自动删除；`main` 永不作为 PR head、永不带 `--delete-branch`。
+* **合 `main` 前 CI 必须全绿**（全量门禁：SQLite pytest + MySQL 8.4 方言/迁移链 + ir-cli 契约 + 前端 lint/build + E2E + Docker 构建冒烟），由 required status check `CI OK` 强制。
+* **三条硬规则已由 ruleset/workflow 机械强制，非纯约定**：① `main` 禁删除/禁强推（ruleset `deletion` + `non_fast_forward`）；② 手动部署（`deploy.yml` `workflow_dispatch`）只接受已有镜像 tag（回滚/重部署），留空即 `exit 1`，上线新代码唯一入口是 push `main` 走 CI；③ 任何分支从最新 `origin/main` 拉出，不从本地旧 ref 重建。
 
 ### 8.2 Issue 约定
 
@@ -295,7 +295,7 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 1. **改完必须验证**：本地测试绿 + 能说明改动影响；验证不了的改动不提交。
 2. **排查/审查中发现的问题只提 issue，不直接改代码**，由任务所有者决定修复方式。
-3. **动手前确认分支**：AI 默认在当前分支提交；被要求改大功能/新功能时，先开 `feature/` 分支。
+3. **动手前从最新 `origin/main` 新建 `feature/` 分支**：AI 不直接 push `main`（受 ruleset 强制），一切改动经 feature 分支 → PR → main。
 4. **不得引入未要求的依赖或表结构改动**；涉及 DB 变更必须同步提供 Alembic 迁移脚本。
 5. **仓库文档（README/AGENTS/runbook）随代码同一次提交更新**；设计决策与方案记录进 issue 讨论。
 6. 当你执行一项任务发现有任何执行细节不明确时，你必须向我提问，而不是自做主张，在我回答之后仍有不明确的行细节时，你需要向我追问，直到了解了所有细节。
