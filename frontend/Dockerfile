@@ -35,8 +35,8 @@ COPY . .
 
 # 构建时注入环境变量
 # API_BASE_URL：Next.js rewrites 在 build 时固化，必须构建期注入
-# 魔搭 Studio 不支持自定义 --build-arg，故默认值即为生产后端地址
-ARG API_BASE_URL=http://<server-ip>:8000
+# 魔搭 Studio 不支持自定义 --build-arg，故默认值即为生产后端地址（走域名，不暴露服务器 IP）
+ARG API_BASE_URL=https://investring.top
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production \
     API_BASE_URL=$API_BASE_URL

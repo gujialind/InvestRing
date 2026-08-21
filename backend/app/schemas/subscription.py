@@ -23,11 +23,13 @@ class SubscriptionCreate(SubscriptionBase):
 
 class SubscriptionUpdate(BaseModel):
     # confirm_date 不开放直改：创建/unconfirm 时由服务层按 T+1 自动维护
+    # （编辑 apply_date 时服务层同步重算预计确认日，issue #202）
     # status 不开放直改：状态流转走 confirm/cancel/unconfirm 端点
     platform_code: Optional[str] = None
     amount: Optional[float] = None
     shares: Optional[float] = None
     unit_price: Optional[float] = None
+    apply_date: Optional[date] = None
     notes: Optional[str] = None
 
 

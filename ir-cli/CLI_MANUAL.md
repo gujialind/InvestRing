@@ -103,6 +103,7 @@ ir schema trade              # 仅输出指定命令组
 | `ALREADY_EXISTS` | 资源已存在（唯一约束冲突） |
 | `VALIDATION_ERROR` | 参数校验失败 |
 | `INVALID_STATUS` | 状态不允许当前操作 |
+| `INVALID_PARAM` | 字段与记录类型/语义不匹配（如申购传份额、字段显式传 null） |
 | `INVALID_AMOUNT` / `INVALID_SHARES` | 金额/份额不合法 |
 | `INSUFFICIENT_CASH` | 买入金额超过可用现金 |
 | `INSUFFICIENT_SHARES` | 卖出/赎回份额超过可用份额 |
@@ -545,6 +546,19 @@ ir sub unconfirm <ID>
 > - 确认日及之后已有快照时报 `SNAPSHOT_DEPENDENCY`，需先删除对应快照
 > - **负现金防护**（issue #180）：申购入金已被后续交易消耗时报 `UNCONFIRM_WOULD_NEGATIVE_CASH`，需先取消依赖该现金的交易
 > - **状态回退**（issue #180）：回退后组合 `started_at` 重算为现存最小确认日；无任何确认申购时组合回退 `draft`（`closed` 组合保持 `closed`）
+
+#### `ir sub update`
+
+编辑申赎（仅 `pending` 可改，`confirmed` 需先 `unconfirm`）。
+
+```bash
+ir sub update <ID> [--amount <金额>] [--shares <份额>] [--unit-price <净值>] \
+  [--platform-code <平台>] [--apply-date YYYY-MM-DD] [--notes <备注>]
+```
+
+> - 改 `--apply-date` 时后端校验交易日 + 晚于最新快照日，并自动重算预计确认日（T+1，issue #202）
+> - 字段按类型收口（与创建同口径）：申购仅可改 `--amount`、赎回仅可改 `--shares`，错位报 `INVALID_PARAM`（PR #204 评审）
+> - 赎回改份额与创建同口径：先量化 2 位再与可用份额精确比较（加回本条自身 pending 旧份额）
 
 ---
 

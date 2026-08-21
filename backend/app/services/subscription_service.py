@@ -407,6 +407,100 @@ def create_subscription(
     return new_sub
 
 
+def update_subscription(
+    db: Session,
+    subscription: Subscription,
+    updates: dict,
+) -> Subscription:
+    """更新申赎（仅 pending 可改，confirmed/cancelled 均拒绝），供 REST 与 CLI 共用。不 commit。
+
+    updates 为 SubscriptionUpdate.dict(exclude_unset=True)。校验与创建同口径：
+    - 状态收口：confirmed 拒绝 CANNOT_MODIFY_CONFIRMED（状态流转走
+      confirm/cancel/unconfirm）；cancelled 拒绝 INVALID_STATUS（终态不可复活改值，
+      与 update_trade 同口径）
+    - 显式 null 收口（PR #204 评审）：除 notes（null=清除备注）外，字段显式
+      传 null 拒绝 INVALID_PARAM，防止绕过量化/可用份额闸门并落库脏数据
+    - 类型拆分（与创建同口径）：subscribe 仅接受 amount、redeem 仅接受 shares，
+      错位字段拒绝 INVALID_PARAM
+    - apply_date：交易日 + 晚于最新快照日，并重算预计确认日（T+1）
+    - amount（申购）/shares（赎回）：先量化再校验大于 0
+    - 赎回份额闸门：新份额（或仅改日期时的原份额）不得超过可用份额，
+      可用份额已扣本条自身 pending 旧份额，先加回再比较（与 trade PUT 同口径）
+    - platform_code：平台必须存在
+    """
+    if subscription.status == "confirmed":
+        raise BusinessError(
+            "CANNOT_MODIFY_CONFIRMED",
+            "已确认的申购赎回事件不可直接修改，请先取消确认后再修改",
+        )
+    if subscription.status == "cancelled":
+        raise InvalidStatusError("已取消的申赎不可修改")
+
+    # 显式 null 收口：exclude_unset 不含 exclude_none，null 会穿透量化/闸门
+    # 校验经 setattr 落库脏数据；notes 例外（null 用于清除备注）
+    null_fields = [f for f, v in updates.items() if f != "notes" and v is None]
+    if null_fields:
+        raise BusinessError(
+            "INVALID_PARAM",
+            f"字段不可为空: {', '.join(sorted(null_fields))}",
+        )
+
+    # 与创建同口径：字段按申赎类型收口，防止语义不一致记录
+    if subscription.sub_type == "subscribe" and "shares" in updates:
+        raise BusinessError("INVALID_PARAM", "申购仅可修改金额，不可修改份额")
+    if subscription.sub_type == "redeem" and "amount" in updates:
+        raise BusinessError("INVALID_PARAM", "赎回仅可修改份额，不可修改金额")
+
+    apply_date = subscription.apply_date
+
+    if updates.get("platform_code") is not None:
+        platform = db.query(Platform).filter(Platform.code == updates["platform_code"]).first()
+        if not platform:
+            raise NotFoundError("PLATFORM_NOT_FOUND", f"平台 {updates['platform_code']} 不存在")
+
+    if updates.get("apply_date") is not None:
+        apply_date = updates["apply_date"]
+        if not is_trading_day(db, apply_date):
+            raise BusinessError("NON_TRADING_DAY", "非交易日，请等待交易日再提交")
+        latest_snapshot_date = get_latest_snapshot_date(db, subscription.portfolio_code)
+        if latest_snapshot_date and apply_date <= latest_snapshot_date:
+            raise BusinessError(
+                "DATE_BEFORE_SNAPSHOT",
+                f"申请日必须晚于最新快照日（{latest_snapshot_date}）",
+            )
+        updates["confirm_date"] = get_next_trading_day(db, apply_date, days=1)
+
+    if updates.get("amount") is not None:
+        amount_d = quantize_amount(Decimal(str(updates["amount"])))
+        if amount_d <= 0:
+            raise BusinessError("INVALID_AMOUNT", "申购金额必须大于0")
+        updates["amount"] = amount_d
+
+    if updates.get("shares") is not None:
+        shares_d = quantize_shares(Decimal(str(updates["shares"])))
+        if shares_d <= 0:
+            raise BusinessError("INVALID_SHARES", "赎回份额必须大于0")
+        updates["shares"] = shares_d
+
+    if subscription.sub_type == "redeem" and ("shares" in updates or "apply_date" in updates):
+        new_shares = updates.get("shares", subscription.shares)
+        if new_shares is not None:
+            available = calculate_investor_available_shares(
+                db, subscription.portfolio_code, subscription.investor_code,
+                as_of_date=apply_date,
+            )
+            # 加回本条自身 pending 旧份额（可用份额计算已将其扣除）
+            if subscription.status == "pending" and subscription.shares:
+                available += Decimal(str(subscription.shares))
+            if Decimal(str(new_shares)) > available:
+                raise BusinessError("INSUFFICIENT_SHARES", "赎回份额超过可用份额")
+
+    for field, value in updates.items():
+        setattr(subscription, field, value)
+
+    return subscription
+
+
 def list_subscriptions(
     db: Session,
     *,
