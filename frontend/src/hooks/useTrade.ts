@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { tradeApi, subscriptionApi, getErrorMessage, ApiException } from "@/lib/api";
 import type { SubscriptionListParams, TradeListParams } from "@/lib/api";
 import { TradeCreate, TradeUpdate } from "@/types/trade";
-import { SubscriptionCreate } from "@/types/subscription";
+import { SubscriptionCreate, SubscriptionUpdate } from "@/types/subscription";
 import { useUIStore } from "@/stores/uiStore";
 
 const TRADE_QUERY_KEY = "trades";
@@ -308,6 +308,36 @@ export function useCreateSubscription() {
         type: "error",
         title: "申请提交失败",
         message: getErrorMessage(error, "请检查输入信息"),
+      });
+    },
+  });
+}
+
+// 更新申购赎回 Hook（issue #202：pending 编辑入口）
+export function useUpdateSubscription(id: number) {
+  const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
+
+  return useMutation({
+    mutationFn: (data: SubscriptionUpdate) => subscriptionApi.update(id, data),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, data.id] });
+      queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, "list"] });
+      // 与 create/confirm/cancel 对齐：改金额/日期后可用现金等派生值变化，失效组合缓存
+      queryClient.invalidateQueries({
+        queryKey: ["portfolios", data.portfolio_code],
+      });
+      addToast({
+        type: "success",
+        title: "更新成功",
+        message: "申请信息已更新",
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "更新失败",
+        message: getErrorMessage(error, "请稍后重试"),
       });
     },
   });

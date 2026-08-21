@@ -10839,6 +10839,18 @@
             ],
             "title": "Unit Price"
           },
+          "apply_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply Date"
+          },
           "notes": {
             "anyOf": [
               {
