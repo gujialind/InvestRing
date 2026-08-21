@@ -1106,3 +1106,70 @@ class TestSubscriptionUpdate:
         )
         assert resp.status_code == 422
         assert resp.json()["detail"]["error"] == "INSUFFICIENT_SHARES"
+
+    def test_update_explicit_null_rejected(self, client, admin_headers, test_db):
+        """显式 null 拒绝 INVALID_PARAM，不可绕过校验落库脏数据（PR #204 评审）"""
+        create_portfolio(test_db, code="UPD_P8", status="active")
+        create_investor(test_db, code="UPD_I8")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        sub = create_subscription(
+            test_db, "UPD_P8", "UPD_I8", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 1),
+        )
+
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"amount": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_PARAM"
+        test_db.refresh(sub)
+        assert sub.amount == Decimal("10000.00")  # 零写入，原值不变
+
+    def test_update_type_mismatch_rejected(self, client, admin_headers, test_db):
+        """字段按申赎类型收口：subscribe 拒 shares、redeem 拒 amount（与创建同口径）"""
+        create_portfolio(test_db, code="UPD_P9", status="active")
+        create_investor(test_db, code="UPD_I9")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        sub_s = create_subscription(
+            test_db, "UPD_P9", "UPD_I9", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 1),
+        )
+        sub_r = create_subscription(
+            test_db, "UPD_P9", "UPD_I9", sub_type="redeem",
+            shares=100.0, apply_date=date(2025, 9, 1),
+        )
+
+        resp = client.put(
+            f"/api/subscriptions/{sub_s.id}", json={"shares": 100},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_PARAM"
+
+        resp = client.put(
+            f"/api/subscriptions/{sub_r.id}", json={"amount": 5000},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_PARAM"
+
+    def test_update_notes_null_clears(self, client, admin_headers, test_db):
+        """notes 传 null 清除备注（唯一放行 null 的字段，PR #204 评审）"""
+        create_portfolio(test_db, code="UPD_P10", status="active")
+        create_investor(test_db, code="UPD_I10")
+        ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
+        sub = create_subscription(
+            test_db, "UPD_P10", "UPD_I10", sub_type="subscribe",
+            amount=10000.0, apply_date=date(2025, 9, 1),
+        )
+        sub.notes = "原备注"
+        test_db.commit()
+
+        resp = client.put(
+            f"/api/subscriptions/{sub.id}", json={"notes": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        test_db.refresh(sub)
+        assert sub.notes is None

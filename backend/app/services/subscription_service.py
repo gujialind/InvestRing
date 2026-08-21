@@ -418,6 +418,10 @@ def update_subscription(
     - 状态收口：confirmed 拒绝 CANNOT_MODIFY_CONFIRMED（状态流转走
       confirm/cancel/unconfirm）；cancelled 拒绝 INVALID_STATUS（终态不可复活改值，
       与 update_trade 同口径）
+    - 显式 null 收口（PR #204 评审）：除 notes（null=清除备注）外，字段显式
+      传 null 拒绝 INVALID_PARAM，防止绕过量化/可用份额闸门并落库脏数据
+    - 类型拆分（与创建同口径）：subscribe 仅接受 amount、redeem 仅接受 shares，
+      错位字段拒绝 INVALID_PARAM
     - apply_date：交易日 + 晚于最新快照日，并重算预计确认日（T+1）
     - amount（申购）/shares（赎回）：先量化再校验大于 0
     - 赎回份额闸门：新份额（或仅改日期时的原份额）不得超过可用份额，
@@ -431,6 +435,21 @@ def update_subscription(
         )
     if subscription.status == "cancelled":
         raise InvalidStatusError("已取消的申赎不可修改")
+
+    # 显式 null 收口：exclude_unset 不含 exclude_none，null 会穿透量化/闸门
+    # 校验经 setattr 落库脏数据；notes 例外（null 用于清除备注）
+    null_fields = [f for f, v in updates.items() if f != "notes" and v is None]
+    if null_fields:
+        raise BusinessError(
+            "INVALID_PARAM",
+            f"字段不可为空: {', '.join(sorted(null_fields))}",
+        )
+
+    # 与创建同口径：字段按申赎类型收口，防止语义不一致记录
+    if subscription.sub_type == "subscribe" and "shares" in updates:
+        raise BusinessError("INVALID_PARAM", "申购仅可修改金额，不可修改份额")
+    if subscription.sub_type == "redeem" and "amount" in updates:
+        raise BusinessError("INVALID_PARAM", "赎回仅可修改份额，不可修改金额")
 
     apply_date = subscription.apply_date
 

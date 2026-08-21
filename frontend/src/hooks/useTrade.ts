@@ -323,6 +323,10 @@ export function useUpdateSubscription(id: number) {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, data.id] });
       queryClient.invalidateQueries({ queryKey: [SUBSCRIPTION_QUERY_KEY, "list"] });
+      // 与 create/confirm/cancel 对齐：改金额/日期后可用现金等派生值变化，失效组合缓存
+      queryClient.invalidateQueries({
+        queryKey: ["portfolios", data.portfolio_code],
+      });
       addToast({
         type: "success",
         title: "更新成功",

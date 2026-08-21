@@ -30,11 +30,12 @@ export interface SubscriptionCreate {
 // 字段与后端 schemas 的 SubscriptionUpdate 对齐：
 // 不含 confirm_date/status（后端会静默丢弃）；改状态请走 confirm/unconfirm/cancel 端点
 // apply_date 可改（issue #202）：后端校验交易日/快照日并重算预计确认日
+// notes 传 null 清除备注（唯一放行 null 的字段，其余字段 null 拒 INVALID_PARAM，PR #204 评审）
 export interface SubscriptionUpdate {
   platform_code?: string;
   amount?: number;
   shares?: number;
   unit_price?: number;
   apply_date?: string;
-  notes?: string;
+  notes?: string | null;
 }

@@ -271,16 +271,22 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
   const handleEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSub) return;
-    // 仅组装非空字段：空串不入 payload（exclude_unset 语义下避免误清）
-    const payload: SubscriptionUpdate = {};
-    if (editingSub.sub_type === "subscribe" && editFormData.amount) {
-      payload.amount = parseFloat(editFormData.amount);
+    // 显式传值（非 truthy 判断，防清空字段被静默丢弃，PR #204 评审）：
+    // 类型字段与 apply_date 恒传（均有预填值）；notes 空串传 null 清除备注
+    //（后端仅 notes 放行 null，其余字段 null 拒 INVALID_PARAM）
+    const payload: SubscriptionUpdate = {
+      apply_date: editFormData.apply_date,
+      notes: editFormData.notes || null,
+    };
+    if (editingSub.sub_type === "subscribe") {
+      const amount = parseFloat(editFormData.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return; // required/min 已拦，双保险
+      payload.amount = amount;
+    } else {
+      const shares = parseFloat(editFormData.shares);
+      if (!Number.isFinite(shares) || shares <= 0) return;
+      payload.shares = shares;
     }
-    if (editingSub.sub_type === "redeem" && editFormData.shares) {
-      payload.shares = parseFloat(editFormData.shares);
-    }
-    if (editFormData.apply_date) payload.apply_date = editFormData.apply_date;
-    if (editFormData.notes) payload.notes = editFormData.notes;
     // 失败时 hook 已 toast，Dialog 保持打开可重试（不挂 onError 关闭逻辑）
     updateSubscription.mutate(payload, { onSuccess: () => setEditingSub(null) });
   };
@@ -488,6 +494,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                       id="amount"
                       type="number"
                       step="0.01"
+                      min="0.01"
                       value={formData.amount}
                       onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                       required
@@ -508,6 +515,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                         id="shares"
                         type="number"
                         step="0.01"
+                        min="0.01"
                         value={formData.shares}
                         onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
                         required
@@ -769,8 +777,10 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                       id="edit_amount"
                       type="number"
                       step="0.01"
+                      min="0.01"
                       value={editFormData.amount}
                       onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
+                      required
                     />
                   </div>
                 ) : (
@@ -780,8 +790,10 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                       id="edit_shares"
                       type="number"
                       step="0.01"
+                      min="0.01"
                       value={editFormData.shares}
                       onChange={(e) => setEditFormData({ ...editFormData, shares: e.target.value })}
+                      required
                     />
                   </div>
                 )}
