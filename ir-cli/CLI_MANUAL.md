@@ -650,9 +650,9 @@ ir trade confirm <ID> [--confirm-date YYYY-MM-DD] [--price <价格>] [--sync-nav
 > **业务规则**：
 > - 仅 `pending` 状态可确认
 > - 确认日期根据产品的 `confirm_days` 自动计算（普通基金 T+1，QDII T+2）
-> - 场外净值型产品（OEF/LOF + CN_OTC）自动从 `PriceRecord` 获取净值
+> - 场外净值型产品（OEF/LOF + CN_OTC/HK_MUTUAL）自动从 `PriceRecord` 获取 T 日净值重算 shares/amount，缺失报 `MISSING_NAV`
 > - **QDII 产品**：使用交易日当天的净值（需 T+2 日后确认）
-> - 可通过 `--price` 手动覆盖价格
+> - `--price`：场外基金仅用于与 T 日净值一致性校验（不一致报 `PRICE_NAV_MISMATCH`，不覆盖净值）；场内基金作为覆盖成交价
 > - `--sync-nav`（issue #90）：命中 `MISSING_NAV` 时自动回填该标的历史净值后重试一次（会访问外部数据源），同步后仍缺失则照常报 `MISSING_NAV`
 
 #### `ir trade cancel`
