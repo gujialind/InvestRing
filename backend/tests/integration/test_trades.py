@@ -533,6 +533,95 @@ class TestNonQDIIrigorousNav:
         assert confirm.json()["detail"]["error"] == "MISSING_NAV"
 
 
+class TestHKMutualConfirmNav:
+    """HK_MUTUAL（香港互认）基金确认同 CN_OTC 口径取 T 日净值重算 shares/amount
+
+    事故复刻：市场白名单曾仅含 CN_OTC，HK_MUTUAL 落入「不重算」分支，
+    确认后 price/shares 为空（即使 price_record 已有 T 日净值）。
+    """
+
+    def test_confirm_hk_mutual_uses_t_nav(self, client, admin_headers, test_db):
+        """HK_MUTUAL 买入确认：取 T 日净值回填 price 并计算 shares"""
+        create_portfolio(test_db, code="HK_P1", status="active")
+        create_product(test_db, code="1001767346", market="HK_MUTUAL",
+                       product_type="OEF", confirm_days=1, is_qdii=False)
+        create_platform(test_db, code="HK_PLAT")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        ensure_trading_day(test_db, date(2025, 10, 7), is_open=True)
+        # 提供现金
+        create_trade(
+            test_db, "HK_P1", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="HK_PLAT", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+        # T 日净值（market=HK_MUTUAL）
+        create_price_record(test_db, "1001767346", "HK_MUTUAL",
+                            date(2025, 10, 6), unit_price=1.25)
+
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "HK_P1",
+                "product_code": "1001767346",
+                "market": "HK_MUTUAL",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "platform_code": "HK_PLAT",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), resp.json()
+        trade_id = resp.json()["id"]
+        # 创建时无价格：price 为空、shares 未计算（序列化可能为 0.0）
+        assert resp.json()["price"] is None
+        assert resp.json()["shares"] in (None, 0.0)
+
+        confirm = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
+        assert confirm.status_code == 200, confirm.json()
+        assert confirm.json()["status"] == "confirmed"
+        # confirm 端点返回精简结构，回查 DB 断言净值/份额已回填
+        t = test_db.query(Trade).filter(Trade.id == trade_id).first()
+        assert float(t.price) == 1.25
+        # shares = (actual_amount - fee) / nav = 10000 / 1.25
+        assert float(t.shares) == 8000.0
+
+    def test_confirm_hk_mutual_missing_t_nav_rejected(self, client, admin_headers, test_db):
+        """HK_MUTUAL 缺 T 日净值同样拒绝确认（不回退、不空确认）"""
+        create_portfolio(test_db, code="HK_P2", status="active")
+        create_product(test_db, code="1001767344", market="HK_MUTUAL",
+                       product_type="OEF", confirm_days=1, is_qdii=False)
+        create_platform(test_db, code="HK_PLAT2")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+        create_trade(
+            test_db, "HK_P2", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="HK_PLAT2", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "HK_P2",
+                "product_code": "1001767344",
+                "market": "HK_MUTUAL",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "platform_code": "HK_PLAT2",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), resp.json()
+        trade_id = resp.json()["id"]
+
+        confirm = client.post(f"/api/trades/{trade_id}/confirm", headers=admin_headers)
+        assert confirm.status_code == 422
+        assert confirm.json()["detail"]["error"] == "MISSING_NAV"
+
+
 class TestUnconfirmTradeSnapshotProtection:
     """#25 unconfirm_trade 快照保护"""
 

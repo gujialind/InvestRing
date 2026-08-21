@@ -328,7 +328,7 @@ def calculate_confirm_preview(
     confirm_single_trade 调用本函数取结果后回写，保证「预览 == 真实确认」。
 
     计算规则（与确认语义完全一致）：
-    - 场外净值型基金（OEF/LOF 且 CN_OTC）：取 T 日净值重算 shares/amount，
+    - 场外净值型基金（OEF/LOF 且 CN_OTC/HK_MUTUAL）：取 T 日净值重算 shares/amount，
       缺失抛 MISSING_NAV；传入 price 仅作一致性校验（不一致抛 PRICE_NAV_MISMATCH）
     - 非净值型且传入 price：按传入成交价重算（补录/手动覆盖场景）
     - 否则（场内不传价）：不重算，返回 trade 现有字段原样
@@ -355,11 +355,11 @@ def calculate_confirm_preview(
     """
     effective_confirm_date = confirm_date if confirm_date is not None else trade.confirm_date
 
-    # 场外净值型基金（CN_OTC 的 OEF/LOF）确认时必须获取 T 日净值进行计算
+    # 场外净值型基金（CN_OTC/HK_MUTUAL 的 OEF/LOF）确认时必须获取 T 日净值进行计算
     is_otc_nav_fund = (
         bool(product)
         and product.product_type in ["OEF", "LOF"]
-        and trade.market == "CN_OTC"
+        and trade.market in ("CN_OTC", "HK_MUTUAL")
     )
 
     result_price = trade.price
@@ -455,7 +455,7 @@ def confirm_single_trade(
     - 计算统一委托 calculate_confirm_preview（确认与预览共用同一实现），
       本函数负责将结果回写 trade 并置 confirmed
     - confirm_date 已在创建时设定；若传入参数则覆盖（补录场景）
-    - 场外基金（OEF/LOF 且 CN_OTC）确认时统一获取 T 日（成交当日）净值并重算 shares/amount，
+    - 场外基金（OEF/LOF 且 CN_OTC/HK_MUTUAL）确认时统一获取 T 日（成交当日）净值并重算 shares/amount，
       不区分 QDII/非 QDII，一律以净值计算；缺失 T 日净值时抛 MISSING_NAV 拒绝确认
     - sync_nav=True（issue #90，显式选择）：命中 MISSING_NAV 时自动回填该标的历史净值
       后重试一次；同步后仍缺失则照常抛 MISSING_NAV
