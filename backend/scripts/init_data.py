@@ -362,8 +362,8 @@ def init_platforms(session):
     session.commit()
 
 def init_admin_user(session):
-    """初始化管理员用户"""
-    password = 'admin@2026'
+    """初始化管理员用户（密码优先从环境变量 ADMIN_INIT_PASSWORD 读取）"""
+    password = os.environ.get('ADMIN_INIT_PASSWORD', 'admin@2026')
     password_bytes = password.encode('utf-8')
     salt = bcrypt.gensalt(rounds=10)
     password_hash = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
