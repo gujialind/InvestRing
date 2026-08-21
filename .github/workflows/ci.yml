@@ -2,7 +2,7 @@
 # InvestRing CI 持续集成流水线
 # ============================================================================
 # 范围：后端测试 + CLI 契约校验 + 前端 lint/类型/构建门禁 + 前端 E2E（issue #168）
-# 触发条件：push 或 pull request 到 main/dev 分支
+# 触发条件：push 到 main（合入后）或 pull request 到 main（issue #211 单分支模型）
 # 测试数据库：
 #   - SQLite（conftest.py 默认模式，快速反馈）
 #   - MySQL 8.4 service 容器（对齐生产 RDS，覆盖方言差异 + 迁移链验证）
@@ -12,15 +12,16 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
 
-# 并发控制：同一源分支只保留最新的运行。
-# head_ref（PR 源分支名）优先，push 事件回落到 ref_name（分支名），
-# 使 push 到 dev 与 dev→main PR 落入同一组，避免同一 commit 重复运行。
+# 并发控制：按「事件类型 + 源分支」分组，同组只保留最新运行。
+# 事件类型入组（issue #211）：push（合入 main 后）与 pull_request（feature→main）分属不同组，
+# 互不取消——required check 语义下「被取消」= 未通过会卡住 PR。
+# head_ref（PR 源分支名）优先，push 事件回落到 ref_name（分支名）。
 concurrency:
-  group: ci-${{ github.head_ref || github.ref_name }}
+  group: ci-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -427,3 +428,31 @@ jobs:
           # 与 deploy.yml 一致：ACR 个人版不支持 OCI attestation（issue #141）
           provenance: false
           sbom: false
+
+  # 汇总门禁（issue #211）：作为 main 分支唯一的 required status check。
+  # 不直接把 matrix 展开的 Docker Build Smoke / 偏发的 Frontend E2E 设为 required，
+  # 而是用本 job needs 全部实质 job 后统一判定——任一 failure/cancelled 即失败，
+  # skipped 视为通过（为将来 paths-ignore 预留）。
+  ci-ok:
+    name: "CI OK"
+    if: always()
+    needs:
+      - backend-test
+      - backend-test-mysql
+      - cli-contract-check
+      - frontend-check
+      - frontend-e2e
+      - docker-build-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate result
+        run: |
+          results="${{ join(needs.*.result, ',') }}"
+          echo "needs results: $results"
+          case "$results" in
+            *failure*|*cancelled*)
+              echo "❌ CI 未全绿（存在 failure/cancelled）"
+              exit 1
+              ;;
+          esac
+          echo "✅ 全部必需 job 成功"

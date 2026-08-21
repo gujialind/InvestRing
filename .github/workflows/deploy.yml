@@ -2,8 +2,8 @@
 # InvestRing CD 持续部署流水线（backend + frontend + nginx）
 # ============================================================================
 # 触发条件：
-#   1. main 分支 CI 通过后自动部署
-#   2. 手动触发（workflow_dispatch）：可指定已有镜像 tag 重新部署/回滚
+#   1. main 分支 CI 通过后自动部署（上线新代码的唯一入口）
+#   2. 手动触发（workflow_dispatch）：仅重新部署/回滚到已有镜像 tag（留空会被拒绝，issue #211）
 #
 # 部署链路：并行构建前后端镜像 → 推送阿里云 ACR → SSH 到服务器 docker compose up -d
 # 目标环境：4核4G 云服务器（backend/frontend/nginx 三容器）+ 云 RDS MySQL
@@ -32,14 +32,15 @@ on:
     workflows: ["CI"]
     types: [completed]
 
-  # 手动触发：留空 image_tag 则构建触发分支当前 commit 并部署；
-  # 填写已有 tag（如短 commit SHA）则跳过构建直接部署该版本（用于回滚）。
+  # 手动触发：仅用于重新部署 / 回滚到已有镜像 tag（如短 commit SHA），跳过构建直接部署该版本。
+  # 收口（issue #211）：上线新代码的唯一入口是 push main 走 CI 自动部署；留空 image_tag 会被
+  # setup 直接拒绝（exit 1），避免手动构建触发分支绕过 CI 覆盖生产（8-21 事故第 4 环）。
   # 前后端镜像共用同一 tag（同一 commit 构建），回滚时两者一起回退。
   # ⚠️ 回滚含数据库迁移的版本前，先按 docs/runbooks/deploy-rollback.md 判定迁移缺口。
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "部署已有镜像 tag（留空则构建最新代码）"
+        description: "要回滚/重部署的已有镜像 tag（必填；留空将被拒绝）"
         required: false
         type: string
 
@@ -51,6 +52,10 @@ concurrency:
 env:
   BACKEND_IMAGE: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/investring-backend
   FRONTEND_IMAGE: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/investring-frontend
+
+# 部署成功后给已部署 commit 打 deploy/ tag（回滚目标单一视图，issue #211）需要写 contents 权限
+permissions:
+  contents: write
 
 jobs:
   # ==========================================================================
@@ -76,23 +81,21 @@ jobs:
       - name: 计算镜像版本
         id: ver
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.image_tag }}" ]; then
-            # 手动指定已有 tag：直接部署，不构建
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # 手动触发：收口为仅回滚/重部署已有 tag（issue #211）。
+            # 留空 image_tag 直接拒绝——上线新代码的唯一入口是 push main 走 CI 自动部署，
+            # 避免手动构建触发分支绕过 CI 覆盖生产（8-21 事故第 4 环）。
+            if [ -z "${{ github.event.inputs.image_tag }}" ]; then
+              echo "❌ 手动部署只接受已有 tag（回滚/重部署）；上线新代码请 push main 走 CI 自动部署"
+              exit 1
+            fi
             echo "image_tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
             echo "need_build=false" >> $GITHUB_OUTPUT
             echo "checkout_ref=main" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "workflow_run" ]; then
-            # CI 触发：部署 CI 对应的 commit（workflow_run 事件中 github.sha 是默认分支，
-            # 必须用 head_sha 才能与 CI 校验的代码一致）
-            SHA="${{ github.event.workflow_run.head_sha }}"
-            echo "image_tag=${SHA:0:7}" >> $GITHUB_OUTPUT
-            echo "need_build=true" >> $GITHUB_OUTPUT
-            echo "checkout_ref=$SHA" >> $GITHUB_OUTPUT
           else
-            # 手动触发且未指定 tag：构建触发分支当前 commit 的代码
-            # 镜像必须从触发 commit 构建（checkout_ref 与 image_tag 均取 github.sha），
-            # 避免镜像内容与生产 DB 的 alembic 迁移版本错位导致启动失败
-            SHA="${{ github.sha }}"
+            # workflow_run（main CI 成功）触发：部署 CI 对应的 commit
+            #（workflow_run 事件中 github.sha 是默认分支，必须用 head_sha 才能与 CI 校验的代码一致）
+            SHA="${{ github.event.workflow_run.head_sha }}"
             echo "image_tag=${SHA:0:7}" >> $GITHUB_OUTPUT
             echo "need_build=true" >> $GITHUB_OUTPUT
             echo "checkout_ref=$SHA" >> $GITHUB_OUTPUT
@@ -353,3 +356,18 @@ jobs:
             echo "============================================"
             echo "  ✅ 部署完成: tag $TAG"
             echo "============================================"
+
+      # 部署成功后给已部署 commit 打 deploy/ tag（issue #211）：回滚目标的单一视图，
+      # 手动 workflow_dispatch 回滚时 image_tag 即取此处短 SHA。仅新构建部署（need_build）打 tag，
+      # 纯回滚/重部署已有 tag 不重复打。同日同 commit 重跑时 tag 已存在则跳过，避免误报失败。
+      - name: Tag deployed commit
+        if: needs.setup.outputs.need_build == 'true'
+        run: |
+          TAG="deploy/$(date +%Y%m%d)-${{ needs.setup.outputs.image_tag }}"
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "tag $TAG 已存在于 origin，跳过"
+          else
+            git tag "$TAG" "${{ needs.setup.outputs.checkout_ref }}"
+            git push origin "$TAG"
+            echo "已打部署 tag: $TAG"
+          fi
