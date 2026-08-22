@@ -169,6 +169,16 @@ export default function ShareChangeEventsPage() {
       return;
     }
 
+    if (PLATFORM_LEVEL_TYPES.includes(formData.event_type) && !formData.platform_code) {
+      // 与申赎 R1 同口径：自定义平台控件无原生 required，须手动拦截
+      addToast({
+        type: "error",
+        title: "表单校验失败",
+        message: "请选择平台",
+      });
+      return;
+    }
+
     submitCreate(formData);
   };
 
