@@ -116,9 +116,10 @@ export default function MobilePositionsPage() {
             <p className="text-xs text-muted-foreground">{code}</p>
           </div>
         </div>
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           size="sm"
+          data-testid="cash-update-trigger"
           onClick={() => setIsCashUpdateOpen(true)}
         >
           <RefreshCw className="h-4 w-4" />
