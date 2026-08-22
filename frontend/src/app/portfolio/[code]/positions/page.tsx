@@ -18,13 +18,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -41,6 +34,7 @@ import { usePositionList, useUpdateCashPosition } from "@/hooks/usePosition";
 import { useCreateTrade } from "@/hooks/useTrade";
 import { useCreateCashTransfer } from "@/hooks/useCashTransfer";
 import CashTransferListDialog from "@/components/shared/dialogs/CashTransferListDialog";
+import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -350,18 +344,13 @@ export default function PositionsPage() {
                   {/* 平台选择 */}
                   <div className="space-y-2">
                     <Label htmlFor="platform">平台</Label>
-                    <Select value={selectedPlatform} onValueChange={setSelectedPlatform} required>
-                      <SelectTrigger>
-                        <SelectValue placeholder="请选择平台" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {platforms.map((platform) => (
-                          <SelectItem key={platform.code} value={platform.code}>
-                            {platform.name} ({platform.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchablePlatformSelect
+                      platforms={platforms}
+                      value={selectedPlatform || null}
+                      onChange={(v) => setSelectedPlatform(v ?? "")}
+                      placeholder="请选择平台"
+                      id="platform"
+                    />
                   </div>
 
                   {/* 日期选择 */}
@@ -438,29 +427,23 @@ export default function PositionsPage() {
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label>转出平台</Label>
-                    <Select value={transferFrom} onValueChange={setTransferFrom} required>
-                      <SelectTrigger><SelectValue placeholder="选择转出平台" /></SelectTrigger>
-                      <SelectContent>
-                        {platforms.map((p) => (
-                          <SelectItem key={p.code} value={p.code} disabled={p.code === transferTo}>
-                            {p.name} ({p.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchablePlatformSelect
+                      platforms={platforms}
+                      value={transferFrom || null}
+                      onChange={(v) => setTransferFrom(v ?? "")}
+                      placeholder="选择转出平台"
+                      isOptionDisabled={(p) => p.code === transferTo}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>转入平台</Label>
-                    <Select value={transferTo} onValueChange={setTransferTo} required>
-                      <SelectTrigger><SelectValue placeholder="选择转入平台" /></SelectTrigger>
-                      <SelectContent>
-                        {platforms.map((p) => (
-                          <SelectItem key={p.code} value={p.code} disabled={p.code === transferFrom}>
-                            {p.name} ({p.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchablePlatformSelect
+                      platforms={platforms}
+                      value={transferTo || null}
+                      onChange={(v) => setTransferTo(v ?? "")}
+                      placeholder="选择转入平台"
+                      isOptionDisabled={(p) => p.code === transferFrom}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="transfer_amount">转移金额（元）</Label>
