@@ -65,10 +65,12 @@ import { useInvestorList } from "@/hooks/useInvestor";
 import { usePlatformList } from "@/hooks/usePlatform";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useInvestorAvailableShares } from "@/hooks/usePosition";
+import { useUIStore } from "@/stores/uiStore";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import PaginationBar from "@/components/shared/PaginationBar";
 import NameCodeCell from "@/components/shared/NameCodeCell";
+import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
 
 interface SubscriptionsContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -227,9 +229,16 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
 
   // 删除走统一 hook（原内联 mutation 的 invalidate key 与 hooks 实际 key 结构不匹配，列表不刷新）
   const deleteSubscriptionMutation = useDeleteSubscription();
+  // R1（#177）toast 通道：表单手动校验反馈
+  const addToast = useUIStore((state) => state.addToast);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.platform_code) {
+      // R1（#177）：原生 <select required> 替换为自定义组件后浏览器校验失效，须手动拦截
+      addToast({ type: "error", title: "表单校验失败", message: "请选择平台" });
+      return;
+    }
     const payload = {
       portfolio_code: code,
       investor_code: formData.investor_code,
@@ -353,25 +362,16 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
           ))}
         </SelectContent>
       </Select>
-      <Select
-        value={platformFilter ?? "all"}
-        onValueChange={(v) => {
-          setPlatformFilter(v === "all" ? undefined : v);
+      <SearchablePlatformSelect
+        platforms={platforms}
+        value={platformFilter ?? null}
+        onChange={(v) => {
+          setPlatformFilter(v ?? undefined);
           setPage(1);
         }}
-      >
-        <SelectTrigger className={selectWidth}>
-          <SelectValue placeholder="全部平台" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部平台</SelectItem>
-          {platforms.map((plat) => (
-            <SelectItem key={plat.code} value={plat.code}>
-              {plat.name} ({plat.code})
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        specialOptionLabel="全部平台"
+        className={selectWidth}
+      />
       <Select
         value={subTypeFilter ?? "all"}
         onValueChange={(v) => {
@@ -472,20 +472,13 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="platform_code">交易平台</Label>
-                  <select
+                  <SearchablePlatformSelect
+                    platforms={platforms}
+                    value={formData.platform_code || null}
+                    onChange={(v) => setFormData({ ...formData, platform_code: v ?? "" })}
+                    placeholder="请选择平台"
                     id="platform_code"
-                    value={formData.platform_code}
-                    onChange={(e) => setFormData({ ...formData, platform_code: e.target.value })}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    required
-                  >
-                    <option value="">请选择平台</option>
-                    {platforms.map((plat) => (
-                      <option key={plat.code} value={plat.code}>
-                        {plat.name} ({plat.code})
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 {subType === "subscribe" ? (
                   <div className="space-y-2">

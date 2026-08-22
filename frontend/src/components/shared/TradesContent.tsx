@@ -69,6 +69,7 @@ import PaginationBar from "@/components/shared/PaginationBar";
 import NameCodeCell from "@/components/shared/NameCodeCell";
 import ProductFilterSelect from "@/components/shared/ProductFilterSelect";
 import SearchableProductSelect from "@/components/shared/SearchableProductSelect";
+import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
 import ProductFormDialog from "@/components/shared/ProductFormDialog";
 import { ProductSelection } from "@/components/shared/ProductFilterDialog";
 
@@ -353,25 +354,16 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
         }}
         className={productSelectWidth}
       />
-      <Select
-        value={platformFilter ?? "all"}
-        onValueChange={(v) => {
-          setPlatformFilter(v === "all" ? undefined : v);
+      <SearchablePlatformSelect
+        platforms={platforms}
+        value={platformFilter ?? null}
+        onChange={(v) => {
+          setPlatformFilter(v ?? undefined);
           setPage(1);
         }}
-      >
-        <SelectTrigger className={selectWidth}>
-          <SelectValue placeholder="全部平台" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部平台</SelectItem>
-          {platforms.map((plat) => (
-            <SelectItem key={plat.code} value={plat.code}>
-              {plat.name} ({plat.code})
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        specialOptionLabel="全部平台"
+        className={selectWidth}
+      />
       <Select
         value={tradeTypeFilter ?? "all"}
         onValueChange={(v) => {
@@ -640,37 +632,25 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="platform_code">交易平台</Label>
-                  <select
+                  <SearchablePlatformSelect
+                    platforms={platforms}
+                    value={formData.platform_code || null}
+                    onChange={(v) => setFormData({ ...formData, platform_code: v ?? "" })}
+                    placeholder="请选择平台"
                     id="platform_code"
-                    value={formData.platform_code}
-                    onChange={(e) => setFormData({ ...formData, platform_code: e.target.value })}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value="">请选择平台</option>
-                    {platforms.map((plat) => (
-                      <option key={plat.code} value={plat.code}>
-                        {plat.name} ({plat.code})
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="cash_platform_code">
                     现金平台（{tradeType === "buy" ? "扣款" : "到账"}，可选）
                   </Label>
-                  <select
+                  <SearchablePlatformSelect
+                    platforms={platforms}
+                    value={formData.cash_platform_code || null}
+                    onChange={(v) => setFormData({ ...formData, cash_platform_code: v ?? "" })}
+                    specialOptionLabel="同交易平台"
                     id="cash_platform_code"
-                    value={formData.cash_platform_code}
-                    onChange={(e) => setFormData({ ...formData, cash_platform_code: e.target.value })}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value="">同交易平台</option>
-                    {platforms.map((plat) => (
-                      <option key={plat.code} value={plat.code}>
-                        {plat.name} ({plat.code})
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 {tradeType === "buy" ? (
                   <div className="space-y-2">
