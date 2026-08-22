@@ -1,18 +1,34 @@
 "use client";
 
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { platformApi, getErrorMessage, PlatformCreate, PlatformUpdate } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 
 const PLATFORM_QUERY_KEY = "platforms";
 
-// 平台列表 Hook
+// 平台列表 Hook（#214：加载失败经 useEffect 监听 isError 弹全局 toast，
+// v5 移除了 useQuery 的 onError 回调，此为官方等价写法；接口恢复后重试成功自动回归正常）
 export function usePlatformList(params?: { page?: number; page_size?: number }) {
-  return useQuery({
+  const addToast = useUIStore((state) => state.addToast);
+  const query = useQuery({
     queryKey: [PLATFORM_QUERY_KEY, "list", params],
     queryFn: () => platformApi.list(params),
     staleTime: 60 * 1000,
   });
+
+  const { isError, error } = query;
+  useEffect(() => {
+    if (isError) {
+      addToast({
+        type: "error",
+        title: "平台列表加载失败",
+        message: getErrorMessage(error, "请稍后重试"),
+      });
+    }
+  }, [isError, error, addToast]);
+
+  return query;
 }
 
 // 单个平台详情 Hook
