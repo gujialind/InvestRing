@@ -356,6 +356,8 @@ npm run build   # tsc + next build 0 error
 | 5 | 移动端平台选择框可搜索 | mobile | `/m/portfolio/{code}/positions` → 「更新非净值资产」→ 平台按钮 → 搜索 → 点选 → 回显 `name (code)`；另验证 trades 移动页筛选面板（「筛选」折叠面板展开后）平台控件可搜索（覆盖 shared 组件 mobile variant） |
 | 6 | 清空搜索词恢复全量 + 无匹配空态 | chromium | 任一平台弹层：输入搜索词后再清空 → 选项恢复全量；输入不可能命中的词（如 `zzz-none`）→ 显示「无符合条件的平台」 |
 
+> **评审后补充**：用例 3 增断言 toast message「请选择平台」；用例 1 增「带过滤词点选关闭后重开 → 搜索词已重置、选项恢复全量」（守护点选路径不经过 `onOpenChange` 的重置）；新增用例 7（按名称片段搜索，覆盖过滤 name 分支）与用例 8（现金平台默认「同交易平台」时路由拦截 POST 断言 body 不含 `cash_platform_code`，不落数据）。
+
 实施提示：触发按钮是 `<button type="button">`，用文案定位（`page.getByRole('button', { name: '全部平台' })`）；弹层选项用 `getByText` 或弹层容器内 locator；注意 hydration 等待先例（`auth.setup.ts` 的 `__reactProps` 等待模式，fill 前确保水合完成）。
 
 ### 4.3 手动冒烟（提交前自查）

@@ -32,7 +32,7 @@ interface SearchablePlatformSelectProps {
 }
 
 /**
- * 平台单选可搜索下拉（issue #177）：复刻 SearchableProductSelect（#162）交互外壳，
+ * 平台单选可搜索下拉：复刻 SearchableProductSelect（#162）交互外壳，
  * 数据流刻意不同——平台全量列表由调用方持有经 props 传入，组件不内部 fetch；
  * 本地客户端过滤（name/code 大小写不敏感），无防抖、无名称缓存。
  * 前置特殊项（全部平台/同交易平台）固定置顶不参与过滤，点选回传 null。
@@ -74,6 +74,9 @@ export default function SearchablePlatformSelect({
   const pick = (code: string | null) => {
     onChange(code);
     setOpen(false);
+    // 编程式 setOpen(false) 不触发 Radix onOpenChange，须在此重置搜索词，
+    // 否则下次打开仍是上次过滤后的列表
+    setKeyword("");
   };
 
   return (

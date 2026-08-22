@@ -300,7 +300,8 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   };
 
   // 筛选栏控件（visual-spec §9）：顺序 = 交易日期区间 → 确认日期区间 → 状态 → 产品 → 平台 → 类型；
-  // 控件统一 h-9，下拉全部走 ui/select（「全部 X」用 "all" 哨兵，Radix SelectItem 不允许空串值）；
+  // 控件统一 h-9，下拉走 ui/select（「全部 X」用 "all" 哨兵，Radix SelectItem 不允许空串值）；
+  // 平台为 SearchablePlatformSelect（Popover，null 哨兵）；
   // 产品为 ProductFilterDialog 多选弹窗触发按钮（#155），outline 风格同筛选栏
   const rangeWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[240px]";
   const selectWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[150px]";

@@ -229,13 +229,12 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
 
   // 删除走统一 hook（原内联 mutation 的 invalidate key 与 hooks 实际 key 结构不匹配，列表不刷新）
   const deleteSubscriptionMutation = useDeleteSubscription();
-  // R1（#177）toast 通道：表单手动校验反馈
   const addToast = useUIStore((state) => state.addToast);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.platform_code) {
-      // R1（#177）：原生 <select required> 替换为自定义组件后浏览器校验失效，须手动拦截
+      // 原生 <select required> 替换为自定义组件后浏览器校验失效，须手动拦截
       addToast({ type: "error", title: "表单校验失败", message: "请选择平台" });
       return;
     }
@@ -301,7 +300,8 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
   };
 
   // 筛选栏控件（visual-spec §9）：顺序 = 申购日期区间 → 确认日期区间 → 状态 → 投资人 → 平台 → 类型；
-  // 控件统一 h-9，下拉全部走 ui/select；「全部 X」用 "all" 哨兵（Radix SelectItem 不允许空串值）
+  // 控件统一 h-9，下拉走 ui/select（「全部 X」用 "all" 哨兵，Radix SelectItem 不允许空串值）；
+  // 平台为 SearchablePlatformSelect（Popover，null 哨兵）
   const rangeWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[240px]";
   const selectWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[150px]";
   const filterControls = (

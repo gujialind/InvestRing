@@ -2,15 +2,16 @@
  * 前端 E2E 测试：平台选择框搜索（防 #177 回归）
  *
  * 守护 SearchablePlatformSelect 的核心行为契约：
- *   - 客户端按 name/code 过滤（大小写不敏感）、无匹配空态、清空恢复全量；
+ *   - 客户端按 name/code 过滤（大小写不敏感、name 与 code 分支各自覆盖）、
+ *     无匹配空态、清空恢复全量、点选/关闭后重开恢复全量；
  *   - 前置特殊项（全部平台/同交易平台）置顶、不参与过滤、点选回传空值语义；
- *   - 点选平台回显 name (code)，筛选请求参数 platform_code 含/不含（评审 R3）；
- *   - 现金转移互斥项可见但禁用（评审 R4）；
- *   - R1：申赎表单原生 <select required> 被替换后，空平台提交须被前端手动校验拦截。
+ *   - 点选平台回显 name (code)，筛选请求参数 platform_code 含/不含；
+ *   - 现金平台默认「同交易平台」时，提交请求 body 不含 cash_platform_code；
+ *   - 现金转移互斥项可见但禁用；
+ *   - 申赎表单原生 <select required> 被替换后，空平台提交须被前端手动校验拦截。
  *
- * 数据说明：搜索词不写死——打开弹层读取第一个平台选项文本，取括号内 code 前 2
- * 字符（转小写，顺带验证大小写不敏感）作为搜索词；无组合/平台/投资人数据时按
- * regression.spec.ts 惯例优雅 skip，不在 CI 造数据。
+ * 数据说明：搜索词不写死——打开弹层读取第一个平台选项文本推导；无组合/平台/
+ * 投资人数据时按 regression.spec.ts 惯例优雅 skip，不在 CI 造数据。
  */
 import { test, expect, type Page, type Locator } from '@playwright/test';
 
@@ -87,6 +88,11 @@ function optionCode(text: string): string {
   return m[1];
 }
 
+/** 选项文本 → name（「名称 (CODE)」取括号前段） */
+function optionName(text: string): string {
+  return text.replace(/\s*\([^()]+\)$/, '');
+}
+
 /** 读取弹层内第一个平台选项；无平台数据时优雅 skip。keyword = code 前 2 字符小写 */
 async function firstPlatformOption(
   popover: Locator
@@ -119,22 +125,21 @@ async function pickOption(popover: Locator, text: string): Promise<void> {
 
 /**
  * 定位 SearchablePlatformSelect 触发按钮。
- * 不能依赖 getByRole('button', { name })：placeholder 态按钮的文字带
- * text-muted-foreground（弱化灰），Playwright 的 accessible name 计算会把它
- * 当装饰文本排除，导致 name 匹配为 0（2026-08-22 #177 实测）。用
- * aria-haspopup="dialog"（Popover 触发器标志）+ 文本双条件定位最稳。
+ * 不能依赖 getByRole('button', { name })：placeholder 态按钮实测 name 匹配为 0
+ * （文字带 text-muted-foreground 弱化样式时的 accessible name 计算差异），
+ * 用 aria-haspopup="dialog"（Popover 触发器标志）+ 文本双条件定位最稳。
  */
 function platformTrigger(scope: Page | Locator, label: string): Locator {
   return scope.locator('button[aria-haspopup="dialog"]', { hasText: label }).first();
 }
 
 test.describe('平台选择框搜索（防 #177 回归）', () => {
-  // ---- 用例 1：调仓页筛选平台可搜索 + 特殊项「全部平台」+ 请求参数断言（R3）----
+  // ---- 用例 1：调仓页筛选平台可搜索 + 特殊项「全部平台」+ 请求参数断言 ----
   test('调仓页筛选平台可搜索，保留「全部平台」且请求参数正确', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '桌面筛选栏断言仅针对桌面项目');
     const errors = collectPageErrors(page);
 
-    // R3「不含」侧：默认（全部平台）进页面，列表请求不带 platform_code。
+    // 「不含」侧：默认（全部平台）进页面，列表请求不带 platform_code。
     // useTradeList staleTime=30s——选平台再切回「全部平台」会命中 fresh 缓存不发请求，
     // 故「不含」断言锚定进页面的初始请求，而非切回后的请求
     const href = await firstPortfolioHref(page);
@@ -153,13 +158,14 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     await platformTrigger(page, '全部平台').click();
     const popover = platformPopover(page);
     const { keyword } = await firstPlatformOption(popover);
+    const totalRows = await popover.locator('span.min-w-0').count(); // 特殊项 1 行 + 全量平台行
 
     // 输入搜索词 → 仅剩命中项；特殊项「全部平台」不参与过滤恒显示
     await popover.getByPlaceholder('搜索平台名称/代码').fill(keyword);
     const matched = await expectFilteredOptions(popover, keyword);
     await expect(popover.getByText('全部平台', { exact: true }).first()).toBeVisible();
 
-    // 点选 → 弹层关闭、触发按钮回显 name (code)；列表请求带 platform_code（R3「含」侧）
+    // 点选 → 弹层关闭、触发按钮回显 name (code)；列表请求带 platform_code（「含」侧）
     const picked = matched[0];
     const respWith = page.waitForResponse(
       (r) =>
@@ -173,9 +179,13 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     const selectedTrigger = platformTrigger(page, picked);
     await expect(selectedTrigger).toBeVisible();
 
-    // 重新打开 → 点「全部平台」→ 触发按钮回显恢复
+    // 带过滤词点选关闭后重开 → 搜索词已重置、选项恢复全量（点选路径不经过 onOpenChange）
     await selectedTrigger.click();
     const popover2 = platformPopover(page);
+    await expect(popover2.getByPlaceholder('搜索平台名称/代码')).toHaveValue('');
+    await expect(popover2.locator('span.min-w-0')).toHaveCount(totalRows);
+
+    // 点「全部平台」→ 触发按钮回显恢复
     await popover2.getByText('全部平台', { exact: true }).first().click();
     await expect(platformTrigger(page, '全部平台')).toBeVisible();
 
@@ -211,8 +221,8 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
 
-  // ---- 用例 3（R1）：申赎表单原生 required 被自定义组件替换后，空平台提交须被前端手动校验拦截 ----
-  test('R1：申赎表单未选平台提交被前端拦截', async ({ page }, testInfo) => {
+  // ---- 用例 3：申赎表单原生 required 被自定义组件替换后，空平台提交须被前端手动校验拦截 ----
+  test('申赎表单未选平台提交被前端拦截', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '桌面表单断言仅针对桌面项目');
     const errors = collectPageErrors(page);
     await gotoSubscriptionsPage(page);
@@ -237,12 +247,17 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     await dlg.getByRole('button', { name: '提交申请' }).click();
 
     await expect(page.getByRole('heading', { name: '表单校验失败' })).toBeVisible();
+    // toast 卡片内断言 message（页面另有同文案的平台占位符，不能全局 getByText）
+    const toast = page
+      .getByRole('heading', { name: '表单校验失败' })
+      .locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
+    await expect(toast.getByText('请选择平台', { exact: true })).toBeVisible();
     await expect(dlg).toBeVisible();
     expect(createRequested, '未选平台时不应发出创建请求').toBe(false);
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
 
-  // ---- 用例 4：现金转移互斥——对方已选平台在列表中可见但禁用（R4）----
+  // ---- 用例 4：现金转移互斥——对方已选平台在列表中可见但禁用 ----
   test('现金转移：对方已选平台可见但禁用，点击不生效', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '移动端无现金转移功能');
     const errors = collectPageErrors(page);
@@ -337,6 +352,81 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
       expect(await platformOptionTexts(popover)).toHaveLength(0);
     }).toPass();
     await expect(rows.first()).toHaveText('全部平台');
+
+    expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
+  });
+
+  // ---- 用例 7：按平台名称片段搜索（覆盖过滤的 name 分支，而非仅 code 分支）----
+  test('按平台名称片段搜索可过滤', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile', '桌面筛选栏断言仅针对桌面项目');
+    const errors = collectPageErrors(page);
+    await gotoTradesPage(page);
+    await platformTrigger(page, '全部平台').click();
+    const popover = platformPopover(page);
+    const { text } = await firstPlatformOption(popover);
+    const name = optionName(text);
+    test.skip(name.length === 0, '平台名称为空，无法推导名称搜索词');
+    const nameKw = name.slice(0, 2).toLowerCase();
+
+    await popover.getByPlaceholder('搜索平台名称/代码').fill(nameKw);
+    const matched = await expectFilteredOptions(popover, nameKw);
+    // 通用断言经 code 巧合也可通过，须显式确认至少一项按 name 命中（抽样平台自身必命中）
+    expect(
+      matched.some((t) => optionName(t).toLowerCase().includes(nameKw)),
+      `过滤结果应含按名称命中的平台: ${matched.join(' | ')}`
+    ).toBe(true);
+
+    expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
+  });
+
+  // ---- 用例 8：现金平台默认「同交易平台」时，提交请求 body 不含 cash_platform_code ----
+  test('现金平台默认「同交易平台」时提交 body 不含 cash_platform_code', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile', '桌面表单断言仅针对桌面项目');
+    const errors = collectPageErrors(page);
+    await gotoTradesPage(page);
+    await page.getByRole('button', { name: '提交交易' }).first().click();
+    const dlg = dialogByTitle(page, '提交交易');
+    await dlg.waitFor();
+
+    // 产品：可搜索下拉取第一项（无产品数据优雅 skip）
+    await platformTrigger(dlg, '请选择产品').click();
+    const productPopover = page
+      .getByPlaceholder('搜索产品代码/名称')
+      .locator('xpath=ancestor::div[@role="dialog"][1]');
+    const productRows = productPopover.locator('div.cursor-pointer');
+    try {
+      await productRows.first().waitFor({ timeout: 10_000 });
+    } catch {
+      test.skip(true, '环境中没有产品数据');
+    }
+    await productRows.first().click();
+
+    // 交易平台选第一项；现金平台刻意不碰，保持默认「同交易平台」
+    await platformTrigger(dlg, '请选择平台').click();
+    const popover = platformPopover(page);
+    const texts = await platformOptionTexts(popover);
+    test.skip(texts.length === 0, '环境中没有平台数据');
+    await pickOption(popover, texts[0]);
+
+    await dlg.getByLabel('金额（元）').fill('1000');
+
+    // 拦截创建请求并 abort：只取 body 做断言，不落任何数据
+    let postBody: string | null = null;
+    await page.route(/\/api\/trades(\?|$)/, async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST') {
+        postBody = req.postData();
+        await route.abort();
+        return;
+      }
+      await route.continue();
+    });
+    await dlg.getByRole('button', { name: '提交交易' }).click();
+    await expect.poll(() => postBody, { timeout: 10_000 }).not.toBeNull();
+
+    const body = JSON.parse(postBody!) as Record<string, unknown>;
+    expect(body.platform_code).toBe(optionCode(texts[0]));
+    expect('cash_platform_code' in body, '「同交易平台」默认时 cash_platform_code 应被省略').toBe(false);
 
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
