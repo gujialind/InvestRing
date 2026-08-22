@@ -173,7 +173,7 @@ class TestChainedConfirm:
         "trade", "create",
         "--portfolio-code", "P1", "--product-code", "F001",
         "--type", "buy", "--trade-date", "2026-07-28",
-        "--actual-amount", "1000",
+        "--actual-amount", "1000", "--platform-code", "PF1",
     ]
 
     def test_trade_confirm_failure_carries_created_trade_id(self, monkeypatch, capsys, cli):

@@ -63,6 +63,7 @@ import {
   useDeleteTrade,
 } from "@/hooks/useTrade";
 import { usePlatformList } from "@/hooks/usePlatform";
+import { useUIStore } from "@/stores/uiStore";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import PaginationBar from "@/components/shared/PaginationBar";
@@ -222,6 +223,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const updateTrade = useUpdateTrade(editingTrade?.id ?? 0);
   // 命中 DUPLICATE_TRADE 时暂存待重试的交易，由确认框引导 allow_duplicate 重试
   const [duplicateTrade, setDuplicateTrade] = useState<TradeCreate | null>(null);
+  const addToast = useUIStore((state) => state.addToast);
 
   const resetTradeForm = () => {
     setIsDialogOpen(false);
@@ -230,6 +232,11 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.platform_code) {
+      // 原生 select 替换为自定义组件后浏览器校验失效，须手动拦截（与 SubscriptionsContent 同口径）
+      addToast({ type: "error", title: "表单校验失败", message: "请选择平台" });
+      return;
+    }
     const payload: TradeCreate = {
       portfolio_code: code,
       product_code: formData.product_code,

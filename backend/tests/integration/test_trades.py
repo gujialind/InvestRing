@@ -2206,3 +2206,109 @@ class TestUpdateTradeValidation:
         got = client.get(f"/api/trades/{trade_id}", headers=admin_headers)
         assert got.json()["status"] == "pending"
 
+
+class TestPlatformRequired:
+    """#209 调仓交易 platform_code 必填 + 存在性（service 层统一校验）"""
+
+    def test_create_without_platform_rejected(self, client, admin_headers, test_db):
+        """买入不传 platform_code -> 422 PLATFORM_REQUIRED，基金腿与配对 CASH 腿均不落库"""
+        create_portfolio(test_db, code="PLR_P1", status="active")
+        create_product(test_db, code="ETF_PLR1", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
+        create_platform(test_db, code="PLR_PLAT1")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+
+        # 提供可用现金，确保平台之外一切合法（不被现金校验抢先拦截）
+        create_trade(
+            test_db, "PLR_P1", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="PLR_PLAT1", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+        base_count = test_db.query(Trade).filter_by(portfolio_code="PLR_P1").count()
+
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "PLR_P1",
+                "product_code": "ETF_PLR1",
+                "market": "CN_EXCHANGE",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "price": 1.5,
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, f"Response: {resp.status_code} {resp.json()}"
+        assert resp.json()["detail"]["error"] == "PLATFORM_REQUIRED"
+        # 基金腿与配对 CASH 腿均不落库（base 为 fixture 的现金入账记录）
+        assert test_db.query(Trade).filter_by(portfolio_code="PLR_P1").count() == base_count
+
+    def test_create_sell_without_platform_rejected(self, client, admin_headers, test_db):
+        """卖出不传 platform_code -> 422 PLATFORM_REQUIRED（覆盖 CASH buy 腿平台继承路径）"""
+        create_portfolio(test_db, code="PLR_P2", status="active")
+        create_product(test_db, code="ETF_PLR2", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
+        create_platform(test_db, code="PLR_PLAT2")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+
+        # 先有持仓，确保平台之外一切合法（不被份额校验抢先拦截）
+        create_position_snapshot(
+            test_db, "PLR_P2", "ETF_PLR2", "CN_EXCHANGE",
+            snapshot_date=date(2025, 10, 3),
+            shares=1000.0, unit_price=1.5, cost_price=1.5,
+            market_value=1500.0, platform_code="PLR_PLAT2",
+        )
+
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "PLR_P2",
+                "product_code": "ETF_PLR2",
+                "market": "CN_EXCHANGE",
+                "trade_type": "sell",
+                "shares": 500.0,
+                "price": 1.6,
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, f"Response: {resp.status_code} {resp.json()}"
+        assert resp.json()["detail"]["error"] == "PLATFORM_REQUIRED"
+        assert test_db.query(Trade).filter_by(portfolio_code="PLR_P2").count() == 0
+
+    def test_create_with_unknown_platform_rejected(self, client, admin_headers, test_db):
+        """传不存在平台 -> 404 PLATFORM_NOT_FOUND（顺带修复 FK IntegrityError 爆 500 的潜在问题）"""
+        create_portfolio(test_db, code="PLR_P3", status="active")
+        create_product(test_db, code="ETF_PLR3", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
+        create_platform(test_db, code="PLR_PLAT3")
+        ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
+
+        create_trade(
+            test_db, "PLR_P3", "CASH", "",
+            trade_type="buy", amount=50000.0, price=None,
+            platform_code="PLR_PLAT3", trade_date=date(2025, 10, 3),
+            confirm_date=date(2025, 10, 3), status="confirmed",
+        )
+        base_count = test_db.query(Trade).filter_by(portfolio_code="PLR_P3").count()
+
+        resp = client.post(
+            "/api/trades",
+            json={
+                "portfolio_code": "PLR_P3",
+                "product_code": "ETF_PLR3",
+                "market": "CN_EXCHANGE",
+                "trade_type": "buy",
+                "amount": 10000.0,
+                "price": 1.5,
+                "platform_code": "NO_SUCH_PLATFORM",
+                "trade_date": "2025-10-06",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404, f"Response: {resp.status_code} {resp.json()}"
+        assert resp.json()["detail"]["error"] == "PLATFORM_NOT_FOUND"
+        assert test_db.query(Trade).filter_by(portfolio_code="PLR_P3").count() == base_count
+

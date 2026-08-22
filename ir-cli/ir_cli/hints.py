@@ -34,6 +34,8 @@ ERROR_HINTS: dict = {
     "MISSING_POSITION_SNAPSHOT": "权益登记日持仓快照缺失，先生成该日快照: ir snapshot generate",
     "MANUAL_OVERRIDE_NOT_FOUND": "未找到对应现金覆盖记录: ir position list-cash-overrides --portfolio-code <code> 核查后重试",
     "PLATFORM_NOT_COVERED": "平台级事件未覆盖全部有持仓平台，补录其余平台事件，或传 --force-cover 降级为 warning",
+    "PLATFORM_REQUIRED": "该平台操作必须指定平台: 加 --platform-code <平台代码>，用 ir platform list 查询可用平台",
+    "PLATFORM_NOT_FOUND": "平台不存在: 用 ir platform list 查询可用平台代码",
     "CANNOT_UNCONFIRM_CHILD": "基金级事件的子记录不可单独 unconfirm，请对父事件执行 unconfirm",
     "AUTH_REQUIRED": "执行 ir auth login 登录后重试",
     "NOT_FOUND": "检查资源标识拼写；产品类先用 ir product list 查询可用产品代码与市场",

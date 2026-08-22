@@ -8,7 +8,7 @@
  *   - 点选平台回显 name (code)，筛选请求参数 platform_code 含/不含；
  *   - 现金平台默认「同交易平台」时，提交请求 body 不含 cash_platform_code；
  *   - 现金转移互斥项可见但禁用；
- *   - 申赎表单原生 <select required> 被替换后，空平台提交须被前端手动校验拦截。
+ *   - 申赎/调仓表单原生 <select required> 被替换后，空平台提交须被前端手动校验拦截（#209）。
  *
  * 数据说明：搜索词不写死——打开弹层读取第一个平台选项文本推导；无组合/平台/
  * 投资人数据时按 regression.spec.ts 惯例优雅 skip，不在 CI 造数据。
@@ -257,7 +257,50 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
 
-  // ---- 用例 4：现金转移互斥——对方已选平台在列表中可见但禁用 ----
+  // ---- 用例 4：调仓表单空平台提交被前端手动校验拦截（#209，镜像用例 3 申赎拦截形态）----
+  test('提交交易表单未选平台提交被前端拦截', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile', '桌面表单断言仅针对桌面项目');
+    const errors = collectPageErrors(page);
+    await gotoTradesPage(page);
+    await page.getByRole('button', { name: '提交交易' }).first().click();
+    const dlg = dialogByTitle(page, '提交交易');
+    await dlg.waitFor();
+
+    // 选产品（可搜索下拉取第一项）、填金额（买入模式默认）；平台刻意不选
+    await platformTrigger(dlg, '请选择产品').click();
+    const productPopover = page
+      .getByPlaceholder('搜索产品代码/名称')
+      .locator('xpath=ancestor::div[@role="dialog"][1]');
+    const productRows = productPopover.locator('div.cursor-pointer');
+    try {
+      await productRows.first().waitFor({ timeout: 10_000 });
+    } catch {
+      test.skip(true, '环境中没有产品数据');
+    }
+    await productRows.first().click();
+    await dlg.getByLabel('金额（元）').fill('1000');
+
+    // 提交 → 前端拦截：校验 toast 出现、Dialog 保持打开、未发出创建请求
+    let createRequested = false;
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/trades')) {
+        createRequested = true;
+      }
+    });
+    await dlg.getByRole('button', { name: '提交交易' }).click();
+
+    await expect(page.getByRole('heading', { name: '表单校验失败' })).toBeVisible();
+    // toast 卡片内断言 message（页面另有同文案的平台占位符，不能全局 getByText）
+    const toast = page
+      .getByRole('heading', { name: '表单校验失败' })
+      .locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
+    await expect(toast.getByText('请选择平台', { exact: true })).toBeVisible();
+    await expect(dlg).toBeVisible();
+    expect(createRequested, '未选平台时不应发出创建请求').toBe(false);
+    expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
+  });
+
+  // ---- 用例 5：现金转移互斥——对方已选平台在列表中可见但禁用 ----
   test('现金转移：对方已选平台可见但禁用，点击不生效', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '移动端无现金转移功能');
     const errors = collectPageErrors(page);
@@ -289,7 +332,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
 
-  // ---- 用例 5：移动端平台选择框可搜索（m-positions 弹窗 + trades 移动筛选面板）----
+  // ---- 用例 6：移动端平台选择框可搜索（m-positions 弹窗 + trades 移动筛选面板）----
   test('移动端：更新非净值资产与筛选面板的平台选择框可搜索', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile', '仅移动端项目');
     const errors = collectPageErrors(page);
@@ -327,7 +370,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
 
-  // ---- 用例 6：清空搜索词恢复全量 + 无匹配空态 ----
+  // ---- 用例 7：清空搜索词恢复全量 + 无匹配空态 ----
   test('清空搜索词恢复全量，无匹配显示空态提示', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '桌面筛选栏断言仅针对桌面项目');
     const errors = collectPageErrors(page);
@@ -356,7 +399,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
 
-  // ---- 用例 7：按平台名称片段搜索（覆盖过滤的 name 分支，而非仅 code 分支）----
+  // ---- 用例 8：按平台名称片段搜索（覆盖过滤的 name 分支，而非仅 code 分支）----
   test('按平台名称片段搜索可过滤', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '桌面筛选栏断言仅针对桌面项目');
     const errors = collectPageErrors(page);
@@ -379,7 +422,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
 
-  // ---- 用例 8：现金平台默认「同交易平台」时，提交请求 body 不含 cash_platform_code ----
+  // ---- 用例 9：现金平台默认「同交易平台」时，提交请求 body 不含 cash_platform_code ----
   test('现金平台默认「同交易平台」时提交 body 不含 cash_platform_code', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '桌面表单断言仅针对桌面项目');
     const errors = collectPageErrors(page);
