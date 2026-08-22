@@ -93,7 +93,7 @@ async function firstPlatformOption(
 ): Promise<{ text: string; code: string; keyword: string }> {
   await popover.locator('span.min-w-0').first().waitFor();
   const texts = await platformOptionTexts(popover);
-  test.skip(texts.length > 0, '环境中没有平台数据');
+  test.skip(texts.length === 0, '环境中没有平台数据');
   const text = texts[0];
   const code = optionCode(text);
   return { text, code, keyword: code.slice(0, 2).toLowerCase() };
@@ -115,6 +115,17 @@ async function expectFilteredOptions(popover: Locator, keyword: string): Promise
 /** 点选弹层内指定文本的平台选项（getByText 首个匹配为挂 onClick 的行 div，点击冒泡生效） */
 async function pickOption(popover: Locator, text: string): Promise<void> {
   await popover.getByText(text, { exact: true }).first().click();
+}
+
+/**
+ * 定位 SearchablePlatformSelect 触发按钮。
+ * 不能依赖 getByRole('button', { name })：placeholder 态按钮的文字带
+ * text-muted-foreground（弱化灰），Playwright 的 accessible name 计算会把它
+ * 当装饰文本排除，导致 name 匹配为 0（2026-08-22 #177 实测）。用
+ * aria-haspopup="dialog"（Popover 触发器标志）+ 文本双条件定位最稳。
+ */
+function platformTrigger(scope: Page | Locator, label: string): Locator {
+  return scope.locator('button[aria-haspopup="dialog"]', { hasText: label }).first();
 }
 
 test.describe('平台选择框搜索（防 #177 回归）', () => {
@@ -139,7 +150,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     await initialResp;
 
     // 打开筛选栏平台弹层，动态取第一个平台 code 片段作为搜索词
-    await page.getByRole('button', { name: '全部平台' }).click();
+    await platformTrigger(page, '全部平台').click();
     const popover = platformPopover(page);
     const { keyword } = await firstPlatformOption(popover);
 
@@ -159,14 +170,14 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     );
     await pickOption(popover, picked);
     await respWith;
-    const selectedTrigger = page.getByRole('button', { name: picked, exact: true });
+    const selectedTrigger = platformTrigger(page, picked);
     await expect(selectedTrigger).toBeVisible();
 
     // 重新打开 → 点「全部平台」→ 触发按钮回显恢复
     await selectedTrigger.click();
     const popover2 = platformPopover(page);
     await popover2.getByText('全部平台', { exact: true }).first().click();
-    await expect(page.getByRole('button', { name: '全部平台' })).toBeVisible();
+    await expect(platformTrigger(page, '全部平台')).toBeVisible();
 
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
@@ -181,16 +192,17 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     await dlg.waitFor();
 
     // 交易平台：搜索 → 过滤 → 点选 → 触发按钮回显 name (code)
-    await dlg.getByRole('button', { name: '请选择平台' }).click();
+    await platformTrigger(dlg, '请选择平台').click();
     const popover = platformPopover(page);
     const { keyword } = await firstPlatformOption(popover);
     await popover.getByPlaceholder('搜索平台名称/代码').fill(keyword);
     const matched = await expectFilteredOptions(popover, keyword);
     await pickOption(popover, matched[0]);
-    await expect(dlg.getByRole('button', { name: matched[0], exact: true })).toBeVisible();
+    // 回显断言：按钮 accessible name 是 Label「交易平台」而非文本，用 hasText 定位回显串
+    await expect(platformTrigger(dlg, matched[0])).toBeVisible();
 
     // 现金平台：未操作时回显特殊项「同交易平台」；打开后特殊项置顶（列表首行）
-    const cashTrigger = dlg.getByRole('button', { name: '同交易平台' });
+    const cashTrigger = platformTrigger(dlg, '同交易平台');
     await expect(cashTrigger).toBeVisible();
     await cashTrigger.click();
     const popover2 = platformPopover(page);
@@ -211,7 +223,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     // 选投资人（原生 select 保留）、填金额（申购模式默认）；平台刻意不选
     const investorSelect = dlg.locator('select#investor_code');
     const investorCount = await investorSelect.locator('option').count();
-    test.skip(investorCount >= 2, '环境中没有投资人数据');
+    test.skip(investorCount < 2, '环境中没有投资人数据');
     await investorSelect.selectOption({ index: 1 });
     await dlg.getByLabel('金额（元）').fill('1000');
 
@@ -240,24 +252,24 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     await dlg.waitFor();
 
     // 转出平台选第一项
-    await dlg.getByRole('button', { name: '选择转出平台' }).click();
+    await platformTrigger(dlg, '选择转出平台').click();
     const popover = platformPopover(page);
     await popover.locator('span.min-w-0').first().waitFor();
     const texts = await platformOptionTexts(popover);
-    test.skip(texts.length >= 2, '环境中平台数 < 2，无法验证互斥');
+    test.skip(texts.length < 2, '环境中平台数 < 2，无法验证互斥');
     const picked = texts[0];
     await pickOption(popover, picked);
-    await expect(dlg.getByRole('button', { name: picked, exact: true })).toBeVisible();
+    await expect(platformTrigger(dlg, picked)).toBeVisible();
 
     // 打开转入平台：已选平台行存在且 aria-disabled；点击不生效（弹层不关闭、值不变）
-    await dlg.getByRole('button', { name: '选择转入平台' }).click();
+    await platformTrigger(dlg, '选择转入平台').click();
     const popover2 = platformPopover(page);
     const disabledRow = popover2.locator('div[aria-disabled="true"]').filter({ hasText: picked });
     await expect(disabledRow).toHaveCount(1);
     // aria-disabled 元素须 force 点击（绕过 Playwright actionability 的 enabled 等待）
     await disabledRow.click({ force: true });
     await expect(popover2.getByPlaceholder('搜索平台名称/代码')).toBeVisible();
-    await expect(dlg.getByRole('button', { name: '选择转入平台' })).toBeVisible();
+    await expect(platformTrigger(dlg, '选择转入平台')).toBeVisible();
 
     expect(errors, `页面抛出未捕获异常: ${errors.join(' | ')}`).toHaveLength(0);
   });
@@ -276,20 +288,20 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     await refreshTrigger.click();
     const dlg = dialogByTitle(page, '更新非净值资产');
     await dlg.waitFor();
-    await dlg.getByRole('button', { name: '请选择平台' }).click();
+    await platformTrigger(dlg, '请选择平台').click();
     const popover = platformPopover(page);
     const { keyword } = await firstPlatformOption(popover);
     await popover.getByPlaceholder('搜索平台名称/代码').fill(keyword);
     const matched = await expectFilteredOptions(popover, keyword);
     await pickOption(popover, matched[0]);
-    await expect(dlg.getByRole('button', { name: matched[0], exact: true })).toBeVisible();
+    await expect(platformTrigger(dlg, matched[0])).toBeVisible();
     await dlg.getByRole('button', { name: '取消' }).click();
 
     // trades 移动页筛选面板（覆盖 shared 组件 mobile variant）：展开「筛选」→ 平台控件可搜索
     await page.goto(`${href}/trades`);
     await page.getByRole('button', { name: '提交交易' }).first().waitFor({ timeout: 15_000 });
     await page.getByRole('button', { name: '筛选' }).click();
-    await page.getByRole('button', { name: '全部平台' }).click();
+    await platformTrigger(page, '全部平台').click();
     const popover2 = platformPopover(page);
     const opt2 = await firstPlatformOption(popover2);
     await popover2.getByPlaceholder('搜索平台名称/代码').fill(opt2.keyword);
@@ -305,7 +317,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     test.skip(testInfo.project.name === 'mobile', '桌面筛选栏断言仅针对桌面项目');
     const errors = collectPageErrors(page);
     await gotoTradesPage(page);
-    await page.getByRole('button', { name: '全部平台' }).click();
+    await platformTrigger(page, '全部平台').click();
     const popover = platformPopover(page);
     const { keyword } = await firstPlatformOption(popover);
 
