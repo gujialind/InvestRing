@@ -57,6 +57,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
 
 const PLATFORM_LEVEL_TYPES: EventType[] = ["cash_dividend", "reinvest_dividend", "forced_adjustment"];
 
@@ -236,21 +237,13 @@ export default function ShareChangeEventsPage() {
                   {PLATFORM_LEVEL_TYPES.includes(formData.event_type) && (
                     <div className="space-y-2">
                       <Label htmlFor="platform_code">平台</Label>
-                      <Select
-                        value={formData.platform_code || ""}
-                        onValueChange={(value) => setFormData({ ...formData, platform_code: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择平台" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {platforms.map((p) => (
-                            <SelectItem key={p.code} value={p.code}>
-                              {p.name} ({p.code})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <SearchablePlatformSelect
+                        platforms={platforms}
+                        value={formData.platform_code || null}
+                        onChange={(v) => setFormData({ ...formData, platform_code: v ?? "" })}
+                        placeholder="选择平台"
+                        id="platform_code"
+                      />
                     </div>
                   )}
 

@@ -15,13 +15,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { formatCurrency, getReturnColorClass, toDateOnly } from "@/lib/utils";
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
@@ -29,6 +22,7 @@ import { platformApi } from "@/lib/api";
 import { useUIStore } from "@/stores/uiStore";
 import { usePositionList, useUpdateCashPosition } from "@/hooks/usePosition";
 import PositionCard from "@/components/shared/PositionCard";
+import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { Position } from "@/types/position";
 import type { Platform } from "@/types/platform";
@@ -204,18 +198,13 @@ export default function MobilePositionsPage() {
               {/* 平台选择 */}
               <div className="space-y-2">
                 <Label htmlFor="platform">平台</Label>
-                <Select value={selectedPlatform} onValueChange={setSelectedPlatform} required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="请选择平台" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {platforms.map((platform) => (
-                      <SelectItem key={platform.code} value={platform.code}>
-                        {platform.name} ({platform.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchablePlatformSelect
+                  platforms={platforms}
+                  value={selectedPlatform || null}
+                  onChange={(v) => setSelectedPlatform(v ?? "")}
+                  placeholder="请选择平台"
+                  id="platform"
+                />
               </div>
 
               {/* 日期选择 */}
