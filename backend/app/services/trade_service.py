@@ -663,6 +663,13 @@ def create_trade(
             "不支持直接创建 CASH 交易，请使用现金转移或申购赎回入口",
         )
 
+    # 平台必填 + 存在性（与 share_change_event_service PLATFORM_REQUIRED 先例同口径）：
+    # 基金腿平台决定持仓平台归属，缺省时现金闸门退化为全组合聚合（§2.2 旁路），必须拦截
+    if not platform_code:
+        raise BusinessError("PLATFORM_REQUIRED", "调仓交易必须指定交易平台 platform_code")
+    if not db.query(Platform).filter(Platform.code == platform_code).first():
+        raise NotFoundError("PLATFORM_NOT_FOUND", f"平台 {platform_code} 不存在")
+
     # #91：现金腿平台规范化——与基金腿同平台时等价于不传；传入时校验存在
     if cash_platform_code == platform_code:
         cash_platform_code = None

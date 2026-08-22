@@ -593,12 +593,12 @@ ir trade list [--portfolio-code <组合>] [--status <状态>] [--type <类型>] 
 # 买入
 ir trade create --portfolio-code <组合> --product-code <产品> [--market <市场>] \
   --type buy --actual-amount <实际金额> --fee <手续费> --price <价格> \
-  --trade-date YYYY-MM-DD [--platform-code <平台>] [--cash-platform-code <现金平台>] [--shares <份额>] [--notes <备注>]
+  --trade-date YYYY-MM-DD --platform-code <平台> [--cash-platform-code <现金平台>] [--shares <份额>] [--notes <备注>]
 
 # 卖出
 ir trade create --portfolio-code <组合> --product-code <产品> [--market <市场>] \
   --type sell --shares <份额> --trade-date YYYY-MM-DD [--actual-amount <实际金额>] \
-  [--fee <手续费>] [--platform-code <平台>] [--cash-platform-code <现金平台>] [--notes <备注>]
+  [--fee <手续费>] --platform-code <平台> [--cash-platform-code <现金平台>] [--notes <备注>]
 ```
 
 | 参数 | 必填 | 说明 |
@@ -612,7 +612,7 @@ ir trade create --portfolio-code <组合> --product-code <产品> [--market <市
 | `--fee` | 否（默认0） | 手续费 |
 | `--price` | 场内必填 | 交易价格；场内（CN_EXCHANGE）必填；任意市场显式传价均须为正数（`MISSING_OR_INVALID_PRICE`）；卖出传价将按 `shares×price` 推导金额（场内对账超差报 `AMOUNT_MISMATCH`，场外仅推导展示不强对账，确认时仅与 T 日净值做一致性校验，不覆盖净值） |
 | `--shares` | 卖出时必填 | 卖出份额（必须 > 0；先量化到 2 位小数再校验，不超过可用份额） |
-| `--platform-code` | 否 | 平台代码 |
+| `--platform-code` | 是 | 平台代码（必须已存在，缺失报 `PLATFORM_REQUIRED`、不存在报 `PLATFORM_NOT_FOUND`） |
 | `--cash-platform-code` | 否 | 现金腿平台（issue #91）：买=扣款平台、卖=到账平台，缺省同基金腿平台；买入可用现金按扣款平台校验，两腿同 transfer_group 原子翻转 |
 | `--trade-date` | 是 | 交易日期（必须是交易日） |
 | `--notes` | 否 | 备注 |

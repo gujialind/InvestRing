@@ -58,7 +58,7 @@ def create(
     trade_date: Optional[str] = typer.Option(None, "--trade-date", help="交易日期(YYYY-MM-DD)(必填)"),
     actual_amount: Optional[float] = typer.Option(None, "--actual-amount", help="实际金额"),
     fee: float = typer.Option(0, "--fee", help="手续费"),
-    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码"),
+    platform_code: Optional[str] = typer.Option(None, "--platform-code", help="平台代码(必填)"),
     cash_platform_code: Optional[str] = typer.Option(None, "--cash-platform-code", help="现金腿平台：买=扣款平台、卖=到账平台，缺省同基金腿平台"),
     market: Optional[str] = typer.Option(None, "--market", help="市场类型（省略时自动解析；LOF 多市场须显式指定）"),
     price: Optional[float] = typer.Option(None, "--price", help="价格"),
@@ -80,7 +80,7 @@ def create(
     client = APIClient.from_config()
     body = resolve_body(
         json_body,
-        required=("portfolio_code", "product_code", "trade_type", "trade_date"),
+        required=("portfolio_code", "product_code", "trade_type", "trade_date", "platform_code"),
         portfolio_code=portfolio_code,
         product_code=product_code,
         trade_type=trade_type,
