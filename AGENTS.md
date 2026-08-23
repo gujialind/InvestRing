@@ -19,6 +19,8 @@
 
 **运行入口**：后端 `backend/app/main.py`（启动初始化行为读源码）；前端 `npm run dev`；`ir` CLI 的说明见 §6。
 
+**模块指南分层**（issue #224）：各模块操作级细节（怎么跑测试/E2E、种子来源、契约流程、易踩坑）在 `backend/AGENTS.md`、`frontend/AGENTS.md`、`ir-cli/AGENTS.md`；本文件只保留全局业务约束与组织约定，两边不重复。
+
 ***
 
 ## 2. 核心领域模型与不变量
