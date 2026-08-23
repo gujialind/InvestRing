@@ -1,8 +1,6 @@
 # ============================================================================
 # InvestRing 生产环境 Docker Compose 配置（backend + frontend + nginx）
 # ============================================================================
-# 目标环境：4核4G 云服务器 + 云 RDS MySQL
-# 部署目录：/opt/investring（compose 文件由 CD 自动同步，.env 人工维护）
 # 镜像版本：由 .env 中的 BACKEND_IMAGE_REF / FRONTEND_IMAGE_REF 指定
 #（CD 部署时自动更新这两行）
 # 对外入口：仅 nginx 发布 80/443；backend 仅绑定 127.0.0.1（供健康检查/运维）
@@ -33,7 +31,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    # 4G 内存环境下为后端预留充足资源（其余留给系统与未来的前端）
     deploy:
       resources:
         limits:
