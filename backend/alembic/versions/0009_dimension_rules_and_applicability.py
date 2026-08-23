@@ -12,7 +12,7 @@ Create Date: 2026-08-13
    required/optional，无行 = forbidden），按 DIMENSION_RULES 回填。
 
 两表数据源自 app/constants/asset_dimensions.py（沿用 0008 import 常量模式；
-init_data.py、tests/conftest.py 三方同源）。回填后校验（先于任何后续操作）：
+tests/seed_base.py 同源；init_data.py 已于 #222 退役）。回填后校验（先于任何后续操作）：
 - 每个非 asset_class 维度值至少有 1 条适用关联（否则值级校验下该值不可用）；
 - 存量产品五维引用全部通过值级适用校验（否则中止，不留半成品——本迁移纯增量，
   DML 回滚即复原；注意 MySQL DDL 自动提交，故校验排在建表之后、无任何破坏操作）。

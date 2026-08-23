@@ -1,6 +1,6 @@
 """资产分类正交维度字典与产品维度映射（issue #128，单一事实来源）。
 
-迁移 0008、scripts/init_data.py 种子、tests/conftest.py 均引用本模块，避免多处手写漂移。
+迁移 0008 与 tests/seed_base.py（pytest 及 CI E2E 种子同源）引用本模块，避免多处手写漂移。
 
 维度模型（asset_classification 表改造为维度值字典）：
 - dimension：asset_class / region / style / size / segment 五个正交维度；
@@ -25,7 +25,7 @@ ASSET_ALTERNATIVE + SEG_REIT），不为假想需求预留空值——故当前�
   PRODUCT_DIMENSIONS 的产品（如用户手工新增）的兜底回填。
 
 适用性关系（issue #135 矩阵落库）分两层，DB 为运行期事实来源、本模块为种子来源
-（迁移 0009、init_data.py、tests/conftest.py 三方同源消费）：
+（迁移 0009 与 tests/seed_base.py 同源消费）：
 - DIMENSION_RULES（维度级，表 asset_class_dimension_rule）：asset_class →
   {dimension: rule}，rule ∈ required/optional，未登记的 dimension = forbidden；
   未登记的大类 = 全 forbidden（现金型语义），新建大类配规则后运行期即可用；

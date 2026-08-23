@@ -8,7 +8,7 @@
  * 把弹层 Portal 注入 DialogContent。本文件守护该行为不再复发。
  *
  * 数据说明：快照页四个弹窗的「选日写入 + 按钮启用」断言不依赖业务数据，
- * CI 种子库（init_data 的 draft 组合）即可跑；编辑交易用例依赖 pending 交易，
+ * CI 种子库（seed_e2e.py 的 draft 组合 E2E_PORT）即可跑；编辑交易用例依赖 pending 交易，
  * 无数据时优雅 skip（与 regression.spec.ts 同一惯例）。
  */
 import { test, expect, type Page, type Locator } from '@playwright/test';

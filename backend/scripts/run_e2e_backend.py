@@ -7,9 +7,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+E2E_DB_PATH = "/tmp/ir_e2e.db"
 
 os.environ.update(
-    DATABASE_URL="sqlite:////tmp/ir_e2e.db",
+    DATABASE_URL=f"sqlite:///{E2E_DB_PATH}",
     SECRET_KEY="test-secret-key-e2e",
     SCHEDULER_ENABLED="false",
     DEBUG="true",
@@ -17,7 +18,19 @@ os.environ.update(
 os.chdir(BACKEND_DIR)
 sys.path.insert(0, str(BACKEND_DIR))
 
-from app.main import app  # noqa: E402
+# 每次启动重建临时库，避免上一版本 schema 残留（同 conftest 的 drop+create 策略）
+if os.path.exists(E2E_DB_PATH):
+    os.remove(E2E_DB_PATH)
+
+from app.main import app  # noqa: E402  （import 期完成 create_all）
+from app.database import SessionLocal  # noqa: E402
+from tests.seed_base import seed_base_data  # noqa: E402
+
+db = SessionLocal()
+try:
+    seed_base_data(db)
+finally:
+    db.close()
 
 
 @asynccontextmanager
