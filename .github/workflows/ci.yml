@@ -230,8 +230,10 @@ jobs:
   # 后端跑在 MySQL 8.4 上（对齐 backend-test-mysql 的"对齐生产 RDS"哲学）。
   #
   # 运行前提（勿删）：
-  #   - E2E 登录用例依赖 ADMIN/admin@2026 用户，该用户不会随后端启动自动创建，
-  #     必须由 scripts/init_data.py 种子产生，删除 seed 步骤登录必挂
+  #   - E2E 登录用例依赖 ADMIN/admin@2026 用户，业务冒烟用例依赖 draft 组合
+  #     E2E_PORT（无组合时 spec 优雅 skip、覆盖静默蒸发），两者均由
+  #     scripts/seed_e2e.py 种子产生（种子体与 pytest 同源：tests/seed_base.py），
+  #     删除 seed 步骤登录必挂
   #   - 前端 next.config.js 将 /api/* rewrite 到 localhost:8000，故需真实后端
   frontend-e2e:
     name: "Frontend E2E"
@@ -289,15 +291,16 @@ jobs:
           python -c "from app.database import engine, Base; import app.models; Base.metadata.create_all(bind=engine)"
           alembic upgrade head
 
-      # 种子 ADMIN/admin@2026（E2E auth.setup.ts 登录依赖，勿删）
-      - name: Seed admin user
+      # 种子 ADMIN/admin@2026 + draft 组合 E2E_PORT（E2E 登录与业务冒烟依赖，勿删；
+      # 种子体与 pytest 同源：backend/tests/seed_base.py，issue #222）
+      - name: Seed E2E base data
         working-directory: backend
         env:
           DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/ir_e2e?charset=utf8mb4
           SECRET_KEY: test-secret-key-for-ci
           SCHEDULER_ENABLED: "false"
           DEBUG: "false"
-        run: python scripts/init_data.py
+        run: python scripts/seed_e2e.py
 
       - name: Start backend
         working-directory: backend

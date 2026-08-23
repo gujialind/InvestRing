@@ -18,8 +18,8 @@ Create Date: 2026-08-01
 
 3. 插入两条种子产品记录（IN_TRANSIT_BUY / IN_TRANSIT_SELL）：
    与 CASH 虚拟产品同构（market=''），product_type='IN_TRANSIT'，
-   confirm_days=0，is_qdii=0。CASH 经 init_data.py 脚本种子，IN_TRANSIT
-   经本迁移种子（部署时 alembic upgrade head 自动执行）。
+   confirm_days=0，is_qdii=0。CASH 原经部署期 init_data.py 脚本种子（该脚本已于
+   #222 退役，生产数据早已落库），IN_TRANSIT 经本迁移种子（部署时 alembic upgrade head 自动执行）。
 
 幂等设计：
 - 全新库经 create_all 已按 String(20) 建列，alter_column 对 MySQL 为
