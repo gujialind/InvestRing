@@ -79,26 +79,30 @@ def seed_base_data(db: Session) -> None:
 
     products = [
         {"code": "CASH", "market": "", "name": "现金类资产", "product_type": "CASH",
-         "confirm_days": 0, "is_qdii": False, **_dims("CASH")},
+         "confirm_days": 0, "is_qdii": False, "nav_lag_days": 0, **_dims("CASH")},
         # #93: 在途资金虚拟产品（与 CASH 同构：market='', 五维度全 NULL）
         {"code": "IN_TRANSIT_BUY", "market": "", "name": "买入在途资金", "product_type": "IN_TRANSIT",
          "asset_class_code": None, "region_code": None, "style_code": None,
-         "size_code": None, "segment_code": None, "confirm_days": 0, "is_qdii": False},
+         "size_code": None, "segment_code": None, "confirm_days": 0, "is_qdii": False,
+         "nav_lag_days": 0},
         {"code": "IN_TRANSIT_SELL", "market": "", "name": "卖出在途资金", "product_type": "IN_TRANSIT",
          "asset_class_code": None, "region_code": None, "style_code": None,
-         "size_code": None, "segment_code": None, "confirm_days": 0, "is_qdii": False},
+         "size_code": None, "segment_code": None, "confirm_days": 0, "is_qdii": False,
+         "nav_lag_days": 0},
         {"code": "510300.SH", "market": "CN_EXCHANGE", "name": "沪深300ETF", "product_type": "ETF",
-         "confirm_days": 0, "is_qdii": False,
+         "confirm_days": 0, "is_qdii": False, "nav_lag_days": 0,
          "asset_class_code": "ASSET_STOCK", "region_code": "REGION_CN",
          "style_code": "STYLE_BALANCED", "size_code": "SIZE_LARGE", "segment_code": "SEG_COMPOSITE"},
         {"code": "000300.OF", "market": "CN_OTC", "name": "沪深300联接A", "product_type": "OEF",
-         "confirm_days": 1, "is_qdii": False,
+         "confirm_days": 1, "is_qdii": False, "nav_lag_days": 0,
          "asset_class_code": "ASSET_STOCK", "region_code": "REGION_CN",
          "style_code": "STYLE_BALANCED", "size_code": "SIZE_LARGE", "segment_code": "SEG_COMPOSITE"},
+        # 场外 QDII：快照估值取 T-1 交易日净值（issue #228 nav_lag_days=1）
         {"code": "270042.OF", "market": "CN_OTC", "name": "广发纳指100(QDII)A", "product_type": "OEF",
-         "confirm_days": 2, "is_qdii": True, **_dims("270042.OF")},
+         "confirm_days": 2, "is_qdii": True, "nav_lag_days": 1, **_dims("270042.OF")},
         {"code": "1001767344", "market": "HK_MUTUAL", "name": "摩根国际债券人民币对冲", "product_type": "OEF",
-         "confirm_days": 1, "is_qdii": False, "data_source": "akshare", **_dims("1001767344")},
+         "confirm_days": 1, "is_qdii": False, "nav_lag_days": 0,
+         "data_source": "akshare", **_dims("1001767344")},
     ]
     for p in products:
         if not db.query(Product).filter(

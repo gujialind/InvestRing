@@ -16,6 +16,9 @@ class ProductBase(BaseModel):
     size_code: Optional[str] = None
     segment_code: Optional[str] = None
     confirm_days: int = 1
+    # issue #228：快照估值取价滞后交易日数（0=当日、N=前第 N 个交易日）；
+    # 场外 QDII / 互认基金取 1。is_qdii 仅为展示标签，不参与取价
+    nav_lag_days: int = 0
     is_qdii: bool = False
     data_source: Optional[str] = "tushare"
 
@@ -33,6 +36,7 @@ class ProductUpdate(BaseModel):
     size_code: Optional[str] = None
     segment_code: Optional[str] = None
     confirm_days: Optional[int] = None
+    nav_lag_days: Optional[int] = None
     is_qdii: Optional[bool] = None
 
 

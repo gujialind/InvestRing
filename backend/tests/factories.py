@@ -133,6 +133,7 @@ def create_product(
     segment_code: str = "SEG_COMPOSITE",
     confirm_days: int = 1,
     is_qdii: bool = False,
+    nav_lag_days: int = 0,
 ) -> Product:
     """创建产品，如已存在则直接返回（维度值默认取 conftest 已种子的字典值）"""
     existing = db.query(Product).filter(
@@ -154,6 +155,7 @@ def create_product(
         region_code=region_code, style_code=style_code,
         size_code=size_code, segment_code=segment_code,
         confirm_days=confirm_days, is_qdii=is_qdii,
+        nav_lag_days=nav_lag_days,
     )
     db.add(product)
     db.commit()

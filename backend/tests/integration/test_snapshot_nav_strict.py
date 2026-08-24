@@ -1,16 +1,18 @@
 # ============================================================================
 # 集成测试：快照生成净值严格匹配 (test_snapshot_nav_strict.py)
 # ============================================================================
-# issue #96：快照生成净值必须严格与快照日一致——普通基金严格取 target_date
-# 当日净值、QDII 严格取 T-1（前一交易日）净值；取不到即拒绝生成（MISSING_NAV），
+# issue #96：快照生成净值必须严格与快照日一致——取不到即拒绝生成（MISSING_NAV），
 # 禁止静默回退到更早净值。
 # issue #178：场内 QDII 与普通场内产品一致取 target_date 当日收盘价（T+0），
 # 仅场外 QDII 保持 T-1 滞后口径（见 TestExchangeQdiiPricing）。
+# issue #228：滞后取价泛化为产品列 `nav_lag_days` 驱动——0=严格取当日、N>0=严格取
+# 前第 N 个交易日净值；`is_qdii` 降级为纯展示标签，不再参与取价分支（见
+# TestNavLagDaysPricing：非 QDII 也可设 1、is_qdii=True 但 lag=0 仍取当日）。
 #
 # 覆盖验收断言：
 # 1. 缺 target_date 当日净值 → generate 422 MISSING_NAV，指出缺失产品与日期
 # 2. 补齐净值后生成成功，持仓 unit_price == 当日净值
-# 3. QDII：T-1 缺失拒绝（不回退 T-2）；T-1 存在严格用 T-1（不用当日净值）
+# 3. nav_lag_days=1（如场外 QDII）：T-1 缺失拒绝（不回退 T-2）；T-1 存在严格用 T-1
 # 4. 净值齐全的正常交易日生成不回归
 # 5. 被拒绝后不产生快照（目标日无快照行、最新快照日不变）
 # 附：recalculate 预校验同样严格（删除任何快照前拦截）；生成点硬性兜底
@@ -138,11 +140,11 @@ class TestSnapshotNavStrict:
         assert Decimal(str(pos.market_value)) == Decimal("150.0")
 
     def test_qdii_missing_t1_nav_rejected_no_fallback(self, client, admin_headers, test_db):
-        """QDII：T-1 缺失即拒绝，不回退 T-2 净值（验收 3 前半）"""
+        """场外 QDII（nav_lag_days=1）：T-1 缺失即拒绝，不回退 T-2 净值（验收 3 前半）"""
         port = create_portfolio(test_db, code="NAV_S3", status="active")
         create_product(test_db, code="QDIIA.OF", market="CN_OTC",
                        product_type="OEF", asset_class_code="ASSET_STOCK",
-                       confirm_days=2, is_qdii=True)
+                       confirm_days=2, is_qdii=True, nav_lag_days=1)
         _setup_fund_snapshot(test_db, port.code, "QDIIA.OF", "CN_OTC", D0)
         # 仅 T-2（06-05）有净值，T-1（06-06）缺失
         create_price_record(test_db, "QDIIA.OF", "CN_OTC", T_MINUS_2, 1.8)
@@ -164,11 +166,11 @@ class TestSnapshotNavStrict:
         ).first() is None
 
     def test_qdii_strict_t1_nav_used(self, client, admin_headers, test_db):
-        """QDII：T-1 存在时严格用 T-1，不用 target_date 当日净值（验收 3 后半）"""
+        """场外 QDII（nav_lag_days=1）：T-1 存在时严格用 T-1，不用 target_date 当日净值（验收 3 后半）"""
         port = create_portfolio(test_db, code="NAV_S4", status="active")
         create_product(test_db, code="QDIIB.OF", market="CN_OTC",
                        product_type="OEF", asset_class_code="ASSET_STOCK",
-                       confirm_days=2, is_qdii=True)
+                       confirm_days=2, is_qdii=True, nav_lag_days=1)
         _setup_fund_snapshot(test_db, port.code, "QDIIB.OF", "CN_OTC", D0)
         # NEXT_DAY 的 T-1 = D0（06-06）；两日净值不同值以区分取价日
         create_price_record(test_db, "QDIIB.OF", "CN_OTC", D0, 2.0)
@@ -241,15 +243,16 @@ class TestSnapshotNavStrict:
 
 
 class TestExchangeQdiiPricing:
-    """#178 场内 QDII 快照取价：与普通场内产品一致取 target_date 当日收盘价（T+0），
-    仅场外 QDII 保持 T-1 滞后口径"""
+    """#178 场内 QDII 快照取价：与普通场内产品一致取 target_date 当日收盘价（T+0）。
+    #228 起该行为由 nav_lag_days=0 落库表达（is_qdii=True 也不滞后），
+    证明 is_qdii 标签本身不驱动取价"""
 
     def test_exchange_qdii_uses_target_date_close_price(self, client, admin_headers, test_db):
         """T1：场内 QDII 取当日收盘价；T-1 与当日双价并存时不用 T-1（防回退歧义）"""
         port = create_portfolio(test_db, code="NAV_E1", status="active")
         create_product(test_db, code="EQDIIA.SZ", market="CN_EXCHANGE",
                        product_type="ETF", asset_class_code="ASSET_STOCK",
-                       confirm_days=0, is_qdii=True)
+                       confirm_days=0, is_qdii=True, nav_lag_days=0)
         _setup_fund_snapshot(test_db, port.code, "EQDIIA.SZ", "CN_EXCHANGE", D0)
         # T-1（D0）与当日（NEXT_DAY）均有价且不同值，确认取当日
         create_price_record(test_db, "EQDIIA.SZ", "CN_EXCHANGE", D0, 1.7)
@@ -276,7 +279,7 @@ class TestExchangeQdiiPricing:
         port = create_portfolio(test_db, code="NAV_E2", status="active")
         create_product(test_db, code="EQDIIB.SZ", market="CN_EXCHANGE",
                        product_type="ETF", asset_class_code="ASSET_STOCK",
-                       confirm_days=0, is_qdii=True)
+                       confirm_days=0, is_qdii=True, nav_lag_days=0)
         _setup_fund_snapshot(test_db, port.code, "EQDIIB.SZ", "CN_EXCHANGE", D0)
         # 仅 T-1（D0）有价，NEXT_DAY 当日缺失（旧逻辑按 QDII T-1 会放行）
         create_price_record(test_db, "EQDIIB.SZ", "CN_EXCHANGE", D0, 1.8)
@@ -305,7 +308,7 @@ class TestExchangeQdiiPricing:
         port = create_portfolio(test_db, code="NAV_E3", status="active")
         create_product(test_db, code="EQDIIC.SZ", market="CN_EXCHANGE",
                        product_type="ETF", asset_class_code="ASSET_STOCK",
-                       confirm_days=0, is_qdii=True)
+                       confirm_days=0, is_qdii=True, nav_lag_days=0)
         _setup_fund_snapshot(test_db, port.code, "EQDIIC.SZ", "CN_EXCHANGE", D0)
         create_price_record(test_db, "EQDIIC.SZ", "CN_EXCHANGE", D0, 1.8)
 
@@ -331,21 +334,22 @@ class TestExchangeQdiiPricing:
         assert check["status"] == "passed"
 
     def test_mixed_portfolio_three_pricing_rules(self, client, admin_headers, test_db):
-        """T4：混合组合三口径互不串扰--场内 QDII=当日收盘、场外 QDII=T-1、普通场外=当日净值"""
+        """T4：混合组合三口径互不串扰（#228 起口径由 nav_lag_days 表达）——
+        场内 QDII lag=0 取当日收盘、场外 QDII lag=1 取 T-1、普通场外 lag=0 取当日净值"""
         port = create_portfolio(test_db, code="NAV_E4", status="active")
         products = [
-            # (code, market, is_qdii, T-1 价, 当日价, 期望 unit_price)
-            ("EQDIID.SZ", "CN_EXCHANGE", True, 2.0, 2.5, Decimal("2.5")),
-            ("QDIID.OF", "CN_OTC", True, 3.0, 4.0, Decimal("3.0")),
-            ("PLAIND.OF", "CN_OTC", False, 1.0, 1.5, Decimal("1.5")),
+            # (code, market, is_qdii, nav_lag_days, T-1 价, 当日价, 期望 unit_price)
+            ("EQDIID.SZ", "CN_EXCHANGE", True, 0, 2.0, 2.5, Decimal("2.5")),
+            ("QDIID.OF", "CN_OTC", True, 1, 3.0, 4.0, Decimal("3.0")),
+            ("PLAIND.OF", "CN_OTC", False, 0, 1.0, 1.5, Decimal("1.5")),
         ]
-        for code, market, is_qdii, _, _, _ in products:
+        for code, market, is_qdii, nav_lag_days, _, _, _ in products:
             create_product(
                 test_db, code=code, market=market,
                 product_type="ETF" if market == "CN_EXCHANGE" else "OEF",
                 asset_class_code="ASSET_STOCK",
                 confirm_days=0 if market == "CN_EXCHANGE" else 1,
-                is_qdii=is_qdii,
+                is_qdii=is_qdii, nav_lag_days=nav_lag_days,
             )
             # D0 三表快照：三产品各 100 份（value/holding 仅一条，防唯一约束冲突）
             create_position_snapshot(
@@ -358,7 +362,7 @@ class TestExchangeQdiiPricing:
         )
         create_investor_holding(test_db, port.code, "VIEWER", D0, shares=300.0)
 
-        for code, market, _, t1_price, t0_price, _ in products:
+        for code, market, _, _, t1_price, t0_price, _ in products:
             create_price_record(test_db, code, market, D0, t1_price)
             create_price_record(test_db, code, market, NEXT_DAY, t0_price)
 
@@ -369,7 +373,7 @@ class TestExchangeQdiiPricing:
         )
         assert resp.status_code == 200, f"Response: {resp.status_code} {resp.json()}"
 
-        for code, market, _, _, _, expected in products:
+        for code, market, _, _, _, _, expected in products:
             pos = test_db.query(PortfolioPosition).filter(
                 PortfolioPosition.portfolio_code == port.code,
                 PortfolioPosition.product_code == code,
@@ -379,3 +383,92 @@ class TestExchangeQdiiPricing:
             assert Decimal(str(pos.unit_price)) == expected, (
                 f"{code}({market}) unit_price={pos.unit_price}，期望 {expected}"
             )
+
+
+class TestNavLagDaysPricing:
+    """#228 滞后取价泛化：快照取价日只看产品 `nav_lag_days`，与 is_qdii/market 解耦
+    （互认基金等非 QDII 品种可直接设 1；QDII 标签设 0 则不滞后）"""
+
+    def test_non_qdii_nav_lag_1_uses_prev_trading_day_nav(self, client, admin_headers, test_db):
+        """非 QDII 产品设 nav_lag_days=1（互认基金场景）→ 快照严格用 T-1 净值"""
+        port = create_portfolio(test_db, code="NAV_L1", status="active")
+        create_product(test_db, code="HKMR1", market="HK_MUTUAL",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
+                       confirm_days=1, is_qdii=False, nav_lag_days=1)
+        _setup_fund_snapshot(test_db, port.code, "HKMR1", "HK_MUTUAL", D0)
+        # T-1（D0）与当日（NEXT_DAY）双价并存且不同值，确认取 T-1
+        create_price_record(test_db, "HKMR1", "HK_MUTUAL", D0, 2.0)
+        create_price_record(test_db, "HKMR1", "HK_MUTUAL", NEXT_DAY, 3.0)
+
+        resp = client.post(
+            "/api/snapshots/generate",
+            json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, f"Response: {resp.status_code} {resp.json()}"
+
+        pos = test_db.query(PortfolioPosition).filter(
+            PortfolioPosition.portfolio_code == port.code,
+            PortfolioPosition.product_code == "HKMR1",
+            PortfolioPosition.snapshot_date == NEXT_DAY,
+        ).first()
+        assert pos is not None
+        assert Decimal(str(pos.unit_price)) == Decimal("2.0")
+        assert Decimal(str(pos.market_value)) == Decimal("200.0")
+
+    def test_non_qdii_nav_lag_1_missing_t1_rejected_no_fallback(self, client, admin_headers, test_db):
+        """非 QDII nav_lag_days=1 缺 T-1（仅 T-2 与当日有价）→ MISSING_NAV，
+        既不回退 T-2 也不改用当日价，message 指出所需 T-1 日期"""
+        port = create_portfolio(test_db, code="NAV_L2", status="active")
+        create_product(test_db, code="HKMR2", market="HK_MUTUAL",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
+                       confirm_days=1, is_qdii=False, nav_lag_days=1)
+        _setup_fund_snapshot(test_db, port.code, "HKMR2", "HK_MUTUAL", D0)
+        # T-2（06-05）与当日（06-09）有价，T-1（06-06）缺失
+        create_price_record(test_db, "HKMR2", "HK_MUTUAL", T_MINUS_2, 1.8)
+        create_price_record(test_db, "HKMR2", "HK_MUTUAL", NEXT_DAY, 2.2)
+        ids_before = _snapshot_ids(test_db, port.code)
+
+        resp = client.post(
+            "/api/snapshots/generate",
+            json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "MISSING_NAV"
+        assert "HKMR2(HK_MUTUAL)" in detail["message"]
+        assert "[T-1=2025-06-06]" in detail["message"]
+
+        assert test_db.query(PortfolioValueSnapshot).filter(
+            PortfolioValueSnapshot.portfolio_code == port.code,
+            PortfolioValueSnapshot.snapshot_date == NEXT_DAY,
+        ).first() is None
+        assert _snapshot_ids(test_db, port.code) == ids_before
+
+    def test_otc_qdii_with_nav_lag_0_uses_target_date_nav(self, client, admin_headers, test_db):
+        """场外产品 is_qdii=True 但 nav_lag_days=0 → 仍取当日净值
+        （证明取价只由 nav_lag_days 驱动，is_qdii 已是纯展示标签）"""
+        port = create_portfolio(test_db, code="NAV_L3", status="active")
+        create_product(test_db, code="QDIIL3.OF", market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK",
+                       confirm_days=2, is_qdii=True, nav_lag_days=0)
+        _setup_fund_snapshot(test_db, port.code, "QDIIL3.OF", "CN_OTC", D0)
+        create_price_record(test_db, "QDIIL3.OF", "CN_OTC", D0, 2.0)
+        create_price_record(test_db, "QDIIL3.OF", "CN_OTC", NEXT_DAY, 3.0)
+
+        resp = client.post(
+            "/api/snapshots/generate",
+            json={"portfolio_code": port.code, "target_date": NEXT_DAY.isoformat()},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, f"Response: {resp.status_code} {resp.json()}"
+
+        pos = test_db.query(PortfolioPosition).filter(
+            PortfolioPosition.portfolio_code == port.code,
+            PortfolioPosition.product_code == "QDIIL3.OF",
+            PortfolioPosition.snapshot_date == NEXT_DAY,
+        ).first()
+        assert pos is not None
+        assert Decimal(str(pos.unit_price)) == Decimal("3.0")
+        assert Decimal(str(pos.market_value)) == Decimal("300.0")

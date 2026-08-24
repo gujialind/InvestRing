@@ -11,6 +11,9 @@ export interface Product {
   size_code?: string | null;
   segment_code?: string | null;
   confirm_days: number;
+  /** issue #228：快照估值取价滞后交易日数（0=当日、N=前第 N 个交易日；场外 QDII/互认基金=1） */
+  nav_lag_days: number;
+  /** 展示标签（issue #228 起不参与快照取价判断，取价看 nav_lag_days） */
   is_qdii: boolean;
   data_source?: string;
   data_source_status: string;
@@ -30,6 +33,8 @@ export interface ProductCreate {
   size_code?: string;
   segment_code?: string;
   confirm_days?: number;
+  /** issue #228：快照估值取价滞后交易日数（默认 0） */
+  nav_lag_days?: number;
   is_qdii?: boolean;
   /** 数据源（后端默认 tushare） */
   data_source?: string;
@@ -46,5 +51,7 @@ export interface ProductUpdate {
   size_code?: string | null;
   segment_code?: string | null;
   confirm_days?: number;
+  /** issue #228：纯显式更新（不传不改） */
+  nav_lag_days?: number;
   is_qdii?: boolean;
 }

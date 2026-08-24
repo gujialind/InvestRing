@@ -61,15 +61,18 @@ def get_positions(
     name_map = {}
     dims_by_product = {}
     qdii_map = {}
+    nav_lag_map = {}
     dim_codes = set()
     if codes:
         for prod in db.query(
             Product.code, Product.market, Product.name, Product.is_qdii,
+            Product.nav_lag_days,
             Product.asset_class_code, Product.region_code, Product.style_code,
             Product.size_code, Product.segment_code,
         ).filter(Product.code.in_(codes)).all():
             name_map[(prod.code, prod.market)] = prod.name
             qdii_map[(prod.code, prod.market)] = prod.is_qdii
+            nav_lag_map[(prod.code, prod.market)] = prod.nav_lag_days
             dims = (prod.asset_class_code, prod.region_code, prod.style_code,
                     prod.size_code, prod.segment_code)
             dims_by_product[(prod.code, prod.market)] = dims
@@ -104,6 +107,7 @@ def get_positions(
         key = (p.portfolio_code, p.product_code, p.market, p.platform_code)
         row["product_name"] = name_map.get((p.product_code, p.market))
         row["is_qdii"] = qdii_map.get((p.product_code, p.market))
+        row["nav_lag_days"] = nav_lag_map.get((p.product_code, p.market)) or 0
         dims = dims_by_product.get((p.product_code, p.market))
         if dims:
             for field, code in zip(

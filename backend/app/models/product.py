@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, Boolean, Integer, ForeignKey, func
+from sqlalchemy import Column, String, Text, DateTime, Boolean, Integer, ForeignKey, func, text
 from app.database import Base
 
 
@@ -17,6 +17,10 @@ class Product(Base):
     size_code = Column(String(30), ForeignKey("asset_classification.code"))
     segment_code = Column(String(30), ForeignKey("asset_classification.code"))
     confirm_days = Column(Integer)
+    # issue #228：快照估值取价滞后交易日数（0=当日、N=前第 N 个交易日）；
+    # 普通产品 0，场外 QDII / 互认基金 1。滞后估值一律由此列驱动，
+    # is_qdii 降级为纯展示标签（不再参与取价业务分支）。
+    nav_lag_days = Column(Integer, nullable=False, default=0, server_default=text('0'))
     is_qdii = Column(Boolean, default=False)
     data_source = Column(String(20), default="tushare")
     fallback_source = Column(String(20))

@@ -90,6 +90,7 @@ def create_product(
         size_code=product.size_code,
         segment_code=product.segment_code,
         is_qdii=product.is_qdii,
+        nav_lag_days=product.nav_lag_days,
         data_source=product.data_source,
         sync_history=bool(product.sync_history),
     )

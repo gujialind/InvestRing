@@ -641,7 +641,7 @@ ir trade preview <ID> [--confirm-date YYYY-MM-DD] [--price <价格>]
 
 #### `ir trade confirm`
 
-确认交易（自动获取净值，QDII 产品特殊处理）。
+确认交易（自动获取净值；确认间隔取产品落库的 `confirm_days`）。
 
 ```bash
 ir trade confirm <ID> [--confirm-date YYYY-MM-DD] [--price <价格>] [--sync-nav]
@@ -649,9 +649,9 @@ ir trade confirm <ID> [--confirm-date YYYY-MM-DD] [--price <价格>] [--sync-nav
 
 > **业务规则**：
 > - 仅 `pending` 状态可确认
-> - 确认日期根据产品的 `confirm_days` 自动计算（普通基金 T+1，QDII T+2）
-> - 场外净值型产品（OEF/LOF + CN_OTC/HK_MUTUAL）自动从 `PriceRecord` 获取 T 日净值重算 shares/amount，缺失报 `MISSING_NAV`
-> - **QDII 产品**：使用交易日当天的净值（需 T+2 日后确认）
+> - 确认日期根据产品落库的 `confirm_days` 自动计算（普通场外基金 T+1，场外 QDII 通常 T+2），不在确认时按 `is_qdii` 二次推断
+> - 场外净值型产品（OEF/LOF + CN_OTC/HK_MUTUAL）**一律**从 `PriceRecord` 获取交易日（T 日）净值重算 shares/amount，缺失报 `MISSING_NAV`——QDII / 互认基金也不例外
+> - issue #228：快照估值侧的滞后取价（`nav_lag_days`）与确认侧正交，确认恒取 T 日净值
 > - `--price`：场外基金仅用于与 T 日净值一致性校验（不一致报 `PRICE_NAV_MISMATCH`，不覆盖净值）；场内基金作为覆盖成交价
 > - `--sync-nav`（issue #90）：命中 `MISSING_NAV` 时自动回填该标的历史净值后重试一次（会访问外部数据源），同步后仍缺失则照常报 `MISSING_NAV`
 
@@ -894,11 +894,11 @@ ir product list [--product-type <类型>] [--page N] [--page-size N] [--all]
 
 #### `ir product create`
 
-创建产品（自动根据市场类型和 QDII 属性计算 `confirm_days`）。
+创建产品（`confirm_days` 由后端按市场 + QDII 属性自动推导，创建请求不接受自定义值）。
 
 ```bash
 ir product create --code <代码> --market <市场> --name <名称> --product-type <类型> \
-  [--asset-class-code <资产类别>] [--is-qdii] [--data-source <数据源>] [--sync]
+  [--asset-class-code <资产类别>] [--nav-lag-days N] [--is-qdii] [--data-source <数据源>] [--sync]
 ```
 
 | 参数 | 必填 | 说明 |
@@ -908,18 +908,19 @@ ir product create --code <代码> --market <市场> --name <名称> --product-ty
 | `--name` | 是 | 产品名称 |
 | `--product-type` | 是 | 类型：`ETF` / `OEF` / `LOF` / `CASH` |
 | `--asset-class-code` | 否 | 资产类别代码 |
-| `--is-qdii` | 否 | 是否为 QDII 产品（默认 false） |
+| `--nav-lag-days` | 否 | 快照估值取价滞后交易日数（issue #228）：默认 `0` 取当日净值，`N` 取前第 N 个交易日净值；场外 QDII / 香港互认基金填 `1` |
+| `--is-qdii` | 否 | 是否为 QDII 产品（默认 false）；**纯展示标签**，仅在创建时参与 `confirm_days` 默认值推导，不影响快照取价 |
 | `--data-source` | 否 | 数据源（如 `tushare`） |
 | `--sync` | 否 | 创建后立即回填历史净值（issue #90）；同步结果在响应 `sync_result`，失败不阻断创建 |
 
-**confirm_days 自动计算规则：**
+**confirm_days 创建时自动推导规则（唯一入口；创建后需要其它值用 `ir product update --confirm-days`）：**
 
 | 市场 | QDII | confirm_days |
 |------|:----:|:------------:|
 | `CN_EXCHANGE` | — | 0 |
 | `CN_OTC` | 否 | 1 |
 | `CN_OTC` | 是 | 2 |
-| 其他 | — | 0 |
+| 其他（含 `HK_MUTUAL` / 空市场） | — | 1 |
 
 #### `ir product get`
 
@@ -936,11 +937,14 @@ ir product get <CODE> [MARKET]
 更新产品信息。
 
 ```bash
-ir product update <CODE> <MARKET> [--name <名称>] [--is-qdii true/false] \
-  [--asset-class-code <类别>] [--data-source <数据源>]
+ir product update <CODE> <MARKET> [--name <名称>] [--is-qdii/--no-qdii] \
+  [--confirm-days N] [--nav-lag-days N] [--asset-class-code <类别>] [--data-source <数据源>]
 ```
 
-> 更新 `--is-qdii` 时会自动重新计算 `confirm_days`。
+> **issue #228 语义**：
+> - `--is-qdii` 为**纯展示标签**，更新它**不再**联动重算 `confirm_days`
+> - `--confirm-days` / `--nav-lag-days` 纯显式更新：不传不改，传什么就是什么
+> - `--nav-lag-days 1` 用于香港互认基金等 T-1 披露净值的产品（快照按前一个交易日净值估值）；迁移 `0012` 仅回填场外 QDII，互认基金需手工设置
 
 #### `ir product delete`
 
@@ -1006,7 +1010,8 @@ ir platform delete <CODE> [--yes]
 ir snapshot generate --portfolio-code <组合> --target-date YYYY-MM-DD
 ```
 
-> - 净值严格匹配（issue #96）：普通基金严格取 target_date 当日净值，QDII 严格取 T-1（前一交易日）净值，禁止向前回退；任一持仓缺失即失败并返回 `MISSING_NAV`（错误信息列出缺失产品与所需日期），先用 `ir market sync-history <product_code> <market>` 回填净值后重试
+> - 净值严格匹配（issue #96/#178，#228 起由产品 `nav_lag_days` 驱动）：取价日 = `nav_lag_days=0` 时的 target_date 当日净值，`nav_lag_days=N` 时的前第 N 个交易日净值（场外 QDII / 香港互认基金为 1，即 T-1）；禁止向前回退，任一持仓缺失即失败并返回 `MISSING_NAV`（错误信息按取价规则分组列出缺失产品与所需日期，形如 `[T=2025-06-10]` / `[T-1=2025-06-09]`），先用 `ir market sync-history <product_code> <market>` 回填净值后重试
+> - `is_qdii` 不参与取价判断（纯展示标签）；交易确认侧仍恒取 T 日净值，不受 `nav_lag_days` 影响
 > - 生成失败不产生任何快照数据（目标日仍缺失，可修复数据后安全重试）
 > - **零快照防呆**（issue #180）：组合尚无任何快照且目标日之前已有确认交易时报 `SNAPSHOT_REQUIRES_RECALCULATE`（单日生成会漏掉早期到账记录），改用 `ir snapshot recalculate` 从最早确认日起逐日重建
 
@@ -1598,7 +1603,7 @@ ir schema
 
 4. **首次申购特殊规则**：组合的首次申购确认时净值固定为 `1.0000`，同时自动将组合状态从 `draft` 切换为 `active`。
 
-5. **QDII 产品**：QDII 产品的净值延迟一天（T+2 确认），确认交易时需确保净值已同步。
+5. **净值延迟披露产品**（issue #228）：场外 QDII、香港互认基金的净值晚一个交易日披露，需将产品 `nav_lag_days` 设为 `1`，快照即按前一交易日净值估值（`ir product update <CODE> <MARKET> --nav-lag-days 1`）。确认间隔由落库的 `confirm_days` 决定（场外 QDII 通常 T+2），确认时仍取交易日当天净值，须确保该日净值已同步；`is_qdii` 仅为展示标签。
 
 6. **数据精度**：内部使用 Python `Decimal` 进行运算，输出时金额保留 2 位小数，份额统一 2 位小数，净值保留 4 位小数。
 

@@ -26,6 +26,8 @@ const EMPTY_FORM: Partial<Product> = {
   name: "",
   product_type: "ETF",
   confirm_days: 1,
+  // issue #228：快照估值取价滞后交易日数（0=当日；QDII/互认基金可设 1）
+  nav_lag_days: 0,
   is_qdii: false,
 };
 
@@ -122,6 +124,7 @@ export default function ProductFormDialog({
             size_code: formData.size_code || null,
             segment_code: formData.segment_code || null,
             confirm_days: formData.confirm_days,
+            nav_lag_days: formData.nav_lag_days,
             is_qdii: formData.is_qdii,
           },
         },
@@ -139,6 +142,7 @@ export default function ProductFormDialog({
         name: formData.name ?? "",
         product_type: formData.product_type ?? "ETF",
         confirm_days: formData.confirm_days,
+        nav_lag_days: formData.nav_lag_days,
         is_qdii: formData.is_qdii,
         ...(formData.market ? { market: formData.market } : {}),
         ...(formData.asset_class_code ? { asset_class_code: formData.asset_class_code } : {}),
@@ -287,6 +291,25 @@ export default function ProductFormDialog({
                 onChange={(e) => setFormData({ ...formData, confirm_days: parseInt(e.target.value) })}
                 required
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="nav_lag_days">估值滞后交易日</Label>
+              <Input
+                id="nav_lag_days"
+                type="number"
+                min={0}
+                step={1}
+                value={formData.nav_lag_days ?? 0}
+                onChange={(e) => {
+                  // 空值/非法输入回落 0，避免 NaN 进入表单状态
+                  const parsed = parseInt(e.target.value, 10);
+                  setFormData({ ...formData, nav_lag_days: Number.isNaN(parsed) ? 0 : parsed });
+                }}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                快照取价滞后：普通产品 0，QDII/互认基金可设 1
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <input

@@ -152,6 +152,7 @@ export default function ProductsContent() {
                 <TableHead>名称</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>确认天数</TableHead>
+                <TableHead>估值滞后</TableHead>
                 <TableHead>QDII</TableHead>
                 <TableHead>数据源</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -165,6 +166,10 @@ export default function ProductsContent() {
                   <TableCell>{product.name}</TableCell>
                   <TableCell>{product.product_type}</TableCell>
                   <TableCell>{product.confirm_days}</TableCell>
+                  {/* issue #228：快照估值取价日，0 显示 T，N 显示 T-N */}
+                  <TableCell>
+                    {(product.nav_lag_days ?? 0) > 0 ? `T-${product.nav_lag_days}` : "T"}
+                  </TableCell>
                   <TableCell>{product.is_qdii ? "是" : "否"}</TableCell>
                   <TableCell>
                     {product.data_source_status === "success" ? (

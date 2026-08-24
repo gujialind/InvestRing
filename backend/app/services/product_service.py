@@ -134,11 +134,13 @@ def validate_dimension_tags(
 
 
 def calculate_confirm_days(market: Optional[str], is_qdii: bool) -> int:
-    """确认天数计算（唯一实现）：
+    """确认天数默认值推导器（唯一实现，仅**创建时**推导默认值，issue #228）：
     - CN_EXCHANGE: 0（场内当天）
     - CN_OTC 且非 QDII: 1（T+1）
     - CN_OTC 且 QDII: 2（T+2）
     - 其他: 1
+
+    注：update_product 不再据此自动重算——confirm_days 更新纯显式（不传不改）。
     """
     if market == "CN_EXCHANGE":
         return 0
@@ -190,10 +192,14 @@ def create_product(
     size_code: Optional[str] = None,
     segment_code: Optional[str] = None,
     is_qdii: bool = False,
+    nav_lag_days: int = 0,
     data_source: Optional[str] = None,
     sync_history: bool = False,
 ) -> Product:
     """创建产品（自动计算 confirm_days，校验五维度适用矩阵）。不 commit。
+
+    nav_lag_days（issue #228）：快照估值取价滞后交易日数，由调用方显式传入
+    （场外 QDII / 互认基金传 1），不做推导。
 
     sync_history=True 时（issue #90）创建后立即回填历史净值；
     同步失败不回滚产品创建，结果挂在返回对象的瞬态属性 sync_result。
@@ -217,6 +223,7 @@ def create_product(
         name=name,
         product_type=product_type,
         confirm_days=confirm_days,
+        nav_lag_days=nav_lag_days,
         is_qdii=is_qdii,
         data_source=data_source,
         **dims,
@@ -248,17 +255,16 @@ def update_product(
     market: str,
     updates: dict,
 ) -> Product:
-    """更新产品信息（market/is_qdii 变更时自动重算 confirm_days）。不 commit。"""
+    """更新产品信息（仅更新显式传入字段）。不 commit。
+
+    issue #228：confirm_days / nav_lag_days 均为纯显式更新（不传不改），
+    不再因 market/is_qdii 变更自动重算 confirm_days——is_qdii 已降级为纯展示标签。
+    """
     product = db.query(Product).filter(
         Product.code == code, Product.market == market
     ).first()
     if not product:
         raise NotFoundError("NOT_FOUND", f"产品 {code}({market}) 不存在")
-
-    new_market = updates.get("market", product.market)
-    new_is_qdii = updates.get("is_qdii", product.is_qdii)
-    if "market" in updates or "is_qdii" in updates:
-        updates = {**updates, "confirm_days": calculate_confirm_days(new_market or "CN_OTC", new_is_qdii)}
 
     # 维度标签按合并后结果校验适用矩阵（部分更新不允许造成非法组合）；
     # is_active 仅对实际变化的字段校验（#135：存量引用停用值不阻断其他编辑）
