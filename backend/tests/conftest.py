@@ -19,7 +19,7 @@ from typing import Generator
 # 这样 app.config.Settings 和 app.database.engine 将使用测试数据库
 #
 # 优先级：环境变量 TEST_DB_URL（CI 显式指定）
-#        > backend/.env.test（本地默认：RDS ir_test 库，经 SSH 隧道）
+#        > backend/.env.test（gitignored，按需配置本地/远程 MySQL）
 #        > 本地 SQLite 文件（两者都不可用时的降级）
 # ---------------------------------------------------------------------------
 def _load_test_db_url() -> str:
@@ -72,7 +72,7 @@ def test_engine():
     """
     创建测试数据库引擎（整个测试会话共享）。
     - SQLite: 使用文件数据库 + WAL 模式
-    - MySQL: 本地默认经 .env.test 连 RDS ir_test，CI 用环境变量配置
+    - MySQL: 本地经 .env.test 配置（gitignored），CI 用环境变量配置
 
     清理策略：会话【开始】时 drop_all + create_all 保证干净起跑，
     会话结束不清理——保留 _seed_base_data 的基准数据（ADMIN/产品/日历），
