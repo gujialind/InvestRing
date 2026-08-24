@@ -164,8 +164,10 @@ def get_nav_for_trade_confirmation(
 
     规则：
     - 场外基金统一取 T 日（成交当日）净值，禁止向前查找，不区分 QDII/非 QDII。
-      QDII 与非 QDII 的差异仅在确认间隔（T+2 / T+1），已通过创建时设定的
-      confirm_date 体现；到确认日净值理应可取，缺失则由调用方拒绝确认。
+      QDII 与互认基金的差异仅在确认间隔，已通过创建时按 confirm_days（落库字段）
+      设定的 confirm_date 体现；到确认日净值理应可取，缺失则由调用方拒绝确认。
+    - issue #228：快照估值侧的滞后取价由 product.nav_lag_days 驱动，与本函数正交
+      （确认侧恒取 T 日净值，不受 nav_lag_days 影响）。
 
     Args:
         db: 数据库会话

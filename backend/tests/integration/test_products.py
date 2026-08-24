@@ -77,6 +77,75 @@ class TestProductCRUD:
         assert data["page_size"] == 5
 
 
+class TestConfirmDaysAndNavLagDays:
+    """issue #228：confirm_days / nav_lag_days 更新纯显式（is_qdii 不再联动重算），
+    calculate_confirm_days 仅保留创建时默认推导器角色"""
+
+    def test_update_is_qdii_keeps_confirm_days(self, client, admin_headers, test_db):
+        """PUT {"is_qdii": true} 不改 confirm_days（存量 7 → 仍 7）"""
+        create_product(test_db, code="LAG001.OF", market="CN_OTC", confirm_days=7)
+        resp = client.put(
+            "/api/products/LAG001.OF/CN_OTC",
+            json={"is_qdii": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["is_qdii"] is True
+        assert resp.json()["confirm_days"] == 7
+
+        got = client.get("/api/products/LAG001.OF/CN_OTC", headers=admin_headers)
+        assert got.json()["confirm_days"] == 7
+
+    def test_update_is_qdii_with_explicit_confirm_days_wins(self, client, admin_headers, test_db):
+        """PUT {"is_qdii": true, "confirm_days": 5} → 显式值生效（旧逻辑会被覆盖成 2）"""
+        create_product(test_db, code="LAG002.OF", market="CN_OTC", confirm_days=1)
+        resp = client.put(
+            "/api/products/LAG002.OF/CN_OTC",
+            json={"is_qdii": True, "confirm_days": 5},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["confirm_days"] == 5
+
+    def test_update_nav_lag_days(self, client, admin_headers, test_db):
+        """PUT {"nav_lag_days": 1} 生效（互认基金上线后手动置 1 的路径），不影响 confirm_days"""
+        create_product(test_db, code="LAG003", market="HK_MUTUAL", confirm_days=1)
+        resp = client.put(
+            "/api/products/LAG003/HK_MUTUAL",
+            json={"nav_lag_days": 1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["nav_lag_days"] == 1
+        assert resp.json()["confirm_days"] == 1
+
+        got = client.get("/api/products/LAG003/HK_MUTUAL", headers=admin_headers)
+        assert got.json()["nav_lag_days"] == 1
+
+    def test_create_otc_qdii_derives_confirm_days_2(self, client, admin_headers, test_db):
+        """创建场外 QDII 不传 confirm_days → 后端推导 2（创建时默认推导器仍在）"""
+        resp = client.post(
+            "/api/products",
+            json={
+                "code": "LAG004.OF",
+                "market": "CN_OTC",
+                "name": "测试QDII基金",
+                "product_type": "OEF",
+                "asset_class_code": "ASSET_STOCK",
+                "region_code": "REGION_CN",
+                "style_code": "STYLE_BALANCED",
+                "size_code": "SIZE_LARGE",
+                "is_qdii": True,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), resp.json()
+        data = resp.json()
+        assert data["confirm_days"] == 2
+        # nav_lag_days 不做推导：创建未传即 0，需显式设置（迁移只回填存量场外 QDII）
+        assert data["nav_lag_days"] == 0
+
+
 class TestProductKeywordFilter:
     """产品列表 keyword 模糊筛选（issue #155）：code/name ilike OR 匹配"""
 

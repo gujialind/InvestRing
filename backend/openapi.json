@@ -8841,6 +8841,17 @@
             ],
             "title": "Is Qdii"
           },
+          "nav_lag_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Lag Days"
+          },
           "platform_name": {
             "anyOf": [
               {
@@ -9163,6 +9174,11 @@
             "title": "Confirm Days",
             "default": 1
           },
+          "nav_lag_days": {
+            "type": "integer",
+            "title": "Nav Lag Days",
+            "default": 0
+          },
           "is_qdii": {
             "type": "boolean",
             "title": "Is Qdii",
@@ -9285,6 +9301,11 @@
             "type": "integer",
             "title": "Confirm Days",
             "default": 1
+          },
+          "nav_lag_days": {
+            "type": "integer",
+            "title": "Nav Lag Days",
+            "default": 0
           },
           "is_qdii": {
             "type": "boolean",
@@ -9442,6 +9463,17 @@
               }
             ],
             "title": "Confirm Days"
+          },
+          "nav_lag_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Lag Days"
           },
           "is_qdii": {
             "anyOf": [

@@ -227,9 +227,12 @@ class TestPositionDerivedFields:
         assert cash["region_code"] is None
         assert cash["style_code"] is None
         assert cash["segment_code"] is None
-        # is_qdii 读侧透传（QDII tooltip 依赖）
+        # is_qdii / nav_lag_days 读侧透传（#228：滞后估值 tooltip 依赖 nav_lag_days，
+        # is_qdii 仅作展示标签）
         assert fund["is_qdii"] is False
         assert cash["is_qdii"] is False
+        assert fund["nav_lag_days"] == 0
+        assert cash["nav_lag_days"] == 0
 
     def test_daily_profit_two_days_no_trade(self, client, admin_headers, test_db):
         """两快照日 + 无当日交易 → daily_profit = 市值差值"""

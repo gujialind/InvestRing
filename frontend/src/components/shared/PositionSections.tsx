@@ -100,14 +100,14 @@ function PositionCard({
         <div className="flex-1">
           <div className="flex items-center gap-1 text-xs text-slate-500">
             最新收益
-            {position.is_qdii && position.market === "CN_OTC" && (
+            {(position.nav_lag_days ?? 0) > 0 && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Info className="h-3 w-3 cursor-help" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-[240px]">
-                    QDII 按 T-1 净值估值，日收益滞后一天
+                    按 T-{position.nav_lag_days} 交易日净值估值，日收益相应滞后
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>

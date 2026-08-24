@@ -1118,16 +1118,10 @@ def _generate_portfolio_position(
             # 现金/在途资产：市值即金额
             market_value = pos_data["cash_amount"]
         elif product:
-            # issue #96 严格净值匹配：普通基金=target_date 当日，场外 QDII=T-1 交易日，禁止向前回退
-            # issue #178：场内 QDII 与普通场内产品一致取当日收盘价，仅场外 QDII 滞后一天
-            if product.is_qdii and product.market == "CN_OTC":
-                # 场外 QDII：严格取前一交易日净值
-                nav_date = _prev_trading_day(db, target_date, 1)
-                nav_rule = "T-1(QDII)"
-            else:
-                # 普通基金：严格取当日净值
-                nav_date = target_date
-                nav_rule = "T"
+            # 严格净值匹配（#96/#178 起，#228 起改由 nav_lag_days 驱动）：
+            # nav_lag_days=0 严格取 target_date 当日价；=N>0 严格取前第 N 个交易日净值
+            # （场外 QDII / 互认基金 N=1），禁止向前回退。is_qdii 不参与取价判断。
+            nav_date, nav_rule = _snapshot_nav_date_and_rule(db, product, target_date)
             price_record = db.query(PriceRecord).filter(
                 PriceRecord.product_code == product_code,
                 PriceRecord.market == market,
@@ -1691,7 +1685,8 @@ def _check_price_data_completeness(
     portfolio_code: str,
     target_date: date
 ) -> Dict[str, Any]:
-    """检查净值数据完整性（#96 严格匹配：普通基金=当日净值、场外 QDII=T-1 交易日净值，禁止回退；#178 场内 QDII=当日收盘价）"""
+    """检查净值数据完整性（严格匹配、禁止回退，issue #228 起由 nav_lag_days 驱动：
+    nav_lag_days=0 检查 target_date 当日价；=N>0 检查前第 N 个交易日净值）"""
     # 获取该组合的最新持仓产品
     latest_position_date = db.query(func.max(PortfolioPosition.snapshot_date)).filter(
         PortfolioPosition.portfolio_code == portfolio_code
@@ -1708,8 +1703,8 @@ def _check_price_data_completeness(
         PortfolioPosition.snapshot_date == latest_position_date
     ).distinct().all()
     
-    missing_prices = []
-    qdii_missing = []
+    # 缺失项按取价规则分组（"T" / "T-1" / "T-N"…），保持 message 可读且规则可辨
+    missing_by_rule: Dict[str, list] = {}
     
     for product_code, market in products_to_check:
         # #93: CASH 和 IN_TRANSIT 虚拟产品均无净值，跳过价格完整性校验
@@ -1724,34 +1719,23 @@ def _check_price_data_completeness(
         if not product:
             continue
         
-        # issue #178：仅场外 QDII 取 T-1，场内 QDII 与生成口径一致走当日收盘价分支
-        if product.is_qdii and product.market == "CN_OTC":
-            # QDII基金：检查T-1日净值
-            prev_date = _prev_trading_day(db, target_date, 1)
-            price = db.query(PriceRecord).filter(
-                PriceRecord.product_code == product_code,
-                PriceRecord.market == market,
-                PriceRecord.price_date == prev_date
-            ).first()
+        # issue #228：与生成侧同一实现（nav_lag_days 驱动），禁止向前回退
+        nav_date, nav_rule = _snapshot_nav_date_and_rule(db, product, target_date)
+        price = db.query(PriceRecord).filter(
+            PriceRecord.product_code == product_code,
+            PriceRecord.market == market,
+            PriceRecord.price_date == nav_date
+        ).first()
 
-            if not price:
-                qdii_missing.append(f"{product_code}({market}) [T-1={prev_date}]")
-        else:
-            # 普通基金：严格检查target_date当日净值（#96 禁止回退）
-            price = db.query(PriceRecord).filter(
-                PriceRecord.product_code == product_code,
-                PriceRecord.market == market,
-                PriceRecord.price_date == target_date
-            ).first()
-
-            if not price:
-                missing_prices.append(f"{product_code}({market}) [T={target_date}]")
+        if not price:
+            missing_by_rule.setdefault(nav_rule, []).append(
+                f"{product_code}({market}) [{nav_rule}={nav_date}]"
+            )
 
     all_missing = []
-    if missing_prices:
-        all_missing.append(f"缺少当日净值: {', '.join(missing_prices)}")
-    if qdii_missing:
-        all_missing.append(f"QDII基金缺少T-1日净值: {', '.join(qdii_missing)}")
+    for nav_rule, items in sorted(missing_by_rule.items()):
+        label = "当日" if nav_rule == "T" else f"{nav_rule}日"
+        all_missing.append(f"缺少{label}净值: {', '.join(items)}")
     
     if all_missing:
         return {
@@ -1880,3 +1864,16 @@ def _prev_trading_day(db: Session, target_date: date, offset: int = 1) -> date:
         return target_date - timedelta(days=offset)
     
     return trading_days[-1][0]
+
+
+def _snapshot_nav_date_and_rule(db: Session, product, target_date: date) -> tuple:
+    """快照估值取价日与规则标记（issue #228，生成与校验共用单一实现）：
+
+    产品 `nav_lag_days`=0 → 取 target_date 当日（"T"）；=N>0 → 取前第 N 个
+    交易日（"T-N"，如场外 QDII / 互认基金 N=1）。禁止向前回退，取不到即
+    由调用方报 MISSING_NAV。is_qdii 不参与判断（已降级为纯展示标签）。
+    """
+    lag = int(product.nav_lag_days or 0)
+    if lag <= 0:
+        return target_date, "T"
+    return _prev_trading_day(db, target_date, lag), f"T-{lag}"
