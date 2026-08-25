@@ -937,7 +937,7 @@ ir product get <CODE> [MARKET]
 更新产品信息。
 
 ```bash
-ir product update <CODE> <MARKET> [--name <名称>] [--is-qdii/--no-qdii] \
+ir product update <CODE> <MARKET> [--name <名称>] [--product-type <类型>] [--is-qdii/--no-qdii] \
   [--confirm-days N] [--nav-lag-days N] [--asset-class-code <类别>] [--data-source <数据源>]
 ```
 
@@ -945,6 +945,11 @@ ir product update <CODE> <MARKET> [--name <名称>] [--is-qdii/--no-qdii] \
 > - `--is-qdii` 为**纯展示标签**，更新它**不再**联动重算 `confirm_days`
 > - `--confirm-days` / `--nav-lag-days` 纯显式更新：不传不改，传什么就是什么
 > - `--nav-lag-days 1` 用于香港互认基金等 T-1 披露净值的产品（快照按前一个交易日净值估值）；迁移 `0012` 仅回填场外 QDII，互认基金需手工设置
+>
+> **issue #232 语义**：
+> - `--product-type` 可纠错产品类型（合法值 `ETF`/`OEF`/`LOF`/`CASH`/`IN_TRANSIT`，非法值 422）；存在 pending 交易/事件时拒绝修改
+> - `market` 变更须用 `--json '{"market": "CN_OTC"}'`：**仅限无交易/事件/持仓引用的产品**（有引用返回 `MARKET_CHANGE_REFERENCED` 及各表计数）；已有行情随行迁移并提示重新 `sync-history`；未显式传 `--confirm-days` 时按新市场重推导默认值
+> - 请求体含未声明字段一律 422（此前会被静默忽略、返回 ok 却不生效）
 
 #### `ir product delete`
 

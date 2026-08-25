@@ -14,8 +14,18 @@ from app.models.asset_classification import (
     AssetClassDimensionRule,
     AssetDimensionApplicability,
 )
+from app.models.portfolio_position import PortfolioPosition
+from app.models.price_record import PriceRecord
 from app.models.product import Product
+from app.models.share_change_event import ShareChangeEvent
+from app.models.trade import Trade
 from app.services.exceptions import BusinessError, NotFoundError
+
+# issue #232：product_type / market 合法枚举（单一事实来源，create/update 共用）
+VALID_PRODUCT_TYPES = ("ETF", "OEF", "LOF", "CASH", "IN_TRANSIT")
+VALID_MARKETS = ("CN_EXCHANGE", "CN_OTC", "HK_MUTUAL")
+# 系统虚拟产品（部署期种子），product_type/market 为系统语义，禁止纠错修改
+SYSTEM_PRODUCT_CODES = ("CASH", "IN_TRANSIT_BUY", "IN_TRANSIT_SELL")
 
 # 维度字段 → 字典 dimension（issue #128）
 DIMENSION_FIELDS = ("asset_class_code", "region_code", "style_code", "size_code", "segment_code")
@@ -179,6 +189,127 @@ def resolve_product_market(
     return product_code, markets[0]
 
 
+def validate_product_type(product_type: str) -> None:
+    """issue #232：product_type 枚举校验（create/update 共用）。非法值抛 INVALID_PRODUCT_TYPE（422）。"""
+    if product_type not in VALID_PRODUCT_TYPES:
+        raise BusinessError(
+            "INVALID_PRODUCT_TYPE",
+            f"非法产品类型：{product_type}",
+            details={"valid": list(VALID_PRODUCT_TYPES)},
+        )
+
+
+def _validate_identity_change(db: Session, product: Product, updates: dict) -> None:
+    """issue #232：product_type / market 修改守卫。
+
+    - 系统虚拟产品（CASH/IN_TRANSIT_*）禁止修改任一身份字段；
+    - product_type 枚举校验 + 存在 pending trade/event 时拒绝（防确认口径半途翻转）；
+    - market 枚举校验 + 目标 (code, market) 查重 + 零引用要求（任一 trade/event/
+      position 引用即拒——历史数据在旧 market 定价语义下生成，迁移修键不修语义）。
+    """
+    if product.code in SYSTEM_PRODUCT_CODES:
+        raise BusinessError(
+            "SYSTEM_PRODUCT_PROTECTED",
+            f"系统虚拟产品 {product.code} 禁止修改 product_type/market",
+            details={"code": product.code},
+        )
+
+    if "product_type" in updates:
+        validate_product_type(updates["product_type"])
+        pending_trades = db.query(Trade).filter(
+            Trade.product_code == product.code,
+            Trade.market == product.market,
+            Trade.status == "pending",
+        ).count()
+        pending_events = db.query(ShareChangeEvent).filter(
+            ShareChangeEvent.product_code == product.code,
+            ShareChangeEvent.market == product.market,
+            ShareChangeEvent.status == "pending",
+        ).count()
+        if pending_trades or pending_events:
+            raise BusinessError(
+                "PENDING_TRANSACTIONS_EXIST",
+                f"产品 {product.code}({product.market}) 存在 pending 交易/事件，"
+                "处理完成前禁止修改产品类型",
+                details={"pending_trades": pending_trades, "pending_events": pending_events},
+            )
+
+    new_market = updates.get("market")
+    if new_market is not None and new_market != product.market:
+        if new_market not in VALID_MARKETS:
+            raise BusinessError(
+                "INVALID_MARKET",
+                f"非法市场：{new_market}",
+                details={"valid": list(VALID_MARKETS)},
+            )
+        exists = db.query(Product).filter(
+            Product.code == product.code, Product.market == new_market
+        ).first()
+        if exists:
+            raise BusinessError(
+                "ALREADY_EXISTS",
+                f"产品 {product.code}({new_market}) 已存在",
+                http_status=400,
+            )
+        references = {
+            "trades": db.query(Trade).filter(
+                Trade.product_code == product.code, Trade.market == product.market
+            ).count(),
+            "events": db.query(ShareChangeEvent).filter(
+                ShareChangeEvent.product_code == product.code,
+                ShareChangeEvent.market == product.market,
+            ).count(),
+            "positions": db.query(PortfolioPosition).filter(
+                PortfolioPosition.product_code == product.code,
+                PortfolioPosition.market == product.market,
+            ).count(),
+        }
+        if any(references.values()):
+            raise BusinessError(
+                "MARKET_CHANGE_REFERENCED",
+                f"产品 {product.code}({product.market}) 存在交易/事件/持仓引用，"
+                "禁止修改市场；请在正确市场新建产品记录并补录",
+                details={"references": references},
+            )
+
+
+# price_record 随行迁移时逐字段搬运的列（id/market/时间戳除外）
+_PRICE_RECORD_MOVE_FIELDS = (
+    "price_date", "unit_price", "accumulated_nav",
+    "pre_close", "pct_change", "net_asset", "source",
+)
+
+
+def _migrate_product_market(db: Session, product: Product, new_market: str) -> None:
+    """issue #232：零引用产品改 market（复合主键变更）。
+
+    price_record 随行迁移走「删 → 改父 → 重插」：MySQL/SQLite 外键约束即时检查，
+    先改父或先改子都违约，该序列跨方言安全。调用前须已通过零引用守卫。
+    迁移后挂 market_change_hint 提示重新同步行情（旧行情按旧市场通道同步，可能口径不符）。
+    """
+    old_market = product.market
+    records = db.query(PriceRecord).filter(
+        PriceRecord.product_code == product.code, PriceRecord.market == old_market
+    ).all()
+    moved = [
+        {field: getattr(record, field) for field in _PRICE_RECORD_MOVE_FIELDS}
+        for record in records
+    ]
+    for record in records:
+        db.delete(record)
+    if records:
+        db.flush()
+    product.market = new_market
+    db.flush()
+    for data in moved:
+        db.add(PriceRecord(product_code=product.code, market=new_market, **data))
+    if moved:
+        product.market_change_hint = (
+            f"market {old_market}→{new_market}：{len(moved)} 条行情已随行迁移；"
+            "旧行情按原市场通道同步，口径可能不符，建议 sync-history 重新回填"
+        )
+
+
 def create_product(
     db: Session,
     *,
@@ -209,6 +340,8 @@ def create_product(
     ).first()
     if existing:
         raise BusinessError("ALREADY_EXISTS", f"产品 {code}({market}) 已存在", http_status=400)
+
+    validate_product_type(product_type)
 
     dims = {
         "asset_class_code": asset_class_code, "region_code": region_code,
@@ -266,6 +399,10 @@ def update_product(
     if not product:
         raise NotFoundError("NOT_FOUND", f"产品 {code}({market}) 不存在")
 
+    # issue #232：身份字段（product_type/market）守卫——枚举/系统产品/pending/零引用
+    if "product_type" in updates or "market" in updates:
+        _validate_identity_change(db, product, updates)
+
     # 维度标签按合并后结果校验适用矩阵（部分更新不允许造成非法组合）；
     # is_active 仅对实际变化的字段校验（#135：存量引用停用值不阻断其他编辑）
     if any(f in updates for f in DIMENSION_FIELDS):
@@ -275,6 +412,16 @@ def update_product(
             if f in updates and updates[f] != getattr(product, f)
         }
         validate_dimension_tags(db, merged, changed_fields=changed)
+
+    updates = dict(updates)
+    new_market = updates.pop("market", None)
+    if new_market is not None and new_market != product.market:
+        # market 是复合主键：price_record 随行迁移（删→改父→重插），不走 setattr；
+        # confirm_days 未显式传入时按创建时规则重推导（场内 0 天残留到场外会造成
+        # 当日确认的资金语义错误，此处为 #228「纯显式」的唯一例外）
+        if "confirm_days" not in updates:
+            updates["confirm_days"] = calculate_confirm_days(new_market, product.is_qdii)
+        _migrate_product_market(db, product, new_market)
 
     for field, value in updates.items():
         setattr(product, field, value)

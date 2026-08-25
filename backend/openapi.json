@@ -9367,7 +9367,6 @@
           "sync_result": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -9375,6 +9374,17 @@
               }
             ],
             "title": "Sync Result"
+          },
+          "market_change_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Change Hint"
           }
         },
         "type": "object",
@@ -9397,6 +9407,28 @@
               }
             ],
             "title": "Name"
+          },
+          "product_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Type"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
           },
           "asset_class_code": {
             "anyOf": [
@@ -9487,6 +9519,7 @@
             "title": "Is Qdii"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "ProductUpdate"
       },
@@ -9509,7 +9542,6 @@
           },
           "errors": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -9519,7 +9551,6 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -10290,7 +10321,6 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -10388,7 +10418,6 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -10915,7 +10944,6 @@
           "params": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -11986,13 +12014,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",

@@ -117,6 +117,8 @@ export default function ProductFormDialog({
           market: editingProduct.market,
           data: {
             name: formData.name,
+            // issue #232：产品类型可纠错（后端枚举校验）
+            product_type: formData.product_type,
             // 维度字段空值发 null 显式清除（后端 exclude_unset 下 null 进入合并校验）
             asset_class_code: formData.asset_class_code || null,
             region_code: formData.region_code || null,
@@ -212,13 +214,17 @@ export default function ProductFormDialog({
                 id="product_type"
                 value={formData.product_type}
                 onChange={(e) => setFormData({ ...formData, product_type: e.target.value })}
-                disabled={!!editingProduct}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <option value="ETF">ETF</option>
                 <option value="OEF">开放式基金</option>
                 <option value="LOF">LOF</option>
                 <option value="CASH">现金</option>
+                {/* issue #232：现值不在选项表（如虚拟产品 IN_TRANSIT）补占位项，避免显示空白 */}
+                {formData.product_type &&
+                  !["ETF", "OEF", "LOF", "CASH"].includes(formData.product_type) && (
+                    <option value={formData.product_type}>{formData.product_type}</option>
+                  )}
               </select>
             </div>
             <div className="space-y-2">
