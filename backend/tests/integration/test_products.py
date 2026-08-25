@@ -732,3 +732,14 @@ class TestNavLagDaysValidation:
         assert data["nav_lag_days"] == 0
         assert data["confirm_days"] == 0
 
+    def test_update_nav_lag_days_null_422(self, client, admin_headers, test_db):
+        """PUT 显式传 null → 422 INVALID_NAV_LAG_DAYS（service 拒绝：NOT NULL 列不允许以 null 清除）"""
+        create_product(test_db, code="NL009.OF", market="CN_OTC")
+        resp = client.put(
+            "/api/products/NL009.OF/CN_OTC",
+            json={"nav_lag_days": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_NAV_LAG_DAYS"
+
