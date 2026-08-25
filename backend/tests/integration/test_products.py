@@ -628,3 +628,118 @@ class TestAssetClassificationsEndpoint:
         assert rules["ASSET_COMMODITY"] == {"segment": "optional"}
         # ASSET_CASH 无规则行（全 forbidden）
         assert "ASSET_CASH" not in rules
+
+
+class TestNavLagDaysValidation:
+    """issue #235：nav_lag_days 取值校验——>=0；场内基金（CN_EXCHANGE）必须 0。
+
+    覆盖：
+    - 创建/更新负值 → 422（schema Field(ge=0) 请求层拦截）
+    - 场内（CN_EXCHANGE）创建/更新 lag>0 → 422 INVALID_NAV_LAG_DAYS（service 跨字段）
+    - 场外 QDII（CN_OTC lag=1）/ 互认（HK_MUTUAL lag=1）正常（回归，仅场内禁止）
+    - market 迁移至 CN_EXCHANGE 但残留 lag>0 → 422（禁静默口径翻转）；同 PUT 显式置 0 → 成功
+    """
+
+    def test_create_nav_lag_days_negative_422(self, client, admin_headers):
+        """>=0：创建传 -1 → 422（schema ge=0 拦截）"""
+        resp = client.post(
+            "/api/products",
+            json={"code": "NL001.OF", "market": "CN_OTC", "name": "负值",
+                  "product_type": "OEF", "nav_lag_days": -1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_update_nav_lag_days_negative_422(self, client, admin_headers, test_db):
+        """>=0：PUT 传 -1 → 422（schema ge=0 拦截）"""
+        create_product(test_db, code="NL002.OF", market="CN_OTC")
+        resp = client.put(
+            "/api/products/NL002.OF/CN_OTC",
+            json={"nav_lag_days": -1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_create_exchange_nav_lag_positive_422(self, client, admin_headers):
+        """场内（CN_EXCHANGE）创建 lag=1 → 422 INVALID_NAV_LAG_DAYS（跨字段）"""
+        resp = client.post(
+            "/api/products",
+            json={"code": "NL003.SH", "market": "CN_EXCHANGE", "name": "场内滞后",
+                  "product_type": "ETF", "nav_lag_days": 1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "INVALID_NAV_LAG_DAYS"
+        assert detail["details"]["market"] == "CN_EXCHANGE"
+
+    def test_create_exchange_nav_lag_zero_ok(self, client, admin_headers):
+        """场内创建 lag=0 → 成功（回归）"""
+        resp = client.post(
+            "/api/products",
+            json={"code": "NL004.SH", "market": "CN_EXCHANGE", "name": "场内当日",
+                  "product_type": "ETF", "nav_lag_days": 0},
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), resp.json()
+        assert resp.json()["nav_lag_days"] == 0
+
+    def test_update_exchange_nav_lag_positive_422(self, client, admin_headers, test_db):
+        """场内产品 PUT lag=1 → 422 INVALID_NAV_LAG_DAYS（跨字段）"""
+        create_product(test_db, code="NL005.SH", market="CN_EXCHANGE",
+                       product_type="ETF", nav_lag_days=0)
+        resp = client.put(
+            "/api/products/NL005.SH/CN_EXCHANGE",
+            json={"nav_lag_days": 1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_NAV_LAG_DAYS"
+
+    def test_update_otc_qdii_lag_one_ok(self, client, admin_headers, test_db):
+        """场外 QDII lag=1 正常（回归，仅场内禁止；已由 test_update_nav_lag_days 覆盖 HK）"""
+        create_product(test_db, code="NL006.OF", market="CN_OTC", nav_lag_days=1)
+        resp = client.put(
+            "/api/products/NL006.OF/CN_OTC",
+            json={"nav_lag_days": 1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["nav_lag_days"] == 1
+
+    def test_update_market_to_exchange_with_residual_lag_rejected(self, client, admin_headers, test_db):
+        """CN_OTC (lag=1) → CN_EXCHANGE 未清 lag → 422（终态非法，禁静默口径翻转）"""
+        create_product(test_db, code="NL007.OF", market="CN_OTC", nav_lag_days=1)
+        resp = client.put(
+            "/api/products/NL007.OF/CN_OTC",
+            json={"market": "CN_EXCHANGE"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_NAV_LAG_DAYS"
+
+    def test_update_market_to_exchange_with_lag_zero_ok(self, client, admin_headers, test_db):
+        """CN_OTC (lag=1) → CN_EXCHANGE 且显式置 lag=0 → 成功（confirm_days 重推导 0）"""
+        create_product(test_db, code="NL008.OF", market="CN_OTC", nav_lag_days=1)
+        resp = client.put(
+            "/api/products/NL008.OF/CN_OTC",
+            json={"market": "CN_EXCHANGE", "nav_lag_days": 0},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+        data = resp.json()
+        assert data["market"] == "CN_EXCHANGE"
+        assert data["nav_lag_days"] == 0
+        assert data["confirm_days"] == 0
+
+    def test_update_nav_lag_days_null_422(self, client, admin_headers, test_db):
+        """PUT 显式传 null → 422 INVALID_NAV_LAG_DAYS（service 拒绝：NOT NULL 列不允许以 null 清除）"""
+        create_product(test_db, code="NL009.OF", market="CN_OTC")
+        resp = client.put(
+            "/api/products/NL009.OF/CN_OTC",
+            json={"nav_lag_days": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_NAV_LAG_DAYS"
+

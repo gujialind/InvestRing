@@ -123,6 +123,7 @@ ir schema trade              # 仅输出指定命令组
 | `SNAPSHOT_NOT_CONTINUOUS` | 快照日期不连续 |
 | `INVALID_DIMENSION_TAGS` | 产品维度标签非法（不存在/已停用/违反维度规则/值级不适用，`details` 含 field/code/applicable_asset_classes 等） |
 | `INVALID_CLASSIFICATION` | 维度字典值非法（code 前缀/dimension 不匹配、空适用关联、nonsense 关联等） |
+| `INVALID_NAV_LAG_DAYS` | nav_lag_days 必须 >=0；场内（market=CN_EXCHANGE）必须为 0；显式传 null 拒绝；返回 422 |
 | `DIMENSION_VALUE_IN_USE` | 维度值关联仍被产品引用，不可移除（`details.products` 列引用产品） |
 | `DIMENSION_RULE_CONFLICT` | 维度规则收紧与存量产品冲突（`details.products` 列冲突产品） |
 | `CONFIRM_REQUIRED` | 需要显式确认（如 `--yes`） |

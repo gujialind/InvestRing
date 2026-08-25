@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 
@@ -18,7 +18,9 @@ class ProductBase(BaseModel):
     confirm_days: int = 1
     # issue #228：快照估值取价滞后交易日数（0=当日、N=前第 N 个交易日）；
     # 场外 QDII / 互认基金取 1。is_qdii 仅为展示标签，不参与取价
-    nav_lag_days: int = 0
+    # issue #235：ge=0 拦截负值（此前被快照取价侧静默钳制为 0）；
+    # 场内基金（CN_EXCHANGE）必须 0 的跨字段规则在 product_service 校验
+    nav_lag_days: int = Field(default=0, ge=0)
     is_qdii: bool = False
     data_source: Optional[str] = "tushare"
 
@@ -42,7 +44,8 @@ class ProductUpdate(BaseModel):
     size_code: Optional[str] = None
     segment_code: Optional[str] = None
     confirm_days: Optional[int] = None
-    nav_lag_days: Optional[int] = None
+    # issue #235：ge=0 拦截负值（PartialUpdate：缺省=不修改，null 由服务层拒绝）
+    nav_lag_days: Optional[int] = Field(default=None, ge=0)
     is_qdii: Optional[bool] = None
 
 

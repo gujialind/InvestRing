@@ -203,6 +203,38 @@ def validate_product_type(product_type: str) -> None:
         )
 
 
+def validate_nav_lag_days(market: Optional[str], nav_lag_days: Optional[int]) -> None:
+    """issue #235：nav_lag_days 业务校验（create/update 共用）。
+
+    - 必须 >= 0：schema 层用 Field(ge=0) 已在 HTTP 请求解析时拦截负值（返回 pydantic
+      validation error 的 422）；此处兜底非 HTTP 直调（CLI/内部脚本/测试），防止负值落库后
+      被快照取价侧 `_snapshot_nav_date_and_rule` 静默钳制为 0（见 #235）。
+    - 场内基金（CN_EXCHANGE，ETF/上市 LOF）当日取价、无滞后：必须是 0。此规则跨字段，
+      依赖 market + nav_lag_days 合并终态，故在 service 层校验（create 用传入值，update 用
+      合并后终态）。
+    非法值抛 INVALID_NAV_LAG_DAYS（422）。"nav_lag_days: null" 对 NOT NULL 列语义为清除，
+    一并拒绝。
+    """
+    if nav_lag_days is None:
+        raise BusinessError(
+            "INVALID_NAV_LAG_DAYS",
+            "nav_lag_days 不能为 null",
+            details={"nav_lag_days": nav_lag_days},
+        )
+    if nav_lag_days < 0:
+        raise BusinessError(
+            "INVALID_NAV_LAG_DAYS",
+            f"nav_lag_days 必须 >= 0，收到 {nav_lag_days}",
+            details={"nav_lag_days": nav_lag_days},
+        )
+    if market == "CN_EXCHANGE" and nav_lag_days != 0:
+        raise BusinessError(
+            "INVALID_NAV_LAG_DAYS",
+            f"场内基金（CN_EXCHANGE）当日取价，nav_lag_days 必须为 0，收到 {nav_lag_days}",
+            details={"market": market, "nav_lag_days": nav_lag_days},
+        )
+
+
 def _validate_identity_change(db: Session, product: Product, updates: dict) -> None:
     """issue #232：product_type / market 修改守卫（按值**实际变化**触发——
     前端编辑恒带 product_type，显式传原值不进门禁）。
@@ -355,6 +387,9 @@ def create_product(
         raise BusinessError("ALREADY_EXISTS", f"产品 {code}({market}) 已存在", http_status=400)
 
     validate_product_type(product_type)
+    # issue #235：nav_lag_days >= 0；场内（CN_EXCHANGE）必须 0（负值已在 schema ge=0 拦截，
+    # 此处兜底非 HTTP 直调并校验跨字段规则）
+    validate_nav_lag_days(market or "", nav_lag_days)
 
     dims = {
         "asset_class_code": asset_class_code, "region_code": region_code,
@@ -429,6 +464,15 @@ def update_product(
 
     updates = dict(updates)
     new_market = updates.pop("market", None)
+    # issue #235：nav_lag_days 业务校验——按「合并后终态」判断（market / nav_lag_days 任一
+    # 变化均校验最终合法性）。负值已被 schema ge=0 拦截，此处兜底非 HTTP 直调；跨字段规则：
+    # 场内（CN_EXCHANGE）必须 0。因此在 market 迁移（pop）前用终态 market/lag 校验，避免
+    # CN_OTC→CN_EXCHANGE 迁移后残留 lag>0（当日价变 T-N 的静默口径翻转）。
+    effective_market = new_market if new_market is not None else str(product.market or "")
+    validate_nav_lag_days(
+        effective_market,
+        updates.get("nav_lag_days", product.nav_lag_days),
+    )
     if new_market is not None and new_market != product.market:
         # market 是复合主键：price_record 随行迁移（删→改父→重插），不走 setattr；
         # confirm_days 未显式传入时按创建时规则重推导（场内 0 天残留到场外会造成
