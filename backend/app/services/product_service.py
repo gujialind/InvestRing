@@ -21,7 +21,8 @@ from app.models.share_change_event import ShareChangeEvent
 from app.models.trade import Trade
 from app.services.exceptions import BusinessError, NotFoundError
 
-# issue #232：product_type / market 合法枚举（单一事实来源，create/update 共用）
+# issue #232：product_type 合法枚举（create/update 共用校验）；
+# market 枚举仅 update 守卫使用（create 不校验 market）
 VALID_PRODUCT_TYPES = ("ETF", "OEF", "LOF", "CASH", "IN_TRANSIT")
 VALID_MARKETS = ("CN_EXCHANGE", "CN_OTC", "HK_MUTUAL")
 # 系统虚拟产品（部署期种子），product_type/market 为系统语义，禁止纠错修改
@@ -144,13 +145,16 @@ def validate_dimension_tags(
 
 
 def calculate_confirm_days(market: Optional[str], is_qdii: bool) -> int:
-    """确认天数默认值推导器（唯一实现，仅**创建时**推导默认值，issue #228）：
+    """确认天数默认值推导器（唯一实现，issue #228）：
     - CN_EXCHANGE: 0（场内当天）
     - CN_OTC 且非 QDII: 1（T+1）
     - CN_OTC 且 QDII: 2（T+2）
     - 其他: 1
 
-    注：update_product 不再据此自动重算——confirm_days 更新纯显式（不传不改）。
+    调用点：create_product 创建时推导默认值；update_product 仅在 market
+    **实际变化**且未显式传 confirm_days 时重推导（issue #232 唯一例外——
+    场内 0 天残留到场外会造成当日确认的资金语义错误）。
+    confirm_days / is_qdii 自身的更新始终纯显式（不传不改）。
     """
     if market == "CN_EXCHANGE":
         return 0
@@ -200,13 +204,22 @@ def validate_product_type(product_type: str) -> None:
 
 
 def _validate_identity_change(db: Session, product: Product, updates: dict) -> None:
-    """issue #232：product_type / market 修改守卫。
+    """issue #232：product_type / market 修改守卫（按值**实际变化**触发——
+    前端编辑恒带 product_type，显式传原值不进门禁）。
 
     - 系统虚拟产品（CASH/IN_TRANSIT_*）禁止修改任一身份字段；
     - product_type 枚举校验 + 存在 pending trade/event 时拒绝（防确认口径半途翻转）；
     - market 枚举校验 + 目标 (code, market) 查重 + 零引用要求（任一 trade/event/
       position 引用即拒——历史数据在旧 market 定价语义下生成，迁移修键不修语义）。
     """
+    # 守卫按「值实际变化」触发：前端编辑恒带 product_type，未变化不得进门禁
+    # （否则有 pending 交易的产品仅改名也 422）
+    type_change = "product_type" in updates and updates["product_type"] != product.product_type
+    new_market = updates.get("market")
+    market_change = new_market is not None and new_market != product.market
+    if not (type_change or market_change):
+        return
+
     if product.code in SYSTEM_PRODUCT_CODES:
         raise BusinessError(
             "SYSTEM_PRODUCT_PROTECTED",
@@ -214,7 +227,7 @@ def _validate_identity_change(db: Session, product: Product, updates: dict) -> N
             details={"code": product.code},
         )
 
-    if "product_type" in updates:
+    if type_change:
         validate_product_type(updates["product_type"])
         pending_trades = db.query(Trade).filter(
             Trade.product_code == product.code,
@@ -234,8 +247,7 @@ def _validate_identity_change(db: Session, product: Product, updates: dict) -> N
                 details={"pending_trades": pending_trades, "pending_events": pending_events},
             )
 
-    new_market = updates.get("market")
-    if new_market is not None and new_market != product.market:
+    if market_change:
         if new_market not in VALID_MARKETS:
             raise BusinessError(
                 "INVALID_MARKET",
@@ -273,10 +285,11 @@ def _validate_identity_change(db: Session, product: Product, updates: dict) -> N
             )
 
 
-# price_record 随行迁移时逐字段搬运的列（id/market/时间戳除外）
-_PRICE_RECORD_MOVE_FIELDS = (
-    "price_date", "unit_price", "accumulated_nav",
-    "pre_close", "pct_change", "net_asset", "source",
+# price_record 随行迁移时逐字段搬运的列：从表模型派生，
+# 排除主键/复合键列与 DB 自维护时间戳，新增列自动随行不留坑
+_PRICE_RECORD_MOVE_FIELDS = tuple(
+    col.name for col in PriceRecord.__table__.columns
+    if col.name not in {"id", "product_code", "market", "created_at", "updated_at"}
 )
 
 
@@ -390,8 +403,9 @@ def update_product(
 ) -> Product:
     """更新产品信息（仅更新显式传入字段）。不 commit。
 
-    issue #228：confirm_days / nav_lag_days 均为纯显式更新（不传不改），
-    不再因 market/is_qdii 变更自动重算 confirm_days——is_qdii 已降级为纯展示标签。
+    confirm_days / nav_lag_days 为显式更新（不传不改，issue #228），唯一例外：
+    market 实际变化且未显式传 confirm_days 时按创建规则重推导（issue #232，
+    见 calculate_confirm_days）。
     """
     product = db.query(Product).filter(
         Product.code == code, Product.market == market
@@ -420,7 +434,9 @@ def update_product(
         # confirm_days 未显式传入时按创建时规则重推导（场内 0 天残留到场外会造成
         # 当日确认的资金语义错误，此处为 #228「纯显式」的唯一例外）
         if "confirm_days" not in updates:
-            updates["confirm_days"] = calculate_confirm_days(new_market, product.is_qdii)
+            updates["confirm_days"] = calculate_confirm_days(
+                new_market, updates.get("is_qdii", product.is_qdii)
+            )
         _migrate_product_market(db, product, new_market)
 
     for field, value in updates.items():

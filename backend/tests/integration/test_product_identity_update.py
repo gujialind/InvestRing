@@ -9,6 +9,7 @@
 # ============================================================================
 
 from datetime import date
+from decimal import Decimal
 import time
 
 import pytest
@@ -18,6 +19,7 @@ from tests.factories import (
     create_price_record,
     create_position_snapshot,
     create_product,
+    create_share_change_event,
     create_trade,
 )
 
@@ -119,6 +121,45 @@ class TestProductTypeUpdate:
         )
         assert resp.status_code == 200, resp.json()
         assert resp.json()["product_type"] == "LOF"
+
+    def test_update_product_type_with_pending_event_rejected(self, client, admin_headers, test_db):
+        """存在 pending 事件 → 422 PENDING_TRANSACTIONS_EXIST（守卫覆盖事件侧）"""
+        create_product(test_db, code="PT005.SZ", market="CN_EXCHANGE", product_type="ETF")
+        create_portfolio(test_db, code="PTPORT3")
+        create_platform(test_db, code="PTPLAT3")
+        create_share_change_event(
+            test_db, portfolio_code="PTPORT3", product_code="PT005.SZ",
+            market="CN_EXCHANGE", event_type="cash_dividend",
+            platform_code="PTPLAT3", status="pending",
+        )
+        resp = client.put(
+            "/api/products/PT005.SZ/CN_EXCHANGE",
+            json={"product_type": "LOF"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "PENDING_TRANSACTIONS_EXIST"
+        assert detail["details"]["pending_events"] == 1
+
+    def test_rename_with_pending_trade_passes(self, client, admin_headers, test_db):
+        """回归：前端编辑恒带 product_type，传原值不得进门禁——
+        有 pending 交易的产品仅改名（product_type 未变化）应 200"""
+        create_product(test_db, code="PT006.SZ", market="CN_EXCHANGE", product_type="ETF")
+        create_portfolio(test_db, code="PTPORT4")
+        create_platform(test_db, code="PTPLAT4")
+        create_trade(
+            test_db, portfolio_code="PTPORT4", product_code="PT006.SZ",
+            market="CN_EXCHANGE", platform_code="PTPLAT4", status="pending",
+        )
+        resp = client.put(
+            "/api/products/PT006.SZ/CN_EXCHANGE",
+            json={"name": "改名不改类型", "product_type": "ETF"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["name"] == "改名不改类型"
+        assert resp.json()["product_type"] == "ETF"
 
 
 class TestProductUpdateForbidExtra:
@@ -271,3 +312,64 @@ class TestMarketUpdate:
                 updates={"market": "CN_OTC"},
             )
         assert exc.value.code == "SYSTEM_PRODUCT_PROTECTED"
+
+    def test_update_market_with_event_rejected(self, client, admin_headers, test_db):
+        """存在事件引用（任意状态）→ 422 MARKET_CHANGE_REFERENCED，events 计数"""
+        create_product(test_db, code="MK208.SZ", market="CN_EXCHANGE", product_type="LOF")
+        create_portfolio(test_db, code="MKPORT3")
+        create_share_change_event(
+            test_db, portfolio_code="MKPORT3", product_code="MK208.SZ",
+            market="CN_EXCHANGE", event_type="share_split", status="confirmed",
+        )
+        resp = client.put(
+            "/api/products/MK208.SZ/CN_EXCHANGE",
+            json={"market": "CN_OTC"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "MARKET_CHANGE_REFERENCED"
+        assert detail["details"]["references"]["events"] == 1
+
+    def test_update_market_with_is_qdii_derives_qdii_confirm_days(self, client, admin_headers, test_db):
+        """同一 PUT 传 market+is_qdii：confirm_days 按**新** is_qdii 推导为 2"""
+        create_product(test_db, code="MK209.SZ", market="CN_EXCHANGE",
+                       product_type="LOF", confirm_days=0)
+        resp = client.put(
+            "/api/products/MK209.SZ/CN_EXCHANGE",
+            json={"market": "CN_OTC", "is_qdii": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["is_qdii"] is True
+        assert resp.json()["confirm_days"] == 2
+
+    def test_price_record_full_fields_preserved(self, client, admin_headers, test_db):
+        """随行迁移逐字段搬运：全列值不丢不变"""
+        create_product(test_db, code="MK210.SZ", market="CN_EXCHANGE",
+                       product_type="LOF", confirm_days=0)
+        test_db.add(PriceRecord(
+            product_code="MK210.SZ", market="CN_EXCHANGE",
+            price_date=date(2026, 8, 20),
+            unit_price=Decimal("1.2340"), accumulated_nav=Decimal("2.3450"),
+            pre_close=Decimal("1.2000"), pct_change=Decimal("2.8333"),
+            net_asset=Decimal("12345678.9000"), source="tushare",
+        ))
+        test_db.commit()
+
+        resp = client.put(
+            "/api/products/MK210.SZ/CN_EXCHANGE",
+            json={"market": "CN_OTC"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+
+        moved = test_db.query(PriceRecord).filter_by(
+            product_code="MK210.SZ", market="CN_OTC").one()
+        assert moved.price_date == date(2026, 8, 20)
+        assert moved.unit_price == Decimal("1.2340")
+        assert moved.accumulated_nav == Decimal("2.3450")
+        assert moved.pre_close == Decimal("1.2000")
+        assert moved.pct_change == Decimal("2.8333")
+        assert moved.net_asset == Decimal("12345678.9000")
+        assert moved.source == "tushare"
