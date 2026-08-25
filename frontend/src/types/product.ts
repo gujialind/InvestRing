@@ -44,6 +44,8 @@ export interface ProductCreate {
 
 export interface ProductUpdate {
   name?: string;
+  // issue #232：产品类型可纠错（后端枚举校验，非法值 422）
+  product_type?: string;
   // 维度字段允许显式 null（清空）：后端 exclude_unset 语义下 null 会进入合并校验
   asset_class_code?: string | null;
   region_code?: string | null;

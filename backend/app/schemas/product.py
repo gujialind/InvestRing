@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -29,7 +29,13 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(BaseModel):
+    # issue #232：未知字段直接 422（此前 pydantic 静默丢弃，调用方误以为修改生效）
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = None
+    # issue #232：身份字段可纠错（枚举/守卫见 product_service），market 仅限无引用产品
+    product_type: Optional[str] = None
+    market: Optional[str] = None
     asset_class_code: Optional[str] = None
     region_code: Optional[str] = None
     style_code: Optional[str] = None
@@ -48,6 +54,8 @@ class ProductResponse(ProductBase):
     updated_at: Optional[datetime] = None
     # issue #90：sync_history=True 时的回填结果（success/message/synced_count）
     sync_result: Optional[dict] = None
+    # issue #232：market 随行迁移后的提示（建议重新 sync-history 等）
+    market_change_hint: Optional[str] = None
 
     class Config:
         from_attributes = True

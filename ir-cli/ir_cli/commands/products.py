@@ -77,19 +77,21 @@ def get(
 @app.command("update")
 def update(
     code: str = typer.Argument(..., help="产品代码"),
-    market: str = typer.Argument(..., help="市场类型"),
+    market: str = typer.Argument(..., help="市场类型（现值）"),
     name: Optional[str] = typer.Option(None, "--name", help="产品名称"),
+    product_type: Optional[str] = typer.Option(None, "--product-type", help="产品类型(ETF/OEF/LOF/CASH/IN_TRANSIT)"),
     asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code", help="资产分类代码"),
     confirm_days: Optional[int] = typer.Option(None, "--confirm-days", help="确认天数(纯显式更新，不传不改)"),
     nav_lag_days: Optional[int] = typer.Option(None, "--nav-lag-days", help="快照估值取价滞后交易日数(0=当日，互认基金设1)"),
     is_qdii: Optional[bool] = typer.Option(None, "--is-qdii/--no-qdii", help="是否QDII(纯展示标签，不影响取价与确认天数)"),
     json_body: Optional[str] = typer.Option(None, "--json", help="完整 JSON 请求体，优先于逐项参数"),
 ):
-    """更新产品"""
+    """更新产品（#232：product_type 可改；market 变更须 --json '{"market": ...}'，仅限无交易/事件/持仓引用的产品）"""
     client = APIClient.from_config()
     body = resolve_body(
         json_body,
         name=name,
+        product_type=product_type,
         asset_class_code=asset_class_code,
         confirm_days=confirm_days,
         nav_lag_days=nav_lag_days,

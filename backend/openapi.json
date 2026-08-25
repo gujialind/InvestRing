@@ -9375,6 +9375,17 @@
               }
             ],
             "title": "Sync Result"
+          },
+          "market_change_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Change Hint"
           }
         },
         "type": "object",
@@ -9397,6 +9408,28 @@
               }
             ],
             "title": "Name"
+          },
+          "product_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Type"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
           },
           "asset_class_code": {
             "anyOf": [
@@ -9487,6 +9520,7 @@
             "title": "Is Qdii"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "ProductUpdate"
       },
