@@ -124,6 +124,7 @@ ir schema trade              # 仅输出指定命令组
 | `INVALID_DIMENSION_TAGS` | 产品维度标签非法（不存在/已停用/违反维度规则/值级不适用，`details` 含 field/code/applicable_asset_classes 等） |
 | `INVALID_CLASSIFICATION` | 维度字典值非法（code 前缀/dimension 不匹配、空适用关联、nonsense 关联等） |
 | `INVALID_NAV_LAG_DAYS` | nav_lag_days 必须 >=0；场内（market=CN_EXCHANGE）必须为 0；显式传 null 拒绝；返回 422 |
+| `INVALID_CONFIRM_DAYS` | confirm_days 必须 >=0；场内（market=CN_EXCHANGE）必须为 0；显式传 null 拒绝；返回 422 |
 | `DIMENSION_VALUE_IN_USE` | 维度值关联仍被产品引用，不可移除（`details.products` 列引用产品） |
 | `DIMENSION_RULE_CONFLICT` | 维度规则收紧与存量产品冲突（`details.products` 列冲突产品） |
 | `CONFIRM_REQUIRED` | 需要显式确认（如 `--yes`） |
@@ -944,7 +945,7 @@ ir product update <CODE> <MARKET> [--name <名称>] [--product-type <类型>] [-
 
 > **issue #228 语义**：
 > - `--is-qdii` 为**纯展示标签**，更新它**不再**联动重算 `confirm_days`
-> - `--confirm-days` / `--nav-lag-days` 纯显式更新：不传不改，传什么就是什么（唯一例外：`market` 变更时未传 `--confirm-days` 按新市场重推导，见下方 #232）
+> - `--confirm-days` / `--nav-lag-days` 纯显式更新：不传不改，传什么就是什么（唯一例外：`market` 变更时未传 `--confirm-days` 按新市场重推导，见下方 #232）。取值经服务端统一校验（422，错误码 `INVALID_CONFIRM_DAYS` / `INVALID_NAV_LAG_DAYS`）：必须 `>=0`；场内（`CN_EXCHANGE`）必须为 `0`；显式传 null 拒绝
 > - `--nav-lag-days 1` 用于香港互认基金等 T-1 披露净值的产品（快照按前一个交易日净值估值）；迁移 `0012` 仅回填场外 QDII，互认基金需手工设置
 >
 > **issue #232 语义**：

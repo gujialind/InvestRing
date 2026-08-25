@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -15,12 +15,17 @@ class ProductBase(BaseModel):
     style_code: Optional[str] = None
     size_code: Optional[str] = None
     segment_code: Optional[str] = None
+    # issue #240 跟进 #6：约束由服务层单一实现（product_service.validate_confirm_days，
+    # INVALID_CONFIRM_DAYS）——>=0、显式 null 拒绝、场内（CN_EXCHANGE）必须 0；
+    # schema 层不加 ge=0，避免同一业务规则产生两种 422 形状（与 #5 决策一致）。
+    # 创建路径该值不参与落库：后端按 market+is_qdii 经 calculate_confirm_days 重推导
     confirm_days: int = 1
     # issue #228：快照估值取价滞后交易日数（0=当日、N=前第 N 个交易日）；
     # 场外 QDII / 互认基金取 1。is_qdii 仅为展示标签，不参与取价
-    # issue #235：ge=0 拦截负值（此前被快照取价侧静默钳制为 0）；
-    # 场内基金（CN_EXCHANGE）必须 0 的跨字段规则在 product_service 校验
-    nav_lag_days: int = Field(default=0, ge=0)
+    # issue #235/#240：约束由服务层单一实现（product_service.validate_nav_lag_days，
+    # INVALID_NAV_LAG_DAYS）——>=0、显式 null 拒绝、场内（CN_EXCHANGE）必须 0；
+    # schema 层不加 ge=0，避免同一业务规则两种 422 形状（pydantic 列表形状无 error 码）
+    nav_lag_days: int = 0
     is_qdii: bool = False
     data_source: Optional[str] = "tushare"
 
@@ -43,9 +48,12 @@ class ProductUpdate(BaseModel):
     style_code: Optional[str] = None
     size_code: Optional[str] = None
     segment_code: Optional[str] = None
+    # issue #240 跟进 #6：显式更新走服务层校验（validate_confirm_days，纯显式不传不改；
+    # 唯一例外：market 变化且未传时按新市场重推导）
     confirm_days: Optional[int] = None
-    # issue #235：ge=0 拦截负值（PartialUpdate：缺省=不修改，null 由服务层拒绝）
-    nav_lag_days: Optional[int] = Field(default=None, ge=0)
+    # issue #235/#240：PartialUpdate 缺省=不修改；取值校验（含显式 null 拒绝）由服务层
+    # validate_nav_lag_days 单一实现
+    nav_lag_days: Optional[int] = None
     is_qdii: Optional[bool] = None
 
 
