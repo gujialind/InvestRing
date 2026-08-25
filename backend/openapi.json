@@ -9176,7 +9176,6 @@
           },
           "nav_lag_days": {
             "type": "integer",
-            "minimum": 0.0,
             "title": "Nav Lag Days",
             "default": 0
           },
@@ -9305,7 +9304,6 @@
           },
           "nav_lag_days": {
             "type": "integer",
-            "minimum": 0.0,
             "title": "Nav Lag Days",
             "default": 0
           },
@@ -9502,8 +9500,7 @@
           "nav_lag_days": {
             "anyOf": [
               {
-                "type": "integer",
-                "minimum": 0.0
+                "type": "integer"
               },
               {
                 "type": "null"

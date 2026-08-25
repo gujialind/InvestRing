@@ -204,14 +204,17 @@ def validate_product_type(product_type: str) -> None:
 
 
 def validate_nav_lag_days(market: Optional[str], nav_lag_days: Optional[int]) -> None:
-    """issue #235：nav_lag_days 业务校验（create/update 共用）。
+    """issue #235/#240：nav_lag_days 业务校验（create/update 共用，单一实现）。
 
-    - 必须 >= 0：schema 层用 Field(ge=0) 已在 HTTP 请求解析时拦截负值（返回 pydantic
-      validation error 的 422）；此处兜底非 HTTP 直调（CLI/内部脚本/测试），防止负值落库后
-      被快照取价侧 `_snapshot_nav_date_and_rule` 静默钳制为 0（见 #235）。
+    约束全部收在服务层（#240 跟进 #5 决策）：schema 层不设 Field(ge=0)，
+    同一业务规则只产生一种 422 形状——BusinessError（detail.error=
+    INVALID_NAV_LAG_DAYS），依赖错误码的消费方（CLI hints、前端）可统一识别；
+    此前 schema ge=0 拦截负值返回 pydantic 列表形状 422（无 error 码），
+    与场内规则的两形状并存。类型错误（如字符串）仍由 pydantic 在请求解析层拒绝。
+
+    - 必须 >= 0：负值会被快照取价侧 `_snapshot_nav_date_and_rule` 静默钳制为 0（见 #235）；
     - 场内基金（CN_EXCHANGE，ETF/上市 LOF）当日取价、无滞后：必须是 0。此规则跨字段，
-      依赖 market + nav_lag_days 合并终态，故在 service 层校验（create 用传入值，update 用
-      合并后终态）。
+      依赖 market + nav_lag_days 合并终态（create 用传入值，update 用合并后终态）。
     非法值抛 INVALID_NAV_LAG_DAYS（422）。"nav_lag_days: null" 对 NOT NULL 列语义为清除，
     一并拒绝。
     """
@@ -232,6 +235,40 @@ def validate_nav_lag_days(market: Optional[str], nav_lag_days: Optional[int]) ->
             "INVALID_NAV_LAG_DAYS",
             f"场内基金（CN_EXCHANGE）当日取价，nav_lag_days 必须为 0，收到 {nav_lag_days}",
             details={"market": market, "nav_lag_days": nav_lag_days},
+        )
+
+
+def validate_confirm_days(market: Optional[str], confirm_days: Optional[int]) -> None:
+    """issue #240 跟进 #6：confirm_days 业务校验（显式更新路径，与 validate_nav_lag_days 同构）。
+
+    校验收在服务层单一实现（统一 BusinessError 形状，INVALID_CONFIRM_DAYS），
+    schema 层不加 ge 约束，与 #240 跟进 #5 决策一致：
+    - null 拒绝：列可空且读侧（trade_service 多处）按 `confirm_days or 0` 降级，
+      存 null 会静默变当日确认（确认间隔语义静默翻转）；
+    - 必须 >= 0：负值会被 `get_next_trading_day` 的 max(days, 0) 钳制为 0，
+      静默变当日确认（与 #235 修复前 nav_lag_days 被静默钳制同型）；
+    - 场内（CN_EXCHANGE）当天确认：必须是 0，与 calculate_confirm_days 推导一致。
+    非法值抛 INVALID_CONFIRM_DAYS（422）。
+    创建路径不经此校验：confirm_days 不接受输入、由 calculate_confirm_days
+    重推导（唯一入口），无效值无从落库。
+    """
+    if confirm_days is None:
+        raise BusinessError(
+            "INVALID_CONFIRM_DAYS",
+            "confirm_days 不能为 null",
+            details={"confirm_days": confirm_days},
+        )
+    if confirm_days < 0:
+        raise BusinessError(
+            "INVALID_CONFIRM_DAYS",
+            f"confirm_days 必须 >= 0，收到 {confirm_days}",
+            details={"confirm_days": confirm_days},
+        )
+    if market == "CN_EXCHANGE" and confirm_days != 0:
+        raise BusinessError(
+            "INVALID_CONFIRM_DAYS",
+            f"场内基金（CN_EXCHANGE）当天确认，confirm_days 必须为 0，收到 {confirm_days}",
+            details={"market": market, "confirm_days": confirm_days},
         )
 
 
@@ -387,8 +424,8 @@ def create_product(
         raise BusinessError("ALREADY_EXISTS", f"产品 {code}({market}) 已存在", http_status=400)
 
     validate_product_type(product_type)
-    # issue #235：nav_lag_days >= 0；场内（CN_EXCHANGE）必须 0（负值已在 schema ge=0 拦截，
-    # 此处兜底非 HTTP 直调并校验跨字段规则）
+    # issue #235/#240：nav_lag_days >= 0；场内（CN_EXCHANGE）必须 0（服务层单一实现，
+    # 统一 INVALID_NAV_LAG_DAYS 形状）
     validate_nav_lag_days(market or "", nav_lag_days)
 
     dims = {
@@ -464,8 +501,8 @@ def update_product(
 
     updates = dict(updates)
     new_market = updates.pop("market", None)
-    # issue #235：nav_lag_days 业务校验——按「合并后终态」判断（market / nav_lag_days 任一
-    # 变化均校验最终合法性）。负值已被 schema ge=0 拦截，此处兜底非 HTTP 直调；跨字段规则：
+    # issue #235/#240：nav_lag_days 业务校验——按「合并后终态」判断（market / nav_lag_days 任一
+    # 变化均校验最终合法性），服务层单一实现（统一 INVALID_NAV_LAG_DAYS 形状）；跨字段规则：
     # 场内（CN_EXCHANGE）必须 0。因此在 market 迁移（pop）前用终态 market/lag 校验，避免
     # CN_OTC→CN_EXCHANGE 迁移后残留 lag>0（当日价变 T-N 的静默口径翻转）。
     effective_market = new_market if new_market is not None else str(product.market or "")
@@ -473,14 +510,25 @@ def update_product(
         effective_market,
         updates.get("nav_lag_days", product.nav_lag_days),
     )
-    if new_market is not None and new_market != product.market:
+    # issue #240 跟进 #6：confirm_days 终态校验（同构，统一 INVALID_CONFIRM_DAYS 形状）。
+    # 终态取值：显式传入 > market 变化且未传时按新市场重推导 > 存量值；
+    # 重推导值结构性合法（0/1/2），校验为显式传入路径兜底
+    market_change = new_market is not None and new_market != product.market
+    if "confirm_days" in updates:
+        effective_confirm_days = updates["confirm_days"]
+    elif market_change:
+        effective_confirm_days = calculate_confirm_days(
+            new_market, updates.get("is_qdii", product.is_qdii)
+        )
+    else:
+        effective_confirm_days = product.confirm_days
+    validate_confirm_days(effective_market, effective_confirm_days)
+    if market_change:
         # market 是复合主键：price_record 随行迁移（删→改父→重插），不走 setattr；
         # confirm_days 未显式传入时按创建时规则重推导（场内 0 天残留到场外会造成
         # 当日确认的资金语义错误，此处为 #228「纯显式」的唯一例外）
         if "confirm_days" not in updates:
-            updates["confirm_days"] = calculate_confirm_days(
-                new_market, updates.get("is_qdii", product.is_qdii)
-            )
+            updates["confirm_days"] = effective_confirm_days
         _migrate_product_market(db, product, new_market)
 
     for field, value in updates.items():

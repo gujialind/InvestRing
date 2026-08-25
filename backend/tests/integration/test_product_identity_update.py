@@ -33,7 +33,8 @@ class TestProductTypeUpdate:
 
     def test_update_product_type_success(self, client, admin_headers, test_db):
         """场内 ETF → LOF：生效且 updated_at 变化"""
-        create_product(test_db, code="164906.SZ", market="CN_EXCHANGE", product_type="ETF")
+        create_product(test_db, code="164906.SZ", market="CN_EXCHANGE",
+                       product_type="ETF", confirm_days=0)
         before = client.get("/api/products/164906.SZ/CN_EXCHANGE", headers=admin_headers).json()
         time.sleep(1.1)  # updated_at 秒级精度，跨秒后 PUT 才能断言变化
 
@@ -88,7 +89,8 @@ class TestProductTypeUpdate:
 
     def test_update_product_type_with_pending_trade_rejected(self, client, admin_headers, test_db):
         """存在 pending trade → 422 PENDING_TRANSACTIONS_EXIST（防确认口径半途翻转）"""
-        create_product(test_db, code="PT003.SZ", market="CN_EXCHANGE", product_type="ETF")
+        create_product(test_db, code="PT003.SZ", market="CN_EXCHANGE",
+                       product_type="ETF", confirm_days=0)
         create_portfolio(test_db, code="PTPORT")
         create_platform(test_db, code="PTPLAT")
         create_trade(
@@ -107,7 +109,8 @@ class TestProductTypeUpdate:
 
     def test_update_product_type_with_confirmed_trade_ok(self, client, admin_headers, test_db):
         """仅 confirmed trade 不阻断（历史确认已按旧口径完成，快照不存 type）"""
-        create_product(test_db, code="PT004.SZ", market="CN_EXCHANGE", product_type="ETF")
+        create_product(test_db, code="PT004.SZ", market="CN_EXCHANGE",
+                       product_type="ETF", confirm_days=0)
         create_portfolio(test_db, code="PTPORT2")
         create_platform(test_db, code="PTPLAT2")
         create_trade(
@@ -124,7 +127,8 @@ class TestProductTypeUpdate:
 
     def test_update_product_type_with_pending_event_rejected(self, client, admin_headers, test_db):
         """存在 pending 事件 → 422 PENDING_TRANSACTIONS_EXIST（守卫覆盖事件侧）"""
-        create_product(test_db, code="PT005.SZ", market="CN_EXCHANGE", product_type="ETF")
+        create_product(test_db, code="PT005.SZ", market="CN_EXCHANGE",
+                       product_type="ETF", confirm_days=0)
         create_portfolio(test_db, code="PTPORT3")
         create_platform(test_db, code="PTPLAT3")
         create_share_change_event(
@@ -145,7 +149,8 @@ class TestProductTypeUpdate:
     def test_rename_with_pending_trade_passes(self, client, admin_headers, test_db):
         """回归：前端编辑恒带 product_type，传原值不得进门禁——
         有 pending 交易的产品仅改名（product_type 未变化）应 200"""
-        create_product(test_db, code="PT006.SZ", market="CN_EXCHANGE", product_type="ETF")
+        create_product(test_db, code="PT006.SZ", market="CN_EXCHANGE",
+                       product_type="ETF", confirm_days=0)
         create_portfolio(test_db, code="PTPORT4")
         create_platform(test_db, code="PTPLAT4")
         create_trade(
@@ -245,7 +250,8 @@ class TestMarketUpdate:
 
     def test_update_market_with_trade_rejected(self, client, admin_headers, test_db):
         """存在 trade 引用（任意状态）→ 422 MARKET_CHANGE_REFERENCED，details 带计数"""
-        create_product(test_db, code="MK204.SZ", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="MK204.SZ", market="CN_EXCHANGE",
+                       product_type="LOF", confirm_days=0)
         create_portfolio(test_db, code="MKPORT")
         create_platform(test_db, code="MKPLAT")
         create_trade(
@@ -264,7 +270,8 @@ class TestMarketUpdate:
 
     def test_update_market_with_position_rejected(self, client, admin_headers, test_db):
         """存在持仓快照引用 → 422 MARKET_CHANGE_REFERENCED"""
-        create_product(test_db, code="MK205.SZ", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="MK205.SZ", market="CN_EXCHANGE",
+                       product_type="LOF", confirm_days=0)
         create_portfolio(test_db, code="MKPORT2")
         create_position_snapshot(
             test_db, portfolio_code="MKPORT2", product_code="MK205.SZ",
@@ -283,7 +290,8 @@ class TestMarketUpdate:
 
     def test_update_market_target_exists_rejected(self, client, admin_headers, test_db):
         """目标 (code, market) 已存在（LOF 双记录场景）→ 400 ALREADY_EXISTS"""
-        create_product(test_db, code="MK206.SZ", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="MK206.SZ", market="CN_EXCHANGE",
+                       product_type="LOF", confirm_days=0)
         create_product(test_db, code="MK206.SZ", market="CN_OTC", product_type="LOF")
         resp = client.put(
             "/api/products/MK206.SZ/CN_EXCHANGE",
@@ -295,7 +303,8 @@ class TestMarketUpdate:
 
     def test_update_market_invalid_422(self, client, admin_headers, test_db):
         """非法市场值 → 422 INVALID_MARKET"""
-        create_product(test_db, code="MK207.SZ", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="MK207.SZ", market="CN_EXCHANGE",
+                       product_type="LOF", confirm_days=0)
         resp = client.put(
             "/api/products/MK207.SZ/CN_EXCHANGE",
             json={"market": "US_NASDAQ"},
@@ -315,7 +324,8 @@ class TestMarketUpdate:
 
     def test_update_market_with_event_rejected(self, client, admin_headers, test_db):
         """存在事件引用（任意状态）→ 422 MARKET_CHANGE_REFERENCED，events 计数"""
-        create_product(test_db, code="MK208.SZ", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="MK208.SZ", market="CN_EXCHANGE",
+                       product_type="LOF", confirm_days=0)
         create_portfolio(test_db, code="MKPORT3")
         create_share_change_event(
             test_db, portfolio_code="MKPORT3", product_code="MK208.SZ",

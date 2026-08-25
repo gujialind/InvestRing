@@ -718,7 +718,8 @@ class TestClassificationUpdate:
         })
         create_product(test_db, code="508000.SH", market="CN_EXCHANGE",
                        asset_class_code="ASSET_REIT", region_code=None,
-                       style_code=None, size_code=None, segment_code=None)
+                       style_code=None, size_code=None, segment_code=None,
+                       confirm_days=0)
         resp = client.put(f"{_API}/ASSET_REIT", headers=admin_headers,
                           json={"dimension_rules": {"segment": "required"}})
         assert resp.status_code == 422
@@ -734,7 +735,8 @@ class TestClassificationUpdate:
         })
         create_product(test_db, code="508001.SH", market="CN_EXCHANGE",
                        asset_class_code="ASSET_REIT", region_code=None,
-                       style_code=None, size_code=None, segment_code="SEG_GOLD")
+                       style_code=None, size_code=None, segment_code="SEG_GOLD",
+                       confirm_days=0)
         resp = client.put(f"{_API}/ASSET_REIT", headers=admin_headers,
                           json={"dimension_rules": {}})
         assert resp.status_code == 422

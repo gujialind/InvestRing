@@ -41,7 +41,8 @@ class TestResolveProductMarket:
     def test_multi_market_ambiguous(self, test_db):
         """LOF 一码多市场抛 MARKET_AMBIGUOUS(422)，available_markets 排序返回"""
         create_product(test_db, code="RSLV_LOF", market="CN_OTC", product_type="LOF")
-        create_product(test_db, code="RSLV_LOF", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="RSLV_LOF", market="CN_EXCHANGE", product_type="LOF",
+                       confirm_days=0)
         with pytest.raises(BusinessError) as exc_info:
             resolve_product_market(test_db, "RSLV_LOF")
         err = exc_info.value

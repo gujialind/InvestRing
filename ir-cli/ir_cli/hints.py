@@ -42,6 +42,7 @@ ERROR_HINTS: dict = {
     "PRODUCT_NOT_FOUND": "检查产品代码与市场，如 --product-code 022959.OF --market CN_OTC，用 ir product list 查询可用产品",
     "MARKET_AMBIGUOUS": "产品存在多个市场，请指定 --market；用 ir product list 查询产品可用市场",
     "INVALID_NAV_LAG_DAYS": "nav_lag_days 必须 >=0；场内（market=CN_EXCHANGE）必须为 0；显式传 null 拒绝；修正后重试: ir product update <code> <market> --nav-lag-days <N>",
+    "INVALID_CONFIRM_DAYS": "confirm_days 必须 >=0；场内（market=CN_EXCHANGE）必须为 0；显式传 null 拒绝；修正后重试: ir product update <code> <market> --confirm-days <N>",
     "CONFIRM_REQUIRED": "不可逆操作需 --yes 确认，可先加 --dry-run 预览影响范围",
 }
 
