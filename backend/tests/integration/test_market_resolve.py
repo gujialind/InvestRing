@@ -33,7 +33,7 @@ class TestTradeCreateMarketResolve:
         """唯一市场自动补全，创建成功且 market 落库为解析值"""
         create_portfolio(test_db, code="MKR_P1", status="active")
         create_product(test_db, code="MKR_ETF", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="MKR_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
         _give_cash(test_db, "MKR_P1", "MKR_PLAT")
@@ -62,7 +62,7 @@ class TestTradeCreateMarketResolve:
         create_product(test_db, code="MKR_LOF", market="CN_OTC",
                        product_type="LOF", asset_class_code="ASSET_STOCK")
         create_product(test_db, code="MKR_LOF", market="CN_EXCHANGE",
-                       product_type="LOF", asset_class_code="ASSET_STOCK")
+                       product_type="LOF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="MKR_PLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
         _give_cash(test_db, "MKR_P2", "MKR_PLAT2")
@@ -92,7 +92,7 @@ class TestTradeCreateMarketResolve:
         create_product(test_db, code="MKR_LOF2", market="CN_OTC",
                        product_type="LOF", asset_class_code="ASSET_STOCK")
         create_product(test_db, code="MKR_LOF2", market="CN_EXCHANGE",
-                       product_type="LOF", asset_class_code="ASSET_STOCK")
+                       product_type="LOF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="MKR_PLAT4")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
         _give_cash(test_db, "MKR_P4", "MKR_PLAT4")
@@ -152,7 +152,8 @@ class TestProductGetMarketResolve:
     def test_get_ambiguous(self, client, admin_headers, test_db):
         """LOF 一码多市场返回 MARKET_AMBIGUOUS(422)"""
         create_product(test_db, code="MKR_GET2", market="CN_OTC", product_type="LOF")
-        create_product(test_db, code="MKR_GET2", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="MKR_GET2", market="CN_EXCHANGE", product_type="LOF",
+                       confirm_days=0)
         resp = client.get("/api/products/MKR_GET2", headers=admin_headers)
         assert resp.status_code == 422
         detail = resp.json()["detail"]

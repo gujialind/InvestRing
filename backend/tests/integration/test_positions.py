@@ -55,7 +55,7 @@ class TestAvailableCash:
         """pending 买入应减少可用现金"""
         create_portfolio(test_db, code="AC_PB", status="active")
         create_product(test_db, code="ETF_AC1", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="AC_PLAT")
         ensure_trading_day(test_db, date(2025, 11, 3), is_open=True)
 

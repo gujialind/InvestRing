@@ -694,7 +694,7 @@ class TestNavLagDaysValidation:
     def test_update_exchange_nav_lag_positive_422(self, client, admin_headers, test_db):
         """场内产品 PUT lag=1 → 422 INVALID_NAV_LAG_DAYS（跨字段）"""
         create_product(test_db, code="NL005.SH", market="CN_EXCHANGE",
-                       product_type="ETF", nav_lag_days=0)
+                       product_type="ETF", nav_lag_days=0, confirm_days=0)
         resp = client.put(
             "/api/products/NL005.SH/CN_EXCHANGE",
             json={"nav_lag_days": 1},

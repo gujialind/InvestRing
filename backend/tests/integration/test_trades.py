@@ -23,7 +23,7 @@ class TestBuyTrade:
         """买入交易创建后应为 pending"""
         create_portfolio(test_db, code="TRD_P1", status="active")
         create_product(test_db, code="ETF01", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="TRD_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -58,7 +58,7 @@ class TestBuyTrade:
         """买入金额超过可用现金应被拒绝"""
         create_portfolio(test_db, code="TRD_NC", status="active")
         create_product(test_db, code="ETF02", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="TRD_PLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -86,7 +86,7 @@ class TestBuyTrade:
         """买入金额为 0 应被拒绝"""
         create_portfolio(test_db, code="TRD_Z", status="active")
         create_product(test_db, code="ETF03", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="TRD_PLAT3")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -110,7 +110,7 @@ class TestBuyTrade:
         """manual 覆盖 baked in 快照后，买入金额在覆盖值内应成功（回归 issue #52）"""
         create_portfolio(test_db, code="TRD_OVR", status="active")
         create_product(test_db, code="ETF_OVR", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="TRD_OVR_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -149,7 +149,7 @@ class TestSellTrade:
         """卖出交易创建后应为 pending"""
         create_portfolio(test_db, code="SEL_P1", status="active")
         create_product(test_db, code="ETF04", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="SEL_PLAT")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -184,7 +184,7 @@ class TestSellTrade:
         """卖出份额超过可用份额应被拒绝"""
         create_portfolio(test_db, code="SEL_EX", status="active")
         create_product(test_db, code="ETF05", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="SEL_PLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -1626,7 +1626,8 @@ class TestListTradeFilters:
     def test_filter_product_code_only_matches_all_markets(self, client, admin_headers, test_db):
         """仅 product_code 时 LOF 一码多市场全命中"""
         create_portfolio(test_db, code="LT_P6", status="active")
-        create_product(test_db, code="LOF01", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="LOF01", market="CN_EXCHANGE", product_type="LOF",
+                       confirm_days=0)
         create_product(test_db, code="LOF01", market="CN_OTC", product_type="LOF")
         create_trade(test_db, "LT_P6", "LOF01", "CN_EXCHANGE", trade_date=date(2025, 9, 1))
         create_trade(test_db, "LT_P6", "LOF01", "CN_OTC", trade_date=date(2025, 9, 1))
@@ -1642,7 +1643,8 @@ class TestListTradeFilters:
     def test_filter_product_code_with_market_exact(self, client, admin_headers, test_db):
         """product_code + market 精确过滤（LOF 只命中指定市场）"""
         create_portfolio(test_db, code="LT_P7", status="active")
-        create_product(test_db, code="LOF02", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="LOF02", market="CN_EXCHANGE", product_type="LOF",
+                       confirm_days=0)
         create_product(test_db, code="LOF02", market="CN_OTC", product_type="LOF")
         create_trade(test_db, "LT_P7", "LOF02", "CN_EXCHANGE", trade_date=date(2025, 9, 1))
         create_trade(test_db, "LT_P7", "LOF02", "CN_OTC", trade_date=date(2025, 9, 1))
@@ -1659,9 +1661,11 @@ class TestListTradeFilters:
     def test_filter_products_multi_pairs(self, client, admin_headers, test_db):
         """products=A|CN_OTC,B|CN_EXCHANGE 复合多选命中两笔，LOF 不串市场（issue #155）"""
         create_portfolio(test_db, code="LT_P9", status="active")
-        create_product(test_db, code="LOF03", market="CN_EXCHANGE", product_type="LOF")
+        create_product(test_db, code="LOF03", market="CN_EXCHANGE", product_type="LOF",
+                       confirm_days=0)
         create_product(test_db, code="LOF03", market="CN_OTC", product_type="LOF")
-        create_product(test_db, code="ETF03", market="CN_EXCHANGE", product_type="ETF")
+        create_product(test_db, code="ETF03", market="CN_EXCHANGE", product_type="ETF",
+                       confirm_days=0)
         create_trade(test_db, "LT_P9", "LOF03", "CN_OTC", trade_date=date(2025, 9, 1))
         create_trade(test_db, "LT_P9", "LOF03", "CN_EXCHANGE", trade_date=date(2025, 9, 1))
         create_trade(test_db, "LT_P9", "ETF03", "CN_EXCHANGE", trade_date=date(2025, 9, 1))
@@ -2214,7 +2218,7 @@ class TestPlatformRequired:
         """买入不传 platform_code -> 422 PLATFORM_REQUIRED，基金腿与配对 CASH 腿均不落库"""
         create_portfolio(test_db, code="PLR_P1", status="active")
         create_product(test_db, code="ETF_PLR1", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="PLR_PLAT1")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -2249,7 +2253,7 @@ class TestPlatformRequired:
         """卖出不传 platform_code -> 422 PLATFORM_REQUIRED（覆盖 CASH buy 腿平台继承路径）"""
         create_portfolio(test_db, code="PLR_P2", status="active")
         create_product(test_db, code="ETF_PLR2", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="PLR_PLAT2")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
@@ -2282,7 +2286,7 @@ class TestPlatformRequired:
         """传不存在平台 -> 404 PLATFORM_NOT_FOUND（顺带修复 FK IntegrityError 爆 500 的潜在问题）"""
         create_portfolio(test_db, code="PLR_P3", status="active")
         create_product(test_db, code="ETF_PLR3", market="CN_EXCHANGE",
-                       product_type="ETF", asset_class_code="ASSET_STOCK")
+                       product_type="ETF", asset_class_code="ASSET_STOCK", confirm_days=0)
         create_platform(test_db, code="PLR_PLAT3")
         ensure_trading_day(test_db, date(2025, 10, 6), is_open=True)
 
