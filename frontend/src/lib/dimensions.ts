@@ -4,6 +4,8 @@
  * 二级分组维度（issue #144）的共享事实来源。
  */
 
+import type { AssetClassificationItem } from "@/types/asset-classification";
+
 /** 可规则化的四个维度（asset_class 自身不参与规则/适用关联） */
 export const RULE_DIMENSIONS = ["region", "style", "size", "segment"] as const;
 
@@ -54,4 +56,50 @@ export function resolveSubDim(
     return override as SubDimension;
   }
   return SUB_DIM_BY_CLASS[classCode] ?? null;
+}
+
+/**
+ * 维度筛选下拉选项（issue #238 抽取，产品筛选弹窗与产品管理页共用）：
+ * 启用值；选了 asset_class 则按 applicable_asset_classes 收窄。
+ */
+export function getDimensionOptions(
+  dictItems: AssetClassificationItem[],
+  dimension: string,
+  selectedAssetClass?: string
+): AssetClassificationItem[] {
+  return dictItems.filter(
+    (i) =>
+      i.dimension === dimension &&
+      i.is_active &&
+      (!selectedAssetClass || i.applicable_asset_classes.includes(selectedAssetClass))
+  );
+}
+
+/**
+ * 切换大类后的维度筛选集（issue #238 抽取）：返回新筛选集，
+ * 不再适用新大类的维度值清空（避免查不出数据的隐形条件）；未选大类时仅更新 asset_class。
+ */
+export function clearInapplicableDims(
+  dimFilters: Record<string, string | undefined>,
+  newAssetClass: string | undefined,
+  dictItems: AssetClassificationItem[]
+): Record<string, string | undefined> {
+  const next: Record<string, string | undefined> = { ...dimFilters, asset_class: newAssetClass };
+  if (newAssetClass) {
+    for (const dimension of RULE_DIMENSIONS) {
+      const current = next[dimension];
+      if (
+        current &&
+        !dictItems.some(
+          (i) =>
+            i.code === current &&
+            i.is_active &&
+            i.applicable_asset_classes.includes(newAssetClass)
+        )
+      ) {
+        next[dimension] = undefined;
+      }
+    }
+  }
+  return next;
 }

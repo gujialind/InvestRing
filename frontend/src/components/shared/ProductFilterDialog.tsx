@@ -25,7 +25,12 @@ import { Loader2 } from "lucide-react";
 import { Product } from "@/types/product";
 import { useProductList } from "@/hooks/useProduct";
 import { useAssetClassifications } from "@/hooks/useAssetClassification";
-import { DIMENSION_LABELS, RULE_DIMENSIONS } from "@/lib/dimensions";
+import {
+  DIMENSION_LABELS,
+  RULE_DIMENSIONS,
+  clearInapplicableDims,
+  getDimensionOptions,
+} from "@/lib/dimensions";
 import { cn, formatMarketName } from "@/lib/utils";
 
 /** 产品筛选选中项：code + market（market 为空串对应现金类等无市场产品） */
@@ -120,37 +125,12 @@ export default function ProductFilterDialog({
   const dictItems = useMemo(() => dictData?.items ?? [], [dictData?.items]);
   const nameByCode = useMemo(() => new Map(dictItems.map((i) => [i.code, i.name])), [dictItems]);
   const assetClasses = dictItems.filter((i) => i.dimension === "asset_class" && i.is_active);
-  /** 维度过滤选项：启用值；选了大类则按 applicable_asset_classes 收窄 */
+  // 维度选项收窄与大类联动清空走 lib/dimensions 纯函数（#238 抽取，与产品管理页共用）
   const dimensionOptions = (dimension: string) =>
-    dictItems.filter(
-      (i) =>
-        i.dimension === dimension &&
-        i.is_active &&
-        (!dimFilters.asset_class || i.applicable_asset_classes.includes(dimFilters.asset_class))
-    );
+    getDimensionOptions(dictItems, dimension, dimFilters.asset_class);
 
-  /** 切换大类：不再适用新大类的维度过滤值清空（避免查不出数据的隐形条件） */
   const handleAssetClassChange = (assetClass: string | undefined) => {
-    setDimFilters((prev) => {
-      const next: Record<string, string | undefined> = { ...prev, asset_class: assetClass };
-      if (assetClass) {
-        for (const dimension of RULE_DIMENSIONS) {
-          const current = next[dimension];
-          if (
-            current &&
-            !dictItems.some(
-              (i) =>
-                i.code === current &&
-                i.is_active &&
-                i.applicable_asset_classes.includes(assetClass)
-            )
-          ) {
-            next[dimension] = undefined;
-          }
-        }
-      }
-      return next;
-    });
+    setDimFilters((prev) => clearInapplicableDims(prev, assetClass, dictItems));
   };
 
   const toggleProduct = (product: Product) => {
