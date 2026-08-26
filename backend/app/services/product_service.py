@@ -42,6 +42,9 @@ _FIELD_OF_DIMENSION = {v: k for k, v in _DIMENSION_OF_FIELD.items()}
 _RULE_FIELD_OF_DIMENSION = {
     dimension: _FIELD_OF_DIMENSION[dimension] for dimension in RULE_DIMENSIONS
 }
+# create 路径 confirm_days 哨兵（#231/#236/#241）：区分「未传（推导）」与「显式
+# null（拒绝）」——pydantic 默认值使两者在解析后不可分辨，router 仅显式传入时下发
+UNSET_CONFIRM_DAYS = object()
 
 
 def validate_dimension_tags(
@@ -239,7 +242,7 @@ def validate_nav_lag_days(market: Optional[str], nav_lag_days: Optional[int]) ->
 
 
 def validate_confirm_days(market: Optional[str], confirm_days: Optional[int]) -> None:
-    """issue #240 跟进 #6：confirm_days 业务校验（显式更新路径，与 validate_nav_lag_days 同构）。
+    """issue #240 跟进 #6：confirm_days 业务校验（create 显式传入 / update 终态共用，单一实现）。
 
     校验收在服务层单一实现（统一 BusinessError 形状，INVALID_CONFIRM_DAYS），
     schema 层不加 ge 约束，与 #240 跟进 #5 决策一致：
@@ -249,8 +252,8 @@ def validate_confirm_days(market: Optional[str], confirm_days: Optional[int]) ->
       静默变当日确认（与 #235 修复前 nav_lag_days 被静默钳制同型）；
     - 场内（CN_EXCHANGE）当天确认：必须是 0，与 calculate_confirm_days 推导一致。
     非法值抛 INVALID_CONFIRM_DAYS（422）。
-    创建路径不经此校验：confirm_days 不接受输入、由 calculate_confirm_days
-    重推导（唯一入口），无效值无从落库。
+    创建路径（issue #231/#236/#241）：显式传入经此校验；未传则按
+    calculate_confirm_days 推导（推导值结构性合法，不经此校验）。
     """
     if confirm_days is None:
         raise BusinessError(
@@ -406,10 +409,15 @@ def create_product(
     segment_code: Optional[str] = None,
     is_qdii: bool = False,
     nav_lag_days: int = 0,
+    confirm_days=UNSET_CONFIRM_DAYS,  # Optional[int]：UNSET=未传推导，None=显式 null 拒绝
     data_source: Optional[str] = None,
     sync_history: bool = False,
 ) -> Product:
-    """创建产品（自动计算 confirm_days，校验五维度适用矩阵）。不 commit。
+    """创建产品（confirm_days 显式优先、缺省推导，校验五维度适用矩阵）。不 commit。
+
+    confirm_days（issue #231/#236/#241）：显式传入优先（含显式 null，走
+    validate_confirm_days 拒绝）；未传（UNSET_CONFIRM_DAYS 哨兵）按
+    market+is_qdii 经 calculate_confirm_days 推导。
 
     nav_lag_days（issue #228）：快照估值取价滞后交易日数，由调用方显式传入
     （场外 QDII / 互认基金传 1），不做推导。
@@ -434,7 +442,12 @@ def create_product(
     }
     validate_dimension_tags(db, dims)
 
-    confirm_days = calculate_confirm_days(market or "CN_OTC", is_qdii)
+    # issue #231/#236/#241：confirm_days 显式优先（含显式 null，校验拒绝；market 归一
+    # 与推导同口径）、缺省按 market+is_qdii 推导（推导值结构性合法 0/1/2，无需校验）
+    if confirm_days is not UNSET_CONFIRM_DAYS:
+        validate_confirm_days(market or "CN_OTC", confirm_days)
+    else:
+        confirm_days = calculate_confirm_days(market or "CN_OTC", is_qdii)
     product = Product(
         code=code,
         market=market or "",

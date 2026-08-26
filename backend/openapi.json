@@ -9170,9 +9170,15 @@
             "title": "Segment Code"
           },
           "confirm_days": {
-            "type": "integer",
-            "title": "Confirm Days",
-            "default": 1
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Days"
           },
           "nav_lag_days": {
             "type": "integer",

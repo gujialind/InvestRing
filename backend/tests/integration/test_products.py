@@ -756,7 +756,7 @@ class TestConfirmDaysValidation:
 
     与 nav_lag_days 同决策（#240 跟进 #5）：校验收在 service 层（validate_confirm_days），
     统一 422 形状（detail.error=INVALID_CONFIRM_DAYS），schema 不加 ge 约束。
-    创建路径 confirm_days 由 calculate_confirm_days 重推导（输入不落库），无校验。
+    创建路径（#231/#236/#241）：显式传入优先并校验，未传按 calculate_confirm_days 推导。
 
     覆盖：
     - PUT 负值 / 显式 null → 422 INVALID_CONFIRM_DAYS（此前负值 200 落库、读侧 or 0 静默当日确认）
@@ -764,7 +764,7 @@ class TestConfirmDaysValidation:
     - 场外合法值通过（回归）
     - market 迁移至 CN_EXCHANGE 未传 confirm_days → 重推导 0，不误报（回归）
     - market 迁移至 CN_EXCHANGE 且显式传非 0 → 422（终态校验）
-    - 创建传非法值不落库（重推导覆盖，契约回归）
+    - 创建显式传合法值落库 / 不传按推导 / 显式非法值（负值、null、场内非 0）→ 422
     """
 
     def test_update_confirm_days_negative_422(self, client, admin_headers, test_db):
@@ -842,15 +842,63 @@ class TestConfirmDaysValidation:
         assert resp.status_code == 422
         assert resp.json()["detail"]["error"] == "INVALID_CONFIRM_DAYS"
 
-    def test_create_confirm_days_input_not_persisted(self, client, admin_headers):
-        """创建路径 confirm_days 由后端重推导（唯一入口）：传入值不落库，无非法落库路径"""
+    def test_create_confirm_days_explicit_persisted(self, client, admin_headers):
+        """issue #231/#236/#241：创建显式传合法值 → 落库为该值（显式优先，不再重推导）"""
         resp = client.post(
             "/api/products",
-            json={"code": "CD007.OF", "market": "CN_OTC", "name": "创建推导",
-                  "product_type": "OEF", "confirm_days": -1},
+            json={"code": "CD007.OF", "market": "CN_OTC", "name": "创建显式",
+                  "product_type": "OEF", "confirm_days": 2},
             headers=admin_headers,
         )
         assert resp.status_code in (200, 201), resp.json()
-        # CN_OTC 非 QDII → 推导 1，输入的 -1 未落库
+        assert resp.json()["confirm_days"] == 2
+
+    def test_create_confirm_days_negative_422(self, client, admin_headers):
+        """创建显式传 -1 → 422 INVALID_CONFIRM_DAYS（修复前静默重推导落 1）"""
+        resp = client.post(
+            "/api/products",
+            json={"code": "CD008.OF", "market": "CN_OTC", "name": "创建负值",
+                  "product_type": "OEF", "confirm_days": -1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "INVALID_CONFIRM_DAYS"
+        assert detail["details"]["confirm_days"] == -1
+
+    def test_create_confirm_days_null_422(self, client, admin_headers):
+        """创建显式传 null → 422 INVALID_CONFIRM_DAYS（null 语义为清除，拒绝）"""
+        resp = client.post(
+            "/api/products",
+            json={"code": "CD009.OF", "market": "CN_OTC", "name": "创建null",
+                  "product_type": "OEF", "confirm_days": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_CONFIRM_DAYS"
+
+    def test_create_exchange_confirm_days_positive_422(self, client, admin_headers):
+        """创建场内产品显式传 confirm_days=1 → 422（场内当天确认必须 0）"""
+        resp = client.post(
+            "/api/products",
+            json={"code": "CD010.SH", "market": "CN_EXCHANGE", "name": "创建场内",
+                  "product_type": "ETF", "confirm_days": 1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "INVALID_CONFIRM_DAYS"
+        assert detail["details"]["market"] == "CN_EXCHANGE"
+
+    def test_create_confirm_days_omitted_derived(self, client, admin_headers):
+        """创建不传 confirm_days → 按 market+is_qdii 推导（缺省推导，与修复前行为一致）"""
+        resp = client.post(
+            "/api/products",
+            json={"code": "CD011.OF", "market": "CN_OTC", "name": "创建缺省",
+                  "product_type": "OEF"},
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), resp.json()
+        # CN_OTC 非 QDII → 推导 1
         assert resp.json()["confirm_days"] == 1
 

@@ -896,11 +896,11 @@ ir product list [--product-type <类型>] [--page N] [--page-size N] [--all]
 
 #### `ir product create`
 
-创建产品（`confirm_days` 由后端按市场 + QDII 属性在创建时自动推导，请求中传入的值会被推导值覆盖）。
+创建产品（`confirm_days` 显式传入优先；不传由后端按市场 + QDII 属性自动推导）。
 
 ```bash
 ir product create --code <代码> --market <市场> --name <名称> --product-type <类型> \
-  [--asset-class-code <资产类别>] [--nav-lag-days N] [--is-qdii] [--data-source <数据源>] [--sync]
+  [--asset-class-code <资产类别>] [--confirm-days N] [--nav-lag-days N] [--is-qdii] [--data-source <数据源>] [--sync]
 ```
 
 | 参数 | 必填 | 说明 |
@@ -910,12 +910,13 @@ ir product create --code <代码> --market <市场> --name <名称> --product-ty
 | `--name` | 是 | 产品名称 |
 | `--product-type` | 是 | 类型：`ETF` / `OEF` / `LOF` / `CASH` / `IN_TRANSIT` |
 | `--asset-class-code` | 否 | 资产类别代码 |
+| `--confirm-days` | 否 | 确认天数（#231/#236/#241）：显式传入优先（>=0；场内 `CN_EXCHANGE` 必须 0，否则 422 `INVALID_CONFIRM_DAYS`）；不传按下表推导 |
 | `--nav-lag-days` | 否 | 快照估值取价滞后交易日数（issue #228）：默认 `0` 取当日净值，`N` 取前第 N 个交易日净值；场外 QDII / 香港互认基金填 `1` |
 | `--is-qdii` | 否 | 是否为 QDII 产品（默认 false）；**纯展示标签**，仅在创建时参与 `confirm_days` 默认值推导，不影响快照取价 |
 | `--data-source` | 否 | 数据源（如 `tushare`） |
 | `--sync` | 否 | 创建后立即回填历史净值（issue #90）；同步结果在响应 `sync_result`，失败不阻断创建 |
 
-**confirm_days 创建时自动推导规则（唯一入口；创建后需要其它值用 `ir product update --confirm-days`）：**
+**未传 `--confirm-days` 时的自动推导规则（创建后需要其它值用 `ir product update --confirm-days`）：**
 
 | 市场 | QDII | confirm_days |
 |------|:----:|:------------:|

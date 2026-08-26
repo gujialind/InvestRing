@@ -37,7 +37,7 @@ def create(
     product_type: Optional[str] = typer.Option(None, "--product-type", help="产品类型(ETF/OEF/LOF/CASH)(必填)"),
     market: Optional[str] = typer.Option(None, "--market", help="市场类型"),
     asset_class_code: Optional[str] = typer.Option(None, "--asset-class-code", help="资产分类代码"),
-    confirm_days: int = typer.Option(1, "--confirm-days", help="确认天数"),
+    confirm_days: Optional[int] = typer.Option(None, "--confirm-days", help="确认天数(不传按市场+QDII推导：场内0/场外QDII 2/其余1)"),
     nav_lag_days: int = typer.Option(0, "--nav-lag-days", help="快照估值取价滞后交易日数(0=当日，场外QDII/互认基金常为1)"),
     is_qdii: bool = typer.Option(False, "--is-qdii/--no-qdii", help="是否QDII(纯展示标签)"),
     sync: bool = typer.Option(False, "--sync", help="创建后立即回填历史净值"),
