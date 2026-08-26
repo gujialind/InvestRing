@@ -18,7 +18,7 @@ class ProductBase(BaseModel):
     # issue #240 跟进 #6：约束由服务层单一实现（product_service.validate_confirm_days，
     # INVALID_CONFIRM_DAYS）——>=0、显式 null 拒绝、场内（CN_EXCHANGE）必须 0；
     # schema 层不加 ge=0，避免同一业务规则产生两种 422 形状（与 #5 决策一致）。
-    # 创建路径该值不参与落库：后端按 market+is_qdii 经 calculate_confirm_days 重推导
+    # 创建路径显式优先、缺省推导（#231/#236/#241），见 ProductCreate 覆盖
     confirm_days: int = 1
     # issue #228：快照估值取价滞后交易日数（0=当日、N=前第 N 个交易日）；
     # 场外 QDII / 互认基金取 1。is_qdii 仅为展示标签，不参与取价
@@ -33,6 +33,10 @@ class ProductBase(BaseModel):
 class ProductCreate(ProductBase):
     # issue #90：创建后立即回填历史净值（同步失败不阻断创建）
     sync_history: Optional[bool] = False
+    # issue #231/#236/#241：覆盖继承的 int = 1——None=未传、后端按 market+is_qdii 推导；
+    # 显式传值优先（校验走 product_service.validate_confirm_days，显式 null 拒绝），
+    # 与 update 路径纯显式语义对齐
+    confirm_days: Optional[int] = None
 
 
 class ProductUpdate(BaseModel):

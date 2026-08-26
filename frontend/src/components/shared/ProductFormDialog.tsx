@@ -31,6 +31,15 @@ const EMPTY_FORM: Partial<Product> = {
   is_qdii: false,
 };
 
+/** 创建态 confirm_days 缺省推导（#231/#236/#241，镜像后端
+ *  `backend/app/services/product_service.py::calculate_confirm_days`，规则变更需同步）：
+ *  显式优先、未传推导——前端预填推导值如实下发，用户可覆盖 */
+function deriveConfirmDays(market: string | undefined, isQdii: boolean | undefined): number {
+  if (market === "CN_EXCHANGE") return 0;
+  if (market === "CN_OTC" && isQdii) return 2;
+  return 1;
+}
+
 interface ProductFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -57,11 +66,14 @@ export default function ProductFormDialog({
   const updateProduct = useUpdateProduct();
 
   const [formData, setFormData] = useState<Partial<Product>>(EMPTY_FORM);
+  // 创建态：用户手改过确认天数后，market/is_qdii 联动预填不再覆盖
+  const [confirmDaysTouched, setConfirmDaysTouched] = useState(false);
 
   // 打开时按两态初始化表单：编辑回填整个产品，创建回初始值
   useEffect(() => {
     if (open) {
       setFormData(editingProduct ?? EMPTY_FORM);
+      setConfirmDaysTouched(false);
     }
   }, [open, editingProduct]);
 
@@ -189,7 +201,17 @@ export default function ProductFormDialog({
               <select
                 id="market"
                 value={formData.market}
-                onChange={(e) => setFormData({ ...formData, market: e.target.value })}
+                onChange={(e) => {
+                  const market = e.target.value;
+                  setFormData({
+                    ...formData,
+                    market,
+                    // 创建态预填联动：后端显式优先（#231/#236/#241），默认 1 对场内会 422
+                    ...(!editingProduct && !confirmDaysTouched
+                      ? { confirm_days: deriveConfirmDays(market, formData.is_qdii) }
+                      : {}),
+                  });
+                }}
                 disabled={!!editingProduct}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -293,8 +315,20 @@ export default function ProductFormDialog({
               <Input
                 id="confirm_days"
                 type="number"
-                value={formData.confirm_days}
-                onChange={(e) => setFormData({ ...formData, confirm_days: parseInt(e.target.value) })}
+                min={0}
+                step={1}
+                value={formData.confirm_days ?? ""}
+                onChange={(e) => {
+                  // 空值/非法输入回落预填推导值，避免 NaN 进入表单状态（同 nav_lag_days）
+                  const parsed = parseInt(e.target.value, 10);
+                  const valid = !Number.isNaN(parsed);
+                  setFormData({
+                    ...formData,
+                    confirm_days: valid ? parsed : deriveConfirmDays(formData.market, formData.is_qdii),
+                  });
+                  // 仅有效输入算手改（回落不阻断后续 market/is_qdii 预填联动）
+                  if (valid) setConfirmDaysTouched(true);
+                }}
                 required
               />
             </div>
@@ -322,7 +356,17 @@ export default function ProductFormDialog({
                 id="is_qdii"
                 type="checkbox"
                 checked={formData.is_qdii}
-                onChange={(e) => setFormData({ ...formData, is_qdii: e.target.checked })}
+                onChange={(e) => {
+                  const isQdii = e.target.checked;
+                  setFormData({
+                    ...formData,
+                    is_qdii: isQdii,
+                    // 创建态预填联动（场外+QDII→2，同后端推导规则）
+                    ...(!editingProduct && !confirmDaysTouched
+                      ? { confirm_days: deriveConfirmDays(formData.market, isQdii) }
+                      : {}),
+                  });
+                }}
                 className="h-4 w-4 rounded border-gray-300"
               />
               <Label htmlFor="is_qdii">QDII基金</Label>

@@ -91,6 +91,9 @@ def create_product(
         segment_code=product.segment_code,
         is_qdii=product.is_qdii,
         nav_lag_days=product.nav_lag_days,
+        # #231/#236/#241：仅显式传入才下发（pydantic 默认值不可分辨「未传/显式 null」；
+        # 显式 null 穿透到 service 由 validate_confirm_days 拒绝，统一 422 形状）
+        **({"confirm_days": product.confirm_days} if "confirm_days" in product.model_fields_set else {}),
         data_source=product.data_source,
         sync_history=bool(product.sync_history),
     )

@@ -254,3 +254,28 @@ class TestPortfolioDisplayConfigParam:
         assert result.exit_code == 0
         _, _, body = stub_client.writes[0]
         assert body == {"display_config": None}
+
+
+class TestProductCreateConfirmDays:
+    """product create --confirm-days（issue #241）：缺省不下发（后端按市场+QDII 推导），
+    显式传入如实下发（#231/#236/#241 显式优先）"""
+
+    def test_omitted_not_sent(self, stub_client):
+        result = _runner().invoke(
+            app,
+            ["product", "create", "--code", "T1.OF", "--market", "CN_OTC",
+             "--name", "测试", "--product-type", "OEF"],
+        )
+        assert result.exit_code == 0, result.stdout
+        _, _, body = stub_client.writes[0]
+        assert "confirm_days" not in body
+
+    def test_explicit_sent(self, stub_client):
+        result = _runner().invoke(
+            app,
+            ["product", "create", "--code", "T2.OF", "--market", "CN_OTC",
+             "--name", "测试", "--product-type", "OEF", "--confirm-days", "2"],
+        )
+        assert result.exit_code == 0, result.stdout
+        _, _, body = stub_client.writes[0]
+        assert body["confirm_days"] == 2
