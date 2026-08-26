@@ -148,13 +148,14 @@ def validate_dimension_tags(
 
 
 def calculate_confirm_days(market: Optional[str], is_qdii: bool) -> int:
-    """确认天数默认值推导器（唯一实现，issue #228）：
+    """确认天数默认值推导器（缺省路径单一实现，issue #228）：
     - CN_EXCHANGE: 0（场内当天）
     - CN_OTC 且非 QDII: 1（T+1）
     - CN_OTC 且 QDII: 2（T+2）
     - 其他: 1
 
-    调用点：create_product 创建时推导默认值；update_product 仅在 market
+    调用点：create_product 创建时**未显式传** confirm_days 的缺省推导
+    （#231/#236/#241 起显式传入优先，不经此函数）；update_product 仅在 market
     **实际变化**且未显式传 confirm_days 时重推导（issue #232 唯一例外——
     场内 0 天残留到场外会造成当日确认的资金语义错误）。
     confirm_days / is_qdii 自身的更新始终纯显式（不传不改）。
@@ -409,7 +410,7 @@ def create_product(
     segment_code: Optional[str] = None,
     is_qdii: bool = False,
     nav_lag_days: int = 0,
-    confirm_days=UNSET_CONFIRM_DAYS,  # Optional[int]：UNSET=未传推导，None=显式 null 拒绝
+    confirm_days: Optional[int] = UNSET_CONFIRM_DAYS,  # 哨兵区分未传/显式 null
     data_source: Optional[str] = None,
     sync_history: bool = False,
 ) -> Product:

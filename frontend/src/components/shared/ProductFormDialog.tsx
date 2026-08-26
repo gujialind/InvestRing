@@ -31,8 +31,9 @@ const EMPTY_FORM: Partial<Product> = {
   is_qdii: false,
 };
 
-/** 创建态 confirm_days 缺省推导（#231/#236/#241，镜像后端 calculate_confirm_days：
- *  显式优先、未传推导——前端预填推导值如实下发，用户可覆盖） */
+/** 创建态 confirm_days 缺省推导（#231/#236/#241，镜像后端
+ *  `backend/app/services/product_service.py::calculate_confirm_days`，规则变更需同步）：
+ *  显式优先、未传推导——前端预填推导值如实下发，用户可覆盖 */
 function deriveConfirmDays(market: string | undefined, isQdii: boolean | undefined): number {
   if (market === "CN_EXCHANGE") return 0;
   if (market === "CN_OTC" && isQdii) return 2;
@@ -314,10 +315,19 @@ export default function ProductFormDialog({
               <Input
                 id="confirm_days"
                 type="number"
+                min={0}
+                step={1}
                 value={formData.confirm_days ?? ""}
                 onChange={(e) => {
-                  setFormData({ ...formData, confirm_days: parseInt(e.target.value) });
-                  setConfirmDaysTouched(true);
+                  // 空值/非法输入回落预填推导值，避免 NaN 进入表单状态（同 nav_lag_days）
+                  const parsed = parseInt(e.target.value, 10);
+                  const valid = !Number.isNaN(parsed);
+                  setFormData({
+                    ...formData,
+                    confirm_days: valid ? parsed : deriveConfirmDays(formData.market, formData.is_qdii),
+                  });
+                  // 仅有效输入算手改（回落不阻断后续 market/is_qdii 预填联动）
+                  if (valid) setConfirmDaysTouched(true);
                 }}
                 required
               />

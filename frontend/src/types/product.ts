@@ -32,6 +32,7 @@ export interface ProductCreate {
   style_code?: string;
   size_code?: string;
   segment_code?: string;
+  /** #231/#236/#241：显式传入优先（后端校验）；不传由后端按市场+QDII 推导 */
   confirm_days?: number;
   /** issue #228：快照估值取价滞后交易日数（默认 0） */
   nav_lag_days?: number;

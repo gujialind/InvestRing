@@ -902,3 +902,14 @@ class TestConfirmDaysValidation:
         # CN_OTC 非 QDII → 推导 1
         assert resp.json()["confirm_days"] == 1
 
+    def test_create_hk_mutual_confirm_days_omitted_derived(self, client, admin_headers):
+        """创建互认基金不传 confirm_days → 推导 1（其他市场分支，与 QDII=2 分支互补）"""
+        resp = client.post(
+            "/api/products",
+            json={"code": "CD012.HK", "market": "HK_MUTUAL", "name": "创建互认",
+                  "product_type": "OEF"},
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), resp.json()
+        assert resp.json()["confirm_days"] == 1
+
