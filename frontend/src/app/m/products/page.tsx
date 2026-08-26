@@ -7,7 +7,7 @@ import ProductsContent from "@/components/shared/ProductsContent";
 export default function MobileProductsPage() {
   return (
     <AdminGuard>
-      <ProductsContent />
+      <ProductsContent variant="mobile" />
     </AdminGuard>
   );
 }

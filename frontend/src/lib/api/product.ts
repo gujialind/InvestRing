@@ -26,8 +26,9 @@ function requireMarket(market: string | undefined, action: string): string {
 
 /**
  * 产品列表查询参数。维度筛选参数（issue #128）：asset_class/region/style/size/segment 五维 code；
- * keyword（issue #155）：code/name 模糊匹配，与其余参数 AND 叠加。
- * axios 会丢弃 undefined 值，空筛选自然不传参。
+ * keyword（issue #155）：code/name 模糊匹配，与其余参数 AND 叠加；
+ * confirm_days/nav_lag_days/is_qdii（issue #238）：属性等值筛选（0/false 为合法值，
+ * axios 只丢 undefined，显式传 0/false 正常序列化）。
  */
 export interface ProductListParams {
   page?: number;
@@ -36,6 +37,9 @@ export interface ProductListParams {
   market?: string;
   data_source?: string;
   keyword?: string;
+  confirm_days?: number;
+  nav_lag_days?: number;
+  is_qdii?: boolean;
   asset_class_code?: string;
   region_code?: string;
   style_code?: string;

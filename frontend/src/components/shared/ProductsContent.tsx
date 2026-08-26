@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +12,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -19,12 +28,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import Link from "next/link";
-import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, TrendingUp, Eye, Tags } from "lucide-react";
+import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, TrendingUp, Eye, Tags, Filter } from "lucide-react";
 import { Product } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
-import { formatNav } from "@/lib/utils";
+import { cn, formatMarketName, formatNav } from "@/lib/utils";
 import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
 import ProductFormDialog from "@/components/shared/ProductFormDialog";
+import EmptyState from "@/components/shared/EmptyState";
+import PaginationBar from "@/components/shared/PaginationBar";
+import { useAssetClassifications } from "@/hooks/useAssetClassification";
+import {
+  DIMENSION_LABELS,
+  RULE_DIMENSIONS,
+  clearInapplicableDims,
+  getDimensionOptions,
+} from "@/lib/dimensions";
+import type { ProductListParams } from "@/lib/api";
 import {
   useProductList,
   useDeleteProduct,
@@ -33,14 +52,124 @@ import {
   useSyncProductHistory,
 } from "@/hooks/useProduct";
 
-export default function ProductsContent() {
+interface ProductsContentProps {
+  variant?: "desktop" | "mobile";
+}
+
+// 筛选选项（label 与产品筛选弹窗/产品表单下拉保持一致）
+const MARKET_OPTIONS = ["CN_EXCHANGE", "CN_OTC", "HK_MUTUAL"].map((v) => ({
+  value: v,
+  label: formatMarketName(v),
+}));
+
+const PRODUCT_TYPE_OPTIONS = [
+  { value: "ETF", label: "ETF" },
+  { value: "OEF", label: "开放式基金" },
+  { value: "LOF", label: "LOF" },
+  { value: "CASH", label: "现金" },
+] as const;
+
+const CONFIRM_DAYS_OPTIONS = [0, 1, 2];
+
+const NAV_LAG_OPTIONS = [
+  { value: 0, label: "T" },
+  { value: 1, label: "T-1" },
+] as const;
+
+const DATA_SOURCE_OPTIONS = ["tushare", "akshare"];
+
+/**
+ * 产品管理页内容（桌面/移动共用，issue #234 真分页 + #238 筛选栏）。
+ * 筛选/分页全部走服务端参数（queryKey 带 listParams 自动刷新）；
+ * 五维筛选的选项收窄与大类联动清空走 lib/dimensions 纯函数（与产品筛选弹窗共用）。
+ */
+export default function ProductsContent({ variant = "desktop" }: ProductsContentProps) {
   const addToast = useUIStore((state) => state.addToast);
 
-  const { data, isLoading } = useProductList({ page_size: 100 });
+  // 分页状态（#234：替代原 page_size:100 假分页）
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // 关键字防抖 300ms（规范 §9 文本输入类）
+  const [keywordInput, setKeywordInput] = useState("");
+  const [keyword, setKeyword] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setKeyword(keywordInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [keywordInput]);
+
+  // 筛选状态（#238）：空值 = undefined，axios 不传参
+  const [market, setMarket] = useState<string | undefined>(undefined);
+  const [productType, setProductType] = useState<string | undefined>(undefined);
+  const [confirmDays, setConfirmDays] = useState<number | undefined>(undefined);
+  const [navLagDays, setNavLagDays] = useState<number | undefined>(undefined);
+  const [dataSource, setDataSource] = useState<string | undefined>(undefined);
+  const [isQdii, setIsQdii] = useState<boolean | undefined>(undefined);
+  const [dimFilters, setDimFilters] = useState<Record<string, string | undefined>>({});
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  const listParams: ProductListParams = {
+    page,
+    page_size: pageSize,
+    keyword: keyword || undefined,
+    market,
+    product_type: productType,
+    confirm_days: confirmDays,
+    nav_lag_days: navLagDays,
+    data_source: dataSource,
+    is_qdii: isQdii,
+    asset_class_code: dimFilters.asset_class,
+    region_code: dimFilters.region,
+    style_code: dimFilters.style,
+    size_code: dimFilters.size,
+    segment_code: dimFilters.segment,
+  };
+  const { data, isLoading, isFetching } = useProductList(listParams);
 
   const deleteProduct = useDeleteProduct();
 
   const products = data?.items || [];
+  const total = data?.total ?? 0;
+
+  // 维度字典：五维筛选下拉选项（启用值 + 按所选大类收窄）
+  const { data: dictData } = useAssetClassifications();
+  const dictItems = useMemo(() => dictData?.items ?? [], [dictData?.items]);
+  const assetClasses = dictItems.filter((i) => i.dimension === "asset_class" && i.is_active);
+
+  // 非默认筛选判定：驱动「重置」按钮显隐、空态文案二分与移动端激活计数；
+  // 关键字看 keywordInput（防抖窗口内输入已生效于用户感知）
+  const hasKeyword = keyword !== "" || keywordInput.trim() !== "";
+  const hasNonDefaultFilter =
+    hasKeyword ||
+    market !== undefined ||
+    productType !== undefined ||
+    confirmDays !== undefined ||
+    navLagDays !== undefined ||
+    dataSource !== undefined ||
+    isQdii !== undefined ||
+    Object.values(dimFilters).some((v) => v !== undefined);
+  const activeFilterCount =
+    (hasKeyword ? 1 : 0) +
+    (market ? 1 : 0) +
+    (productType ? 1 : 0) +
+    (confirmDays !== undefined ? 1 : 0) +
+    (navLagDays !== undefined ? 1 : 0) +
+    (dataSource ? 1 : 0) +
+    (isQdii !== undefined ? 1 : 0) +
+    Object.values(dimFilters).filter((v) => v !== undefined).length;
+
+  const resetFilters = () => {
+    setKeywordInput("");
+    setKeyword("");
+    setMarket(undefined);
+    setProductType(undefined);
+    setConfirmDays(undefined);
+    setNavLagDays(undefined);
+    setDataSource(undefined);
+    setIsQdii(undefined);
+    setDimFilters({});
+    setPage(1);
+  };
 
   // 创建/编辑共用 ProductFormDialog（issue #155 抽取）：editingProduct 为 null 即创建态
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -54,7 +183,7 @@ export default function ProductsContent() {
   const handleDelete = (code: string, market?: string) => {
     setPendingDelete({ code, market });
   };
-  
+
   const [pendingDelete, setPendingDelete] = useState<{ code: string; market?: string } | null>(null);
 
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
@@ -97,6 +226,182 @@ export default function ProductsContent() {
     setSelectedProduct(product);
     setPriceDialogOpen(true);
   };
+
+  // 筛选栏控件（规范 §9：表格卡片内顶部，控件 h-9、无 Label、placeholder 表意）；
+  // 下拉走 ui/select（「全部 X」用 "all" 哨兵，Radix SelectItem 不允许空串值），
+  // 数字型在 onChange 里 Number(v)（0 是合法筛选值，不能用真值判断）；每次变更页码归 1
+  const selectWidth = variant === "mobile" ? "h-9 w-full" : "h-9 w-[140px]";
+  const filterControls = (
+    <>
+      <Input
+        value={keywordInput}
+        onChange={(e) => {
+          setKeywordInput(e.target.value);
+          setPage(1);
+        }}
+        placeholder="搜索产品代码/名称"
+        className={variant === "mobile" ? "h-9 w-full" : "h-9 w-[200px]"}
+      />
+      <Select
+        value={market ?? "all"}
+        onValueChange={(v) => {
+          setMarket(v === "all" ? undefined : v);
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="全部市场" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部市场</SelectItem>
+          {MARKET_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={productType ?? "all"}
+        onValueChange={(v) => {
+          setProductType(v === "all" ? undefined : v);
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="全部类型" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部类型</SelectItem>
+          {PRODUCT_TYPE_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={confirmDays === undefined ? "all" : String(confirmDays)}
+        onValueChange={(v) => {
+          setConfirmDays(v === "all" ? undefined : Number(v));
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="确认天数" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部确认天数</SelectItem>
+          {CONFIRM_DAYS_OPTIONS.map((d) => (
+            <SelectItem key={d} value={String(d)}>
+              {d} 天
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={navLagDays === undefined ? "all" : String(navLagDays)}
+        onValueChange={(v) => {
+          setNavLagDays(v === "all" ? undefined : Number(v));
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="估值滞后" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部估值滞后</SelectItem>
+          {NAV_LAG_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={String(o.value)}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={dataSource ?? "all"}
+        onValueChange={(v) => {
+          setDataSource(v === "all" ? undefined : v);
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="数据源" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部数据源</SelectItem>
+          {DATA_SOURCE_OPTIONS.map((s) => (
+            <SelectItem key={s} value={s}>
+              {s}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={isQdii === undefined ? "all" : String(isQdii)}
+        onValueChange={(v) => {
+          setIsQdii(v === "all" ? undefined : v === "true");
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="QDII" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部</SelectItem>
+          <SelectItem value="true">是 QDII</SelectItem>
+          <SelectItem value="false">非 QDII</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select
+        value={dimFilters.asset_class ?? "all"}
+        onValueChange={(v) => {
+          // 切换大类：不再适用新大类的维度值联动清空（lib/dimensions 纯函数）
+          setDimFilters((prev) => clearInapplicableDims(prev, v === "all" ? undefined : v, dictItems));
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={selectWidth}>
+          <SelectValue placeholder="全部大类" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部大类</SelectItem>
+          {assetClasses.map((item) => (
+            <SelectItem key={item.code} value={item.code}>
+              {item.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {RULE_DIMENSIONS.map((dimension) => (
+        <Select
+          key={dimension}
+          value={dimFilters[dimension] ?? "all"}
+          onValueChange={(v) => {
+            setDimFilters({ ...dimFilters, [dimension]: v === "all" ? undefined : v });
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className={selectWidth}>
+            <SelectValue placeholder={`全部${DIMENSION_LABELS[dimension]}`} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{`全部${DIMENSION_LABELS[dimension]}`}</SelectItem>
+            {getDimensionOptions(dictItems, dimension, dimFilters.asset_class).map((item) => (
+              <SelectItem key={item.code} value={item.code}>
+                {item.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ))}
+      {hasNonDefaultFilter && (
+        <Button variant="ghost" size="sm" className="h-9" onClick={resetFilters}>
+          重置
+        </Button>
+      )}
+    </>
+  );
 
   if (isLoading) {
     return (
@@ -144,103 +449,147 @@ export default function ProductsContent() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>代码</TableHead>
-                <TableHead>市场</TableHead>
-                <TableHead>名称</TableHead>
-                <TableHead>类型</TableHead>
-                <TableHead>确认天数</TableHead>
-                <TableHead>估值滞后</TableHead>
-                <TableHead>QDII</TableHead>
-                <TableHead>数据源</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {products.map((product) => (
-                <TableRow key={`${product.code}-${product.market || "null"}`}>
-                  <TableCell className="font-medium">{product.code}</TableCell>
-                  <TableCell>{product.market || "-"}</TableCell>
-                  <TableCell>{product.name}</TableCell>
-                  <TableCell>{product.product_type}</TableCell>
-                  <TableCell>{product.confirm_days}</TableCell>
-                  {/* issue #228：快照估值取价日，0 显示 T，N 显示 T-N */}
-                  <TableCell>
-                    {(product.nav_lag_days ?? 0) > 0 ? `T-${product.nav_lag_days}` : "T"}
-                  </TableCell>
-                  <TableCell>{product.is_qdii ? "是" : "否"}</TableCell>
-                  <TableCell>
-                    {product.data_source_status === "success" ? (
-                      <CheckCircle className="h-4 w-4 text-success" />
-                    ) : product.data_source_status === "failed" ? (
-                      <XCircle className="h-4 w-4 text-destructive" />
-                    ) : (
-                      <span className="text-warning">待验证</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleEdit(product)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDelete(product.code, product.market)}
-                      disabled={deleteProduct.isPending}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                    {product.market && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSyncPrice(product)}
-                          disabled={syncPrice.isPending}
-                        >
-                          {syncPrice.isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSyncHistory(product)}
-                          disabled={syncHistory.isPending}
-                        >
-                          {syncHistory.isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <TrendingUp className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleViewPrices(product)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {products.length === 0 && (
-            <div className="text-center text-muted-foreground py-8">
-              暂无产品
+          {/* 筛选栏（规范 §9）；移动端为折叠面板 + 激活计数 Badge */}
+          {variant === "mobile" ? (
+            <div className="mb-3 space-y-2">
+              <Button variant="outline" size="sm" className="h-9" onClick={() => setFilterOpen((v) => !v)}>
+                <Filter className="mr-2 h-4 w-4" />
+                筛选
+                {activeFilterCount > 0 && (
+                  <Badge variant="default" className="ml-2">
+                    {activeFilterCount}
+                  </Badge>
+                )}
+              </Button>
+              {filterOpen && <div className="grid grid-cols-1 gap-2">{filterControls}</div>}
             </div>
+          ) : (
+            <div className="mb-3 flex flex-wrap items-center gap-2">{filterControls}</div>
           )}
+          {/* 规范 §14：筛选/翻页局部刷新保留旧数据，表格半透明 + 右上角小 spinner；
+              首次加载（isLoading）走上方区块级 spinner，此处不重复遮罩 */}
+          <div className="relative">
+            {isFetching && !isLoading && (
+              <Loader2 className="absolute right-2 top-2 z-10 h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+            <Table className={cn(isFetching && !isLoading && "opacity-50")}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>代码</TableHead>
+                  <TableHead>市场</TableHead>
+                  <TableHead>名称</TableHead>
+                  <TableHead>类型</TableHead>
+                  <TableHead>确认天数</TableHead>
+                  <TableHead>估值滞后</TableHead>
+                  <TableHead>QDII</TableHead>
+                  <TableHead>数据源</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {products.map((product) => (
+                  <TableRow key={`${product.code}-${product.market || "null"}`}>
+                    <TableCell className="font-medium">{product.code}</TableCell>
+                    <TableCell>{product.market || "-"}</TableCell>
+                    <TableCell>{product.name}</TableCell>
+                    <TableCell>{product.product_type}</TableCell>
+                    <TableCell>{product.confirm_days}</TableCell>
+                    {/* issue #228：快照估值取价日，0 显示 T，N 显示 T-N */}
+                    <TableCell>
+                      {(product.nav_lag_days ?? 0) > 0 ? `T-${product.nav_lag_days}` : "T"}
+                    </TableCell>
+                    <TableCell>{product.is_qdii ? "是" : "否"}</TableCell>
+                    <TableCell>
+                      {product.data_source_status === "success" ? (
+                        <CheckCircle className="h-4 w-4 text-success" />
+                      ) : product.data_source_status === "failed" ? (
+                        <XCircle className="h-4 w-4 text-destructive" />
+                      ) : (
+                        <span className="text-warning">待验证</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEdit(product)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(product.code, product.market)}
+                        disabled={deleteProduct.isPending}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                      {product.market && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSyncPrice(product)}
+                            disabled={syncPrice.isPending}
+                          >
+                            {syncPrice.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSyncHistory(product)}
+                            disabled={syncHistory.isPending}
+                          >
+                            {syncHistory.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <TrendingUp className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleViewPrices(product)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          {/* 空态二分：无筛选 = 暂无产品；有筛选 = 引导重置（规范 §8 变体②） */}
+          {products.length === 0 &&
+            (hasNonDefaultFilter ? (
+              <EmptyState
+                message="无符合筛选条件的记录"
+                action={
+                  <Button variant="ghost" size="sm" onClick={resetFilters}>
+                    重置筛选
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState message="暂无产品" />
+            ))}
+          <PaginationBar
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            variant={variant}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
         </CardContent>
       </Card>
 
