@@ -196,6 +196,102 @@ class TestProductKeywordFilter:
         assert data["items"][0]["code"] == "510300.OF"
 
 
+class TestProductListAttrFilter:
+    """产品列表属性等值筛选（issue #238）：confirm_days / nav_lag_days / is_qdii。
+
+    断言风格：谓词全称（结果集每项都满足等值）+ 自建 code 必在/必不在结果集，
+    不对种子无关的绝对 total 下断言（种子见 tests/seed_base.py）。
+    0 / False 为合法筛选值，覆盖「if param: 假值陷阱」回归。
+    """
+
+    def test_confirm_days_filter(self, client, admin_headers, test_db):
+        """?confirm_days=2 → 结果每项 confirm_days==2 且自建 code 在列"""
+        create_product(test_db, code="AF001.OF", market="CN_OTC", confirm_days=2)
+        create_product(test_db, code="AF002.OF", market="CN_OTC", confirm_days=1)
+        resp = client.get("/api/products?confirm_days=2", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) > 0
+        assert all(i["confirm_days"] == 2 for i in items)
+        codes = [i["code"] for i in items]
+        assert "AF001.OF" in codes
+        assert "AF002.OF" not in codes
+
+    def test_confirm_days_zero_matches_virtual(self, client, admin_headers):
+        """?confirm_days=0 → 含种子 CASH/IN_TRANSIT_BUY/IN_TRANSIT_SELL/510300.SH（全为 0），
+        验证 0 值不被 `if param:` 假值陷阱跳过"""
+        resp = client.get("/api/products?confirm_days=0", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert all(i["confirm_days"] == 0 for i in items)
+        codes = [i["code"] for i in items]
+        for seed_code in ("CASH", "IN_TRANSIT_BUY", "IN_TRANSIT_SELL", "510300.SH"):
+            assert seed_code in codes
+
+    def test_nav_lag_days_filter(self, client, admin_headers, test_db):
+        """?nav_lag_days=1 → 谓词成立且自建 code 在列；?nav_lag_days=0 不含该 code"""
+        create_product(test_db, code="AF003.OF", market="CN_OTC", nav_lag_days=1)
+        resp = client.get("/api/products?nav_lag_days=1", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) > 0
+        assert all(i["nav_lag_days"] == 1 for i in items)
+        assert "AF003.OF" in [i["code"] for i in items]
+
+        resp0 = client.get("/api/products?nav_lag_days=0", headers=admin_headers)
+        assert resp0.status_code == 200
+        items0 = resp0.json()["items"]
+        assert all(i["nav_lag_days"] == 0 for i in items0)
+        assert "AF003.OF" not in [i["code"] for i in items0]
+
+    def test_is_qdii_true_false(self, client, admin_headers, test_db):
+        """?is_qdii=true 含自建 QDII；?is_qdii=false 不含（false 分支必测，防 `if is_qdii:` 回归）"""
+        create_product(test_db, code="AF004.OF", market="CN_OTC", is_qdii=True, confirm_days=2)
+        resp_true = client.get("/api/products?is_qdii=true", headers=admin_headers)
+        assert resp_true.status_code == 200
+        items_true = resp_true.json()["items"]
+        assert all(i["is_qdii"] is True for i in items_true)
+        assert "AF004.OF" in [i["code"] for i in items_true]
+
+        resp_false = client.get("/api/products?is_qdii=false", headers=admin_headers)
+        assert resp_false.status_code == 200
+        items_false = resp_false.json()["items"]
+        assert all(i["is_qdii"] is False for i in items_false)
+        assert "AF004.OF" not in [i["code"] for i in items_false]
+
+    def test_filters_and_combined(self, client, admin_headers, test_db):
+        """三参数与既有参数 AND 叠加（仿 test_keyword_and_other_filters 风格）"""
+        create_product(test_db, code="AF005.OF", market="CN_OTC",
+                       product_type="OEF", confirm_days=1, is_qdii=False)
+        create_product(test_db, code="AF006.OF", market="CN_OTC",
+                       product_type="OEF", confirm_days=1, is_qdii=True)
+        resp = client.get(
+            "/api/products?confirm_days=1&is_qdii=false&product_type=OEF",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert all(
+            i["confirm_days"] == 1 and i["is_qdii"] is False and i["product_type"] == "OEF"
+            for i in items
+        )
+        codes = [i["code"] for i in items]
+        assert "AF005.OF" in codes
+        assert "AF006.OF" not in codes
+
+    def test_backward_compat_no_params(self, client, admin_headers, test_db):
+        """不传三参数时不过滤：结果集混合多种 confirm_days / is_qdii 取值"""
+        create_product(test_db, code="AF007.OF", market="CN_OTC", confirm_days=2, is_qdii=True)
+        resp = client.get("/api/products?page_size=100", headers=admin_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        codes = [i["code"] for i in items]
+        assert "AF007.OF" in codes  # is_qdii=True 未被默认排除
+        assert "CASH" in codes  # confirm_days=0 未被默认排除
+        assert {i["is_qdii"] for i in items} == {True, False}
+        assert len({i["confirm_days"] for i in items}) > 1
+
+
 class TestProductListOrder:
     """产品 list 确定性排序（issue #165）：created_at DESC + code ASC"""
 
