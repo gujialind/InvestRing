@@ -187,6 +187,7 @@ class TestPortfolioDetailDerivedFields:
             test_db, "P_DER", "INV_DER", sub_type="redeem", amount=3000.0,
             apply_date=date(2025, 1, 7), confirm_date=date(2025, 1, 7), status="confirmed",
         )
+        # 边界：confirm_date == 最新快照日（01-07）的记录须计入净投入（防 <= 误改为 <）；
         # pending 申赎不计入净投入
         create_subscription(
             test_db, "P_DER", "INV_DER", sub_type="subscribe", amount=99999.0,
@@ -208,6 +209,97 @@ class TestPortfolioDetailDerivedFields:
         data = resp.json()
         assert data["total_value"] is None
         assert data["total_profit"] is None
+
+    def test_future_subscribe_excluded_from_profit(self, client, admin_headers, test_db):
+        """#250：confirm_date > 最新快照日的 confirmed 申购不计入净投入"""
+        create_portfolio(test_db, code="P_DER_FS", status="active")
+        create_investor(test_db, code="INV_DER_FS", name="截断投资人")
+        create_value_snapshot(test_db, "P_DER_FS", date(2025, 1, 7), 11000.0, 10000.0, 1.1)
+        create_subscription(
+            test_db, "P_DER_FS", "INV_DER_FS", sub_type="subscribe", amount=10000.0,
+            apply_date=date(2025, 1, 6), confirm_date=date(2025, 1, 7), status="confirmed",
+        )
+        # 确认日晚于最新快照日：窗口期内不计入净投入
+        create_subscription(
+            test_db, "P_DER_FS", "INV_DER_FS", sub_type="subscribe", amount=5000.0,
+            apply_date=date(2025, 1, 7), confirm_date=date(2025, 1, 8), status="confirmed",
+        )
+
+        resp = client.get("/api/portfolios/P_DER_FS", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_value"] == 11000.0
+        # 11000 − 10000 = 1000（未修复时为 11000 − 15000 = −4000，多计亏损）
+        assert data["total_profit"] == 1000.0
+
+    def test_future_redeem_excluded_from_profit(self, client, admin_headers, test_db):
+        """#250：confirm_date > 最新快照日的 confirmed 赎回不计入净投入（收益不虚增）"""
+        create_portfolio(test_db, code="P_DER_FR", status="active")
+        create_investor(test_db, code="INV_DER_FR", name="截断投资人2")
+        create_value_snapshot(test_db, "P_DER_FR", date(2025, 1, 7), 11000.0, 10000.0, 1.1)
+        create_subscription(
+            test_db, "P_DER_FR", "INV_DER_FR", sub_type="subscribe", amount=10000.0,
+            apply_date=date(2025, 1, 6), confirm_date=date(2025, 1, 7), status="confirmed",
+        )
+        create_subscription(
+            test_db, "P_DER_FR", "INV_DER_FR", sub_type="redeem", amount=3000.0,
+            apply_date=date(2025, 1, 7), confirm_date=date(2025, 1, 8), status="confirmed",
+        )
+
+        resp = client.get("/api/portfolios/P_DER_FR", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        # 11000 − 10000 = 1000（未修复时为 11000 − 7000 = 4000，收益虚增）
+        assert data["total_profit"] == 1000.0
+
+    def test_profit_normalizes_after_snapshot_generated(self, client, admin_headers, test_db):
+        """#250：确认日快照生成后，该批申赎计入净投入，数值恢复正常"""
+        create_portfolio(test_db, code="P_DER_FN", status="active")
+        create_investor(test_db, code="INV_DER_FN", name="截断投资人3")
+        create_value_snapshot(test_db, "P_DER_FN", date(2025, 1, 7), 11000.0, 10000.0, 1.1)
+        create_subscription(
+            test_db, "P_DER_FN", "INV_DER_FN", sub_type="subscribe", amount=10000.0,
+            apply_date=date(2025, 1, 6), confirm_date=date(2025, 1, 7), status="confirmed",
+        )
+        create_subscription(
+            test_db, "P_DER_FN", "INV_DER_FN", sub_type="subscribe", amount=5000.0,
+            apply_date=date(2025, 1, 7), confirm_date=date(2025, 1, 8), status="confirmed",
+        )
+        # 补生成 01-08 快照，两笔申购均应计入
+        create_value_snapshot(test_db, "P_DER_FN", date(2025, 1, 8), 16000.0, 15000.0, 1.0667)
+
+        resp = client.get("/api/portfolios/P_DER_FN", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_value"] == 16000.0
+        # 16000 − (10000 + 5000) = 1000
+        assert data["total_profit"] == 1000.0
+
+    def test_redeem_profit_normalizes_after_snapshot_generated(self, client, admin_headers, test_db):
+        """#250：确认日晚于快照日的赎回，快照补齐后计入净投入（赎回方向对称）"""
+        create_portfolio(test_db, code="P_DER_FNR", status="active")
+        create_investor(test_db, code="INV_DER_FNR", name="截断投资人4")
+        create_value_snapshot(test_db, "P_DER_FNR", date(2025, 1, 7), 11000.0, 10000.0, 1.1)
+        create_subscription(
+            test_db, "P_DER_FNR", "INV_DER_FNR", sub_type="subscribe", amount=10000.0,
+            apply_date=date(2025, 1, 6), confirm_date=date(2025, 1, 7), status="confirmed",
+        )
+        create_subscription(
+            test_db, "P_DER_FNR", "INV_DER_FNR", sub_type="redeem", amount=3000.0,
+            apply_date=date(2025, 1, 7), confirm_date=date(2025, 1, 8), status="confirmed",
+        )
+        # 窗口期：赎回未计入，收益不虚增
+        resp = client.get("/api/portfolios/P_DER_FNR", headers=admin_headers)
+        assert resp.json()["total_profit"] == 1000.0
+        # 补生成 01-08 快照后赎回计入：市值同步降至 8000
+        create_value_snapshot(test_db, "P_DER_FNR", date(2025, 1, 8), 8000.0, 7000.0, 1.1429)
+
+        resp = client.get("/api/portfolios/P_DER_FNR", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_value"] == 8000.0
+        # 8000 − (10000 − 3000) = 1000
+        assert data["total_profit"] == 1000.0
 
 
 class TestPortfolioPerformanceNewPeriods:
