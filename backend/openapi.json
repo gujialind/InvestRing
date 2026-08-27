@@ -1115,6 +1115,54 @@
             }
           },
           {
+            "name": "confirm_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Confirm Days"
+            }
+          },
+          {
+            "name": "nav_lag_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Nav Lag Days"
+            }
+          },
+          {
+            "name": "is_qdii",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Is Qdii"
+            }
+          },
+          {
             "name": "asset_class_code",
             "in": "query",
             "required": false,

@@ -8,7 +8,7 @@ export default function ProductsPage() {
   return (
     <MainLayout>
       <AdminGuard>
-        <ProductsContent />
+        <ProductsContent variant="desktop" />
       </AdminGuard>
     </MainLayout>
   );

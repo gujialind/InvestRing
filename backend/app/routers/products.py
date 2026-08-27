@@ -18,6 +18,10 @@ def get_products(
     keyword: Optional[str] = None,
     data_source: Optional[str] = None,
     data_source_status: Optional[str] = None,
+    # 属性等值筛选（issue #238）：0/False 是合法值，必须判 is not None
+    confirm_days: Optional[int] = None,
+    nav_lag_days: Optional[int] = None,
+    is_qdii: Optional[bool] = None,
     # 维度筛选（issue #128）
     asset_class_code: Optional[str] = None,
     region_code: Optional[str] = None,
@@ -45,6 +49,12 @@ def get_products(
         query = query.filter(Product.data_source == data_source)
     if data_source_status:
         query = query.filter(Product.data_source_status == data_source_status)
+    if confirm_days is not None:
+        query = query.filter(Product.confirm_days == confirm_days)
+    if nav_lag_days is not None:
+        query = query.filter(Product.nav_lag_days == nav_lag_days)
+    if is_qdii is not None:
+        query = query.filter(Product.is_qdii == is_qdii)
     if asset_class_code:
         query = query.filter(Product.asset_class_code == asset_class_code)
     if region_code:

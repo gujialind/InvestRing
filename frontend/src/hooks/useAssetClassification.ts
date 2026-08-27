@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   assetClassificationApi,
@@ -14,14 +15,30 @@ const AC_QUERY_KEY = "asset-classifications";
 /**
  * 维度字典 Hook（issue #128）：字典近乎静态，staleTime 拉长到 5 分钟。
  * 传 dimension 按维度过滤（饼图/分区只需 "asset_class"），缺省取全量。
+ * #214：加载失败经 useEffect 监听 isError 弹全局 toast——失败时调用方拿到的
+ * dictItems 为空数组，维度下拉会只剩「全部X」，必须给用户可见反馈而非静默残废。
  */
 export function useAssetClassifications(dimension?: string) {
-  return useQuery({
+  const addToast = useUIStore((state) => state.addToast);
+  const query = useQuery({
     queryKey: [AC_QUERY_KEY, dimension ?? "all"],
     queryFn: () =>
       assetClassificationApi.list(dimension ? { dimension } : undefined),
     staleTime: 5 * 60 * 1000,
   });
+
+  const { isError, error } = query;
+  useEffect(() => {
+    if (isError) {
+      addToast({
+        type: "error",
+        title: "维度字典加载失败",
+        message: getErrorMessage(error, "维度筛选暂不可用，请稍后重试"),
+      });
+    }
+  }, [isError, error, addToast]);
+
+  return query;
 }
 
 /** 单条详情 Hook（管理页编辑回填用，issue #135） */
