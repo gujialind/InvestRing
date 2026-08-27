@@ -331,11 +331,15 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 * **修复类 issue 要点**：现象（操作 → 报错 → 期望）→ 根因 → 影响面 → 修复方向 → 验收断言。
 
-* **需求类 issue 要点**：背景/目标 → 现状与问题 → 方案推演（表格对比）→ 选定方案 → 待实现改动（文件级）→ 验收断言。
+* **需求类 issue 两阶段**：建 issue 时只记录问题（背景/目标 → 现状与问题 → 期望效果 → 验收断言）；评估完成后把结论**回填正文**「评估结论」段（方案推演表格 → 选定方案 → 待实现改动文件级清单），不散落在评论里。
 
 * **验收断言必须可勾选**（"执行 X → 得到 Y"）：它是给 AI 的验收标准，也是后续测试用例的来源。
 
-* 完整模板见 `.github/ISSUE_TEMPLATE/`（bug\_report / feature\_request）。
+* **标题前缀与 Conventional Commits 对齐**：`[bug]` / `[feat]` / `[chore]`（含文档/运维类）。
+
+* **标签只留类型一维**：`bug` / `enhancement` / `chore` / `documentation`（前三由模板自动打）；不加优先级/模块/生命周期维度——单人项目优先级即排期，模块可 grep，open/closed 即生命周期。
+
+* 完整模板见 `.github/ISSUE_TEMPLATE/`（bug\_report / feature\_request / chore）。
 
 ### 8.3 PR 约定
 
