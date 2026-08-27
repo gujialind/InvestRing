@@ -1,6 +1,6 @@
 # InvestRing 开发指南 (AGENTS.md)
 
-> 为 AI 编程助手提供项目级快速参考。本文只记录**读代码发现不了**的内容：设计决策、业务不变量、组织约定与易踩坑；路由、枚举、错误码、表结构、版本号、确认天数等以源码为准（可发现性过滤，见 §8.5）。
+> 为 AI 编程助手提供项目级快速参考。本文只记录**读代码发现不了**的内容：设计决策、业务不变量、组织约定与易踩坑；路由、枚举、错误码、表结构、版本号等以源码为准。
 
 ***
 
@@ -319,35 +319,27 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 | ------ | ------------- | ------------------------------------------------------------------------------- |
 | `main` | 唯一长期分支（生产交付线） | 受 ruleset 保护：禁删除/禁强推 + require PR + required check `CI OK`；合入即触发 CI → CD 自动部署上线 |
 
-* **一切改动经 `feature/` → PR → `main`**：从最新 `origin/main` 拉短命分支（`feature/<issue号>-<简述>`、`hotfix/<issue号>-<简述>`；AI 代理可用 `trae/xxx`、`codex/xxx` 前缀），PR **squash 合并**，合并后由仓库级 `delete_branch_on_merge` 自动删除；`main` 永不作为 PR head、永不带 `--delete-branch`。
+* **一切改动经 `feature/` → PR → `main`**：从最新 `origin/main` 不从本地旧 ref 重建。拉短命分支（`feature/<issue号>-<简述>`、`hotfix/<issue号>-<简述>`；AI 代理可用 `trae/xxx`、`codex/xxx` 前缀），
 
-* **合 `main` 前 CI 必须全绿**（全量门禁：SQLite pytest + MySQL 8.4 方言/迁移链 + ir-cli 契约 + 前端 lint/build + E2E + Docker 构建冒烟），由 required status check `CI OK` 强制。
 
-* **三条硬规则已由 ruleset/workflow 机械强制，非纯约定**：① `main` 禁删除/禁强推（ruleset `deletion` + `non_fast_forward`）；② 手动部署（`deploy.yml` `workflow_dispatch`）只接受已有镜像 tag（回滚/重部署），留空即 `exit 1`，上线新代码唯一入口是 push `main` 走 CI；③ 任何分支从最新 `origin/main` 拉出，不从本地旧 ref 重建。
+* 手动部署（`deploy.yml` `workflow_dispatch`）只接受已有镜像 tag（回滚/重部署）。
 
 ### 8.2 Issue 约定
 
 * **新功能 / 大改 / 涉及业务规则或 DB 迁移**：必须先提 issue 再动手；修 bug 若影响面大或需留痕，同样先提 issue。
 
-* **修复类 issue 要点**：现象（操作 → 报错 → 期望）→ 根因 → 影响面 → 修复方向 → 验收断言。
-
-* **需求类 issue 两阶段**：建 issue 时只记录问题（背景/目标 → 现状与问题 → 期望效果 → 验收断言）；评估完成后把结论**回填正文**「评估结论」段（方案推演表格 → 选定方案 → 待实现改动文件级清单），不散落在评论里。
-
+* 按模板提交 `.github/ISSUE_TEMPLATE/`（bug\_report / feature\_request / chore）。
+* 
 * **验收断言必须可勾选**（"执行 X → 得到 Y"）：它是给 AI 的验收标准，也是后续测试用例的来源。
 
 * **标题前缀与 Conventional Commits 对齐**：`[bug]` / `[feat]` / `[chore]`（含文档/运维类）。
 
-* **标签只留类型一维**：`bug` / `enhancement` / `chore` / `documentation`（前三由模板自动打）；不加优先级/模块/生命周期维度——单人项目优先级即排期，模块可 grep，open/closed 即生命周期。
-
-* 完整模板见 `.github/ISSUE_TEMPLATE/`（bug\_report / feature\_request / chore）。
 
 ### 8.3 PR 约定
 
 * PR 描述必含：改动内容 / 关联 issue（`fixes #N` 自动关闭）/ 测试验证 / 部署影响（DB 迁移、新依赖、回滚要点）。
 
 * 模板见 `.github/PULL_REQUEST_TEMPLATE.md`。
-
-* **合入 `main` 前 CI 必须全绿**；上线后冒烟：health check + `ir portfolio list` + 关键数据抽查。
 
 ### 8.4 提交信息
 
@@ -357,8 +349,6 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 1. **改完必须验证**：本地测试绿 + 能说明改动影响；验证不了的改动不提交。
 2. **排查/审查中发现的问题只提 issue，不直接改代码**，由任务所有者决定修复方式。
-3. **动手前从最新 `origin/main` 新建 `feature/` 分支**：AI 不直接 push `main`（受 ruleset 强制），一切改动经 feature 分支 → PR → main。
-4. **不得引入未要求的依赖或表结构改动**；涉及 DB 变更必须同步提供 Alembic 迁移脚本。
-5. **仓库文档（README/AGENTS/runbook）随代码同一次提交更新**；设计决策与方案记录进 issue 讨论。
-6. 当你执行一项任务发现有任何执行细节不明确时，你必须向我提问，而不是自做主张，在我回答之后仍有不明确的行细节时，你需要向我追问，直到了解了所有细节。
-7. **AGENTS.md 只写读代码发现不了的内容**（可发现性过滤）：agent 读代码/grep 能拿到的信息（路由、枚举、错误码、表结构、版本号）不写入，只留设计决策、组织约定与易踩坑；新增内容前先自问「这条读源码能拿到吗」。
+3. **不得引入未要求的依赖或表结构改动**；涉及 DB 变更必须同步提供 Alembic 迁移脚本。
+4. **仓库文档（README/AGENTS/runbook）随代码同一次提交更新**；设计决策与方案记录进 issue 讨论。
+5. 当你执行一项任务发现有任何执行细节不明确时，你必须向我提问，而不是自做主张，在我回答之后仍有不明确的行细节时，你需要向我追问，直到了解了所有细节。
