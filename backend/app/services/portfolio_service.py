@@ -154,7 +154,8 @@ def _derive_portfolio_totals(db: Session, code: str) -> dict:
     """组合概要派生字段（issue #99）：total_value / total_profit。
 
     total_profit = 最新快照 total_value − 净投入；净投入 = Σ confirmed 申购金额
-    − Σ confirmed 赎回金额。无快照时两者均为 None。
+    − Σ confirmed 赎回金额，且仅计 confirm_date <= 最新快照日的记录（#250，
+    与 total_value 的快照时点口径对齐）。无快照时两者均为 None。
     """
     latest = (
         db.query(PortfolioValueSnapshot)
@@ -170,6 +171,7 @@ def _derive_portfolio_totals(db: Session, code: str) -> dict:
         .filter(
             Subscription.portfolio_code == code,
             Subscription.status == "confirmed",
+            Subscription.confirm_date <= latest.snapshot_date,
         )
         .all()
     )
