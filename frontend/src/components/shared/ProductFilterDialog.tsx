@@ -31,6 +31,7 @@ import {
   clearInapplicableDims,
   getDimensionOptions,
 } from "@/lib/dimensions";
+import type { DimensionFilterKey, DimensionFilters } from "@/lib/dimensions";
 import { cn, formatMarketName } from "@/lib/utils";
 
 /** 产品筛选选中项：code + market（market 为空串对应现金类等无市场产品） */
@@ -90,7 +91,7 @@ export default function ProductFilterDialog({
   }, [keywordInput]);
 
   // 条件行：asset_class + region/style/size/segment 四维 + product_type + market
-  const [dimFilters, setDimFilters] = useState<Record<string, string | undefined>>({});
+  const [dimFilters, setDimFilters] = useState<DimensionFilters>({});
   const [productType, setProductType] = useState<string | undefined>(undefined);
   const [market, setMarket] = useState<string | undefined>(undefined);
 
@@ -124,9 +125,10 @@ export default function ProductFilterDialog({
   const { data: dictData } = useAssetClassifications();
   const dictItems = useMemo(() => dictData?.items ?? [], [dictData?.items]);
   const nameByCode = useMemo(() => new Map(dictItems.map((i) => [i.code, i.name])), [dictItems]);
-  const assetClasses = dictItems.filter((i) => i.dimension === "asset_class" && i.is_active);
+  // 启用大类列表与维度选项同一入口（asset_class 维度不参与收窄谓词）
+  const assetClasses = getDimensionOptions(dictItems, "asset_class");
   // 维度选项收窄与大类联动清空走 lib/dimensions 纯函数（#238 抽取，与产品管理页共用）
-  const dimensionOptions = (dimension: string) =>
+  const dimensionOptions = (dimension: DimensionFilterKey) =>
     getDimensionOptions(dictItems, dimension, dimFilters.asset_class);
 
   const handleAssetClassChange = (assetClass: string | undefined) => {

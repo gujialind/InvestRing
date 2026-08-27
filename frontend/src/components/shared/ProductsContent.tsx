@@ -43,6 +43,7 @@ import {
   clearInapplicableDims,
   getDimensionOptions,
 } from "@/lib/dimensions";
+import type { DimensionFilters } from "@/lib/dimensions";
 import type { ProductListParams } from "@/lib/api";
 import {
   useProductList,
@@ -105,7 +106,7 @@ export default function ProductsContent({ variant = "desktop" }: ProductsContent
   const [navLagDays, setNavLagDays] = useState<number | undefined>(undefined);
   const [dataSource, setDataSource] = useState<string | undefined>(undefined);
   const [isQdii, setIsQdii] = useState<boolean | undefined>(undefined);
-  const [dimFilters, setDimFilters] = useState<Record<string, string | undefined>>({});
+  const [dimFilters, setDimFilters] = useState<DimensionFilters>({});
   const [filterOpen, setFilterOpen] = useState(false);
 
   const listParams: ProductListParams = {
@@ -124,20 +125,33 @@ export default function ProductsContent({ variant = "desktop" }: ProductsContent
     size_code: dimFilters.size,
     segment_code: dimFilters.segment,
   };
-  const { data, isLoading, isFetching } = useProductList(listParams);
+  const { data, isLoading, isFetching, isError } = useProductList(listParams);
 
   const deleteProduct = useDeleteProduct();
 
   const products = data?.items || [];
   const total = data?.total ?? 0;
 
-  // 维度字典：五维筛选下拉选项（启用值 + 按所选大类收窄）
+  // 页码越界钳制（评审 #244）：删除/筛选失效后 total 收缩致 page 越界时回退末页，
+  // 避免「末页删空即死胡同」；只在 data 到达后判（placeholderData 期间 total 为旧值，不误钳）
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  useEffect(() => {
+    if (data && page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [data, page, totalPages]);
+
+  // 维度字典：五维筛选下拉选项（启用值 + 按所选大类收窄；失败 toast 由 hook 弹出）
   const { data: dictData } = useAssetClassifications();
   const dictItems = useMemo(() => dictData?.items ?? [], [dictData?.items]);
-  const assetClasses = dictItems.filter((i) => i.dimension === "asset_class" && i.is_active);
+  // 启用大类列表与维度选项同一入口（asset_class 维度不参与收窄谓词）
+  const assetClasses = getDimensionOptions(dictItems, "asset_class");
 
-  // 非默认筛选判定：驱动「重置」按钮显隐、空态文案二分与移动端激活计数；
-  // 关键字看 keywordInput（防抖窗口内输入已生效于用户感知）
+  // 非默认筛选判定：驱动「重置」按钮显隐、空态文案二分与移动端激活计数。
+  // hasKeyword 是 keyword ∨ keywordInput 的并集，两边缺一不可：
+  // keywordInput 覆盖「已输入但防抖未生效」窗口（用户感知已有筛选，重置按钮须立即可见）；
+  // keyword 覆盖「输入刚清空但防抖未追平」窗口（列表仍按旧关键字过滤，不能误判成无筛选）。
+  // 重构时若删掉任一半边，对应窗口期的重置按钮显隐与空态文案会被误判。
   const hasKeyword = keyword !== "" || keywordInput.trim() !== "";
   const hasNonDefaultFilter =
     hasKeyword ||
@@ -467,8 +481,9 @@ export default function ProductsContent({ variant = "desktop" }: ProductsContent
             <div className="mb-3 flex flex-wrap items-center gap-2">{filterControls}</div>
           )}
           {/* 规范 §14：筛选/翻页局部刷新保留旧数据，表格半透明 + 右上角小 spinner；
-              首次加载（isLoading）走上方区块级 spinner，此处不重复遮罩 */}
-          <div className="relative">
+              首次加载（isLoading）走上方区块级 spinner，此处不重复遮罩；
+              移动端窄屏表格横向滚动（同 SnapshotsContent） */}
+          <div className={cn("relative", variant === "mobile" && "overflow-x-auto")}>
             {isFetching && !isLoading && (
               <Loader2 className="absolute right-2 top-2 z-10 h-4 w-4 animate-spin text-muted-foreground" />
             )}
@@ -565,9 +580,12 @@ export default function ProductsContent({ variant = "desktop" }: ProductsContent
               </TableBody>
             </Table>
           </div>
-          {/* 空态二分：无筛选 = 暂无产品；有筛选 = 引导重置（规范 §8 变体②） */}
+          {/* 空态三分：请求失败 ≠ 空数据（评审 #244；toast 已由 hook 弹出，此处内联区分）；
+              无筛选为空 = 暂无产品；有筛选为空 = 引导重置（规范 §8 变体②） */}
           {products.length === 0 &&
-            (hasNonDefaultFilter ? (
+            (isError ? (
+              <EmptyState message="产品列表加载失败" description="请检查网络后重试" />
+            ) : hasNonDefaultFilter ? (
               <EmptyState
                 message="无符合筛选条件的记录"
                 action={

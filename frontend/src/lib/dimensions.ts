@@ -11,6 +11,12 @@ export const RULE_DIMENSIONS = ["region", "style", "size", "segment"] as const;
 
 export type RuleDimension = (typeof RULE_DIMENSIONS)[number];
 
+/** 维度筛选键：asset_class + 可规则化四维（产品五维筛选的全集） */
+export type DimensionFilterKey = "asset_class" | RuleDimension;
+
+/** 维度筛选集：缺键 / 显式 undefined 均为「未筛选」（undefined 供联动清空写入） */
+export type DimensionFilters = Partial<Record<DimensionFilterKey, string>>;
+
 /** 二级分组维度（= 可规则化四维；内置默认按大类固定，组合级覆盖见 #144） */
 export type SubDimension = RuleDimension;
 
@@ -61,10 +67,13 @@ export function resolveSubDim(
 /**
  * 维度筛选下拉选项（issue #238 抽取，产品筛选弹窗与产品管理页共用）：
  * 启用值；选了 asset_class 则按 applicable_asset_classes 收窄。
+ * dimension 含 "asset_class"：asset_class 维度值的 applicable_asset_classes 恒为空数组，
+ * 但不参与收窄谓词（selectedAssetClass 未传时不判该项），故
+ * getDimensionOptions(dictItems, "asset_class") 即「启用大类列表」的统一入口。
  */
 export function getDimensionOptions(
   dictItems: AssetClassificationItem[],
-  dimension: string,
+  dimension: DimensionFilterKey,
   selectedAssetClass?: string
 ): AssetClassificationItem[] {
   return dictItems.filter(
@@ -80,11 +89,11 @@ export function getDimensionOptions(
  * 不再适用新大类的维度值清空（避免查不出数据的隐形条件）；未选大类时仅更新 asset_class。
  */
 export function clearInapplicableDims(
-  dimFilters: Record<string, string | undefined>,
+  dimFilters: DimensionFilters,
   newAssetClass: string | undefined,
   dictItems: AssetClassificationItem[]
-): Record<string, string | undefined> {
-  const next: Record<string, string | undefined> = { ...dimFilters, asset_class: newAssetClass };
+): DimensionFilters {
+  const next: DimensionFilters = { ...dimFilters, asset_class: newAssetClass };
   if (newAssetClass) {
     for (const dimension of RULE_DIMENSIONS) {
       const current = next[dimension];

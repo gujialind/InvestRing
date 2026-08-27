@@ -1,6 +1,7 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { productApi, getErrorMessage } from "@/lib/api";
 import type { ProductListParams } from "@/lib/api";
 import { ProductCreate, ProductUpdate } from "@/types/product";
@@ -9,14 +10,32 @@ import { useUIStore } from "@/stores/uiStore";
 const PRODUCT_QUERY_KEY = "products";
 
 // 产品列表 Hook（参数全集见 ProductListParams，queryKey 带 params 自动按条件刷新）
+// placeholderData 保留旧数据：筛选/翻页局部刷新不闪烁（规范 §14，同 useTradeList）
 // options.enabled 供下拉组件懒加载（#165）：默认 true，不影响页面级调用方
+// #214：加载失败经 useEffect 监听 isError 弹全局 toast（v5 移除 useQuery onError 的官方等价写法），
+// 调用方须同时读 isError 区分「请求失败」与「真的为空」，不得把失败渲染成空态
 export function useProductList(params?: ProductListParams, options?: { enabled?: boolean }) {
-  return useQuery({
+  const addToast = useUIStore((state) => state.addToast);
+  const query = useQuery({
     queryKey: [PRODUCT_QUERY_KEY, "list", params],
     queryFn: () => productApi.list(params),
+    placeholderData: keepPreviousData,
     staleTime: 30 * 1000,
     enabled: options?.enabled ?? true,
   });
+
+  const { isError, error } = query;
+  useEffect(() => {
+    if (isError) {
+      addToast({
+        type: "error",
+        title: "产品列表加载失败",
+        message: getErrorMessage(error, "请稍后重试"),
+      });
+    }
+  }, [isError, error, addToast]);
+
+  return query;
 }
 
 // 单个产品详情 Hook

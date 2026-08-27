@@ -210,8 +210,11 @@ class TestProductListAttrFilter:
         create_product(test_db, code="AF002.OF", market="CN_OTC", confirm_days=1)
         resp = client.get("/api/products?confirm_days=2", headers=admin_headers)
         assert resp.status_code == 200
-        items = resp.json()["items"]
+        data = resp.json()
+        items = data["items"]
         assert len(items) > 0
+        # total 契约（评审 #244）：单页装得下时 total == len(items)，承重过滤后的 count
+        assert data["total"] == len(items)
         assert all(i["confirm_days"] == 2 for i in items)
         codes = [i["code"] for i in items]
         assert "AF001.OF" in codes
@@ -222,7 +225,9 @@ class TestProductListAttrFilter:
         验证 0 值不被 `if param:` 假值陷阱跳过"""
         resp = client.get("/api/products?confirm_days=0", headers=admin_headers)
         assert resp.status_code == 200
-        items = resp.json()["items"]
+        data = resp.json()
+        items = data["items"]
+        assert data["total"] == len(items)
         assert all(i["confirm_days"] == 0 for i in items)
         codes = [i["code"] for i in items]
         for seed_code in ("CASH", "IN_TRANSIT_BUY", "IN_TRANSIT_SELL", "510300.SH"):
@@ -235,12 +240,14 @@ class TestProductListAttrFilter:
         assert resp.status_code == 200
         items = resp.json()["items"]
         assert len(items) > 0
+        assert resp.json()["total"] == len(items)
         assert all(i["nav_lag_days"] == 1 for i in items)
         assert "AF003.OF" in [i["code"] for i in items]
 
         resp0 = client.get("/api/products?nav_lag_days=0", headers=admin_headers)
         assert resp0.status_code == 200
         items0 = resp0.json()["items"]
+        assert resp0.json()["total"] == len(items0)
         assert all(i["nav_lag_days"] == 0 for i in items0)
         assert "AF003.OF" not in [i["code"] for i in items0]
 
@@ -250,12 +257,14 @@ class TestProductListAttrFilter:
         resp_true = client.get("/api/products?is_qdii=true", headers=admin_headers)
         assert resp_true.status_code == 200
         items_true = resp_true.json()["items"]
+        assert resp_true.json()["total"] == len(items_true)
         assert all(i["is_qdii"] is True for i in items_true)
         assert "AF004.OF" in [i["code"] for i in items_true]
 
         resp_false = client.get("/api/products?is_qdii=false", headers=admin_headers)
         assert resp_false.status_code == 200
         items_false = resp_false.json()["items"]
+        assert resp_false.json()["total"] == len(items_false)
         assert all(i["is_qdii"] is False for i in items_false)
         assert "AF004.OF" not in [i["code"] for i in items_false]
 
@@ -270,7 +279,9 @@ class TestProductListAttrFilter:
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        items = resp.json()["items"]
+        data = resp.json()
+        items = data["items"]
+        assert data["total"] == len(items)
         assert all(
             i["confirm_days"] == 1 and i["is_qdii"] is False and i["product_type"] == "OEF"
             for i in items
@@ -278,6 +289,43 @@ class TestProductListAttrFilter:
         codes = [i["code"] for i in items]
         assert "AF005.OF" in codes
         assert "AF006.OF" not in codes
+
+    def test_filter_with_pagination(self, client, admin_headers, test_db):
+        """筛选×分页组合（评审 #244）：页间不相交、total 跨页不变且等于未分页口径"""
+        create_product(test_db, code="AF010.SH", market="CN_EXCHANGE",
+                       product_type="ETF", confirm_days=0, nav_lag_days=0)
+        create_product(test_db, code="AF011.SH", market="CN_EXCHANGE",
+                       product_type="ETF", confirm_days=0, nav_lag_days=0)
+        baseline = client.get(
+            "/api/products?confirm_days=0&page_size=100", headers=admin_headers
+        ).json()
+        expected_total = baseline["total"]
+        assert expected_total >= 6  # 种子 confirm_days=0 共 4 只 + 自建 2 只
+
+        page1 = client.get(
+            "/api/products?confirm_days=0&page_size=2&page=1", headers=admin_headers
+        ).json()
+        page2 = client.get(
+            "/api/products?confirm_days=0&page_size=2&page=2", headers=admin_headers
+        ).json()
+        last_page = (expected_total + 1) // 2
+        page_last = client.get(
+            f"/api/products?confirm_days=0&page_size=2&page={last_page}",
+            headers=admin_headers,
+        ).json()
+
+        # total 契约：跨页不变，且与未分页口径一致；过滤谓词跨页成立
+        for payload in (page1, page2, page_last):
+            assert payload["total"] == expected_total
+            assert all(i["confirm_days"] == 0 for i in payload["items"])
+        # 页容量与页间不相交（(code, market) 为产品自然键）
+        assert len(page1["items"]) == 2
+        assert len(page2["items"]) == 2
+        keys1 = {(i["code"], i["market"]) for i in page1["items"]}
+        keys2 = {(i["code"], i["market"]) for i in page2["items"]}
+        assert keys1.isdisjoint(keys2)
+        # 末页恰好收尾：全集可被逐页不重不漏遍历
+        assert len(page_last["items"]) == expected_total - 2 * (last_page - 1)
 
     def test_backward_compat_no_params(self, client, admin_headers, test_db):
         """不传三参数时不过滤：结果集混合多种 confirm_days / is_qdii 取值"""
@@ -290,6 +338,54 @@ class TestProductListAttrFilter:
         assert "CASH" in codes  # confirm_days=0 未被默认排除
         assert {i["is_qdii"] for i in items} == {True, False}
         assert len({i["confirm_days"] for i in items}) > 1
+
+
+class TestProductListDimFilter:
+    """五维 list 筛选（issue #128 遗留缺口，评审 #244）：asset_class/region/segment 等值与 AND 叠加。
+
+    断言风格同 TestProductListAttrFilter：谓词全称 + 自建 code 必在/必不在 + total 契约。
+    """
+
+    def test_asset_class_filter(self, client, admin_headers, test_db):
+        """?asset_class_code=ASSET_BOND → 自建债券在列、默认工厂产品（ASSET_STOCK）不在列"""
+        create_product(test_db, code="AF012.OF", market="CN_OTC",
+                       asset_class_code="ASSET_BOND", region_code="REGION_CN",
+                       style_code=None, size_code=None, segment_code="SEG_BOND_SHORT")
+        create_product(test_db, code="AF013.OF", market="CN_OTC")  # 默认 ASSET_STOCK
+        resp = client.get("/api/products?asset_class_code=ASSET_BOND", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        items = data["items"]
+        assert len(items) > 0
+        assert data["total"] == len(items)
+        assert all(i["asset_class_code"] == "ASSET_BOND" for i in items)
+        codes = [i["code"] for i in items]
+        assert "AF012.OF" in codes
+        assert "AF013.OF" not in codes
+
+    def test_region_and_segment_combined(self, client, admin_headers, test_db):
+        """region_code × segment_code AND 叠加；单维对照（SEG_COMPOSITE）不含自建 code"""
+        create_product(test_db, code="AF014.OF", market="CN_OTC",
+                       asset_class_code="ASSET_BOND", region_code="REGION_CN",
+                       style_code=None, size_code=None, segment_code="SEG_BOND_SHORT")
+        resp = client.get(
+            "/api/products?region_code=REGION_CN&segment_code=SEG_BOND_SHORT",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        items = data["items"]
+        assert len(items) > 0
+        assert data["total"] == len(items)
+        assert all(
+            i["region_code"] == "REGION_CN" and i["segment_code"] == "SEG_BOND_SHORT"
+            for i in items
+        )
+        assert "AF014.OF" in [i["code"] for i in items]
+
+        resp2 = client.get("/api/products?segment_code=SEG_COMPOSITE", headers=admin_headers)
+        assert resp2.status_code == 200
+        assert "AF014.OF" not in [i["code"] for i in resp2.json()["items"]]
 
 
 class TestProductListOrder:
