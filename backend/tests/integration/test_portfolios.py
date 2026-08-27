@@ -187,6 +187,7 @@ class TestPortfolioDetailDerivedFields:
             test_db, "P_DER", "INV_DER", sub_type="redeem", amount=3000.0,
             apply_date=date(2025, 1, 7), confirm_date=date(2025, 1, 7), status="confirmed",
         )
+        # 边界：confirm_date == 最新快照日（01-07）的记录须计入净投入（防 <= 误改为 <）；
         # pending 申赎不计入净投入
         create_subscription(
             test_db, "P_DER", "INV_DER", sub_type="subscribe", amount=99999.0,
@@ -272,6 +273,32 @@ class TestPortfolioDetailDerivedFields:
         data = resp.json()
         assert data["total_value"] == 16000.0
         # 16000 − (10000 + 5000) = 1000
+        assert data["total_profit"] == 1000.0
+
+    def test_redeem_profit_normalizes_after_snapshot_generated(self, client, admin_headers, test_db):
+        """#250：确认日晚于快照日的赎回，快照补齐后计入净投入（赎回方向对称）"""
+        create_portfolio(test_db, code="P_DER_FNR", status="active")
+        create_investor(test_db, code="INV_DER_FNR", name="截断投资人4")
+        create_value_snapshot(test_db, "P_DER_FNR", date(2025, 1, 7), 11000.0, 10000.0, 1.1)
+        create_subscription(
+            test_db, "P_DER_FNR", "INV_DER_FNR", sub_type="subscribe", amount=10000.0,
+            apply_date=date(2025, 1, 6), confirm_date=date(2025, 1, 7), status="confirmed",
+        )
+        create_subscription(
+            test_db, "P_DER_FNR", "INV_DER_FNR", sub_type="redeem", amount=3000.0,
+            apply_date=date(2025, 1, 7), confirm_date=date(2025, 1, 8), status="confirmed",
+        )
+        # 窗口期：赎回未计入，收益不虚增
+        resp = client.get("/api/portfolios/P_DER_FNR", headers=admin_headers)
+        assert resp.json()["total_profit"] == 1000.0
+        # 补生成 01-08 快照后赎回计入：市值同步降至 8000
+        create_value_snapshot(test_db, "P_DER_FNR", date(2025, 1, 8), 8000.0, 7000.0, 1.1429)
+
+        resp = client.get("/api/portfolios/P_DER_FNR", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_value"] == 8000.0
+        # 8000 − (10000 − 3000) = 1000
         assert data["total_profit"] == 1000.0
 
 
