@@ -39,7 +39,7 @@ lxml==6.1.0
 simplejson==4.1.1
 
 # uvicorn dependency
-click==8.3.3
+click==8.4.2
 
 # Auth
 python-dotenv==1.2.2

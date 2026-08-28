@@ -27,7 +27,7 @@ dependencies = [
     "akshare>=1.18.92",
     "lxml>=6.0.0",
     "simplejson>=4.1.0",
-    "click>=8.0.0",
+    "click>=8.4.2",
     "python-dotenv>=1.0.0",
 ]
 
