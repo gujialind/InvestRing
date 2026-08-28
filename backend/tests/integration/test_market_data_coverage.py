@@ -22,22 +22,24 @@ def _seed_prices(test_db, dates, code="510300.SH", market="CN_EXCHANGE"):
 class TestPriceDataLimit:
     """issue #60: price-data limit 上限放宽到 1000"""
 
-    def test_limit_1000_returns_all_records(self, client, test_db):
+    def test_limit_1000_returns_all_records(self, client, viewer_headers, test_db):
         """limit=1000 应返回 200，条数 = min(1000, 实际条数)"""
         dates = [date(2025, 3, 3) + timedelta(days=i) for i in range(10)]
         _seed_prices(test_db, dates)
         resp = client.get(
             "/api/market-data/products/510300.SH/CN_EXCHANGE/price-data",
             params={"limit": 1000, "start_date": "2025-03-03", "end_date": "2025-03-31"},
+            headers=viewer_headers,
         )
         assert resp.status_code == 200
         assert len(resp.json()) == 10
 
-    def test_limit_1001_rejected_422(self, client):
+    def test_limit_1001_rejected_422(self, client, viewer_headers):
         """limit=1001 超出上限应返回 422"""
         resp = client.get(
             "/api/market-data/products/510300.SH/CN_EXCHANGE/price-data",
             params={"limit": 1001},
+            headers=viewer_headers,
         )
         assert resp.status_code == 422
 
@@ -78,12 +80,13 @@ class TestNavCoverage:
     # 2025-01-06(一) ~ 2025-01-10(五)，conftest 日历中均为交易日
     WEEK = [date(2025, 1, 6) + timedelta(days=i) for i in range(5)]
 
-    def test_full_coverage(self, client, test_db):
+    def test_full_coverage(self, client, viewer_headers, test_db):
         """区间内全部交易日均有净值：coverage=1.0，missing 为空"""
         _seed_prices(test_db, self.WEEK, code="000300.OF", market="CN_OTC")
         resp = client.get(
             "/api/market-data/products/000300.OF/CN_OTC/nav-coverage",
             params={"start_date": "2025-01-06", "end_date": "2025-01-10"},
+            headers=viewer_headers,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -94,13 +97,14 @@ class TestNavCoverage:
         assert data["coverage"] == 1.0
         assert data["missing_dates"] == []
 
-    def test_partial_missing(self, client, test_db):
+    def test_partial_missing(self, client, viewer_headers, test_db):
         """缺 2025-01-08：missing_dates 精确列出，coverage=0.8"""
         seeded = [d for d in self.WEEK if d != date(2025, 1, 8)]
         _seed_prices(test_db, seeded, code="000300.OF", market="CN_OTC")
         resp = client.get(
             "/api/market-data/products/000300.OF/CN_OTC/nav-coverage",
             params={"start_date": "2025-01-06", "end_date": "2025-01-10"},
+            headers=viewer_headers,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -109,27 +113,30 @@ class TestNavCoverage:
         assert data["coverage"] == 0.8
         assert data["missing_dates"] == ["2025-01-08"]
 
-    def test_product_not_found_404(self, client):
+    def test_product_not_found_404(self, client, viewer_headers):
         resp = client.get(
             "/api/market-data/products/NO_SUCH.OF/CN_OTC/nav-coverage",
             params={"start_date": "2025-01-06"},
+            headers=viewer_headers,
         )
         assert resp.status_code == 404
 
-    def test_start_after_end_422(self, client):
+    def test_start_after_end_422(self, client, viewer_headers):
         resp = client.get(
             "/api/market-data/products/000300.OF/CN_OTC/nav-coverage",
             params={"start_date": "2025-01-10", "end_date": "2025-01-06"},
+            headers=viewer_headers,
         )
         assert resp.status_code == 422
         detail = resp.json()["detail"]
         assert detail["error"] == "INVALID_DATE_RANGE"
 
-    def test_no_trading_days_coverage_none(self, client, test_db):
+    def test_no_trading_days_coverage_none(self, client, viewer_headers, test_db):
         """区间只含周末（无交易日）：total=0，coverage 为 null"""
         resp = client.get(
             "/api/market-data/products/000300.OF/CN_OTC/nav-coverage",
             params={"start_date": "2025-01-04", "end_date": "2025-01-05"},
+            headers=viewer_headers,
         )
         assert resp.status_code == 200
         data = resp.json()
