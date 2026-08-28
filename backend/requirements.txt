@@ -6,7 +6,7 @@ fastapi==0.136.1
 uvicorn[standard]==0.46.0
 SQLAlchemy==2.0.49
 pydantic==2.13.3
-pydantic-settings==2.14.2  # issue #252: GHSA-4xgf-cpjx-pc3j 修复版
+pydantic-settings==2.15.0  # issue #252: GHSA-4xgf-cpjx-pc3j 修复版
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.31  # issue #252: PYSEC-2026-3037/3036/3040 修复版（3040 需 0.0.31）
