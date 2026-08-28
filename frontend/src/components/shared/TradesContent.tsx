@@ -73,6 +73,7 @@ import SearchableProductSelect from "@/components/shared/SearchableProductSelect
 import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
 import ProductFormDialog from "@/components/shared/ProductFormDialog";
 import { ProductSelection } from "@/components/shared/ProductFilterDialog";
+import { TradeConfirmDialog } from "@/components/shared/TradeConfirmDialog";
 
 interface TradesContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -296,15 +297,31 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     updateTrade.mutate(payload, { onSuccess: () => setEditingTrade(null) });
   };
 
+  // confirm 动作由 TradeConfirmDialog 内部触发（#248），此处仅处理其余三个动作
   const runConfirm = () => {
     if (!confirmState) return;
     const { action, id } = confirmState;
-    if (action === "confirm") confirmTrade.mutate({ id });
-    else if (action === "cancel") cancelTrade.mutate(id);
+    if (action === "cancel") cancelTrade.mutate(id);
     else if (action === "unconfirm") unconfirmTrade.mutate(id);
     else if (action === "delete") deleteTradeMutation.mutate(id);
     setConfirmState(null);
   };
+
+  // #248 确认信息弹窗派生：被确认交易取自当前页列表（含读侧 product_name）；
+  // 现金平台由同 transfer_group 配对 CASH 腿派生（读侧无 cash_platform_code 字段），
+  // 孤儿腿/分页拆开时为空 → 弹窗展示 "--"
+  const confirmingTrade =
+    confirmState?.action === "confirm"
+      ? trades.find((t) => t.id === confirmState.id) ?? null
+      : null;
+  const confirmingCashPlatformCode = confirmingTrade?.transfer_group
+    ? trades.find(
+        (t) =>
+          t.transfer_group === confirmingTrade.transfer_group &&
+          t.id !== confirmingTrade.id &&
+          t.product_code === "CASH"
+      )?.platform_code
+    : undefined;
 
   // 筛选栏控件（visual-spec §9）：顺序 = 交易日期区间 → 确认日期区间 → 状态 → 产品 → 平台 → 类型；
   // 控件统一 h-9，下拉走 ui/select（「全部 X」用 "all" 哨兵，Radix SelectItem 不允许空串值）；
@@ -928,7 +945,27 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!confirmState} onOpenChange={(open) => !open && setConfirmState(null)}>
+      {/* #248：确认动作改为信息核对弹窗（完整记录 + 后端预览值），弹窗内二次确认才发起请求 */}
+      <TradeConfirmDialog
+        open={confirmState?.action === "confirm"}
+        onOpenChange={(open) => !open && setConfirmState(null)}
+        trade={confirmingTrade}
+        cashPlatformCode={confirmingCashPlatformCode}
+        platformNameMap={platformNameMap}
+        isConfirming={confirmTrade.isPending}
+        onConfirm={() => {
+          if (confirmState?.action !== "confirm") return;
+          confirmTrade.mutate(
+            { id: confirmState.id },
+            { onSuccess: () => setConfirmState(null) }
+          );
+        }}
+      />
+
+      <AlertDialog
+        open={!!confirmState && confirmState.action !== "confirm"}
+        onOpenChange={(open) => !open && setConfirmState(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{confirmState ? CONFIRM_TEXT[confirmState.action].title : ""}</AlertDialogTitle>

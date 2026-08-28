@@ -71,6 +71,7 @@ import EmptyState from "@/components/shared/EmptyState";
 import PaginationBar from "@/components/shared/PaginationBar";
 import NameCodeCell from "@/components/shared/NameCodeCell";
 import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
+import { SubscriptionConfirmDialog } from "@/components/shared/SubscriptionConfirmDialog";
 
 interface SubscriptionsContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -255,11 +256,11 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     });
   };
 
+  // confirm 动作由 SubscriptionConfirmDialog 内部触发（#248），此处仅处理其余三个动作
   const runConfirm = () => {
     if (!confirmState) return;
     const { action, id } = confirmState;
-    if (action === "confirm") confirmSubscription.mutate({ id });
-    else if (action === "cancel") cancelSubscription.mutate(id);
+    if (action === "cancel") cancelSubscription.mutate(id);
     else if (action === "unconfirm") unconfirmSubscription.mutate(id);
     else if (action === "delete") deleteSubscriptionMutation.mutate(id);
     setConfirmState(null);
@@ -820,7 +821,32 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!confirmState} onOpenChange={(open) => !open && setConfirmState(null)}>
+      {/* #248：确认动作改为信息核对弹窗（完整记录 + 后端预览值），弹窗内二次确认才发起请求 */}
+      <SubscriptionConfirmDialog
+        open={confirmState?.action === "confirm"}
+        onOpenChange={(open) => !open && setConfirmState(null)}
+        subscriptionId={confirmState?.action === "confirm" ? confirmState.id : null}
+        subType={
+          confirmState?.action === "confirm"
+            ? subscriptions.find((s) => s.id === confirmState.id)?.sub_type
+            : undefined
+        }
+        investorNameMap={investorNameMap}
+        platformNameMap={platformNameMap}
+        isConfirming={confirmSubscription.isPending}
+        onConfirm={() => {
+          if (confirmState?.action !== "confirm") return;
+          confirmSubscription.mutate(
+            { id: confirmState.id },
+            { onSuccess: () => setConfirmState(null) }
+          );
+        }}
+      />
+
+      <AlertDialog
+        open={!!confirmState && confirmState.action !== "confirm"}
+        onOpenChange={(open) => !open && setConfirmState(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{confirmState ? CONFIRM_TEXT[confirmState.action].title : ""}</AlertDialogTitle>

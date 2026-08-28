@@ -54,3 +54,21 @@ export interface TradeUpdate {
   trade_date?: string;
   notes?: string;
 }
+
+// 确认前预览（#248）：与真实确认共用后端计算实现
+export interface TradePreviewResult {
+  price?: number;
+  shares?: number;
+  amount?: number;
+  actual_amount?: number;
+  fee: number;
+  confirm_date?: string;
+  nav_date?: string;
+  is_otc_nav_fund: boolean;
+}
+
+export interface TradePreviewResponse {
+  trade: Trade;
+  preview: TradePreviewResult;
+  paired_cash_amount?: number;
+}

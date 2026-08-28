@@ -5,6 +5,7 @@ import { tradeApi, subscriptionApi, getErrorMessage, ApiException } from "@/lib/
 import type { SubscriptionListParams, TradeListParams } from "@/lib/api";
 import { TradeCreate, TradeUpdate } from "@/types/trade";
 import { SubscriptionCreate, SubscriptionUpdate } from "@/types/subscription";
+import { queryKeys } from "@/lib/queryKeys";
 import { useUIStore } from "@/stores/uiStore";
 
 const TRADE_QUERY_KEY = "trades";
@@ -29,6 +30,17 @@ export function useTrade(id: number) {
     queryFn: () => tradeApi.get(id),
     enabled: !!id && id > 0,
     staleTime: 30 * 1000,
+  });
+}
+
+// 确认前预览 Hook（#248）：确认弹窗打开时才发请求；禁用重试，错误即时展示在弹窗内
+export function useTradePreview(id: number | null, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.trades.preview(id ?? 0),
+    queryFn: () => tradeApi.preview(id!),
+    enabled: enabled && !!id,
+    retry: false,
+    staleTime: 0,
   });
 }
 
@@ -282,6 +294,17 @@ export function useSubscription(id: number) {
     queryFn: () => subscriptionApi.get(id),
     enabled: !!id && id > 0,
     staleTime: 30 * 1000,
+  });
+}
+
+// 确认前预览 Hook（#248）：确认弹窗打开时才发请求；禁用重试，错误即时展示在弹窗内
+export function useSubscriptionPreview(id: number | null, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.subscriptions.preview(id ?? 0),
+    queryFn: () => subscriptionApi.preview(id!),
+    enabled: enabled && !!id,
+    retry: false,
+    staleTime: 0,
   });
 }
 

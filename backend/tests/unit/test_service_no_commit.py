@@ -221,3 +221,46 @@ class TestTradePreviewNoCommit:
         assert trade.status == "pending"
         assert trade.price is None
         assert trade.shares is None
+
+
+class TestSubscriptionPreviewNoCommit:
+    """calculate_subscription_confirm_preview 纯计算：不 commit、不修改 subscription（#248）"""
+
+    def test_calculate_subscription_confirm_preview_no_commit_no_mutation(
+        self, test_db, monkeypatch
+    ):
+        from app.services.subscription_service import (
+            calculate_subscription_confirm_preview,
+        )
+        from tests.factories import (
+            create_investor,
+            create_subscription,
+            ensure_trading_day,
+            create_value_snapshot,
+        )
+
+        create_portfolio(test_db, code="NC_SPRV", status="active")
+        create_investor(test_db, code="NC_SPINV")
+        ensure_trading_day(test_db, D0, is_open=True)
+        ensure_trading_day(test_db, NEXT_DAY, is_open=True)
+        create_value_snapshot(test_db, "NC_SPRV", D0,
+                              total_value=12500, total_shares=10000, unit_price=1.25)
+        sub = create_subscription(
+            test_db, "NC_SPRV", "NC_SPINV", sub_type="subscribe",
+            amount=10000.0, apply_date=D0,
+        )
+
+        _forbid_commit(monkeypatch, test_db)
+        result = calculate_subscription_confirm_preview(test_db, sub)
+
+        # 计算结果正确（与 confirm 共用同一实现）
+        assert result["nav"] == Decimal("1.25")
+        assert result["shares"] == Decimal("8000")
+        assert result["amount"] == Decimal("10000")
+        assert result["confirm_date"] == NEXT_DAY
+        assert result["is_first"] is True
+        # 纯计算：subscription 对象未被修改
+        assert sub.status == "pending"
+        assert sub.unit_price is None
+        assert sub.shares is None
+        assert sub.confirm_date is None

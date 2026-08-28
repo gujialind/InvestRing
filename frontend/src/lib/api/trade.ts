@@ -1,5 +1,5 @@
 import { request } from "./client";
-import { Trade, TradeCreate, TradeUpdate } from "@/types/trade";
+import { Trade, TradeCreate, TradeUpdate, TradePreviewResponse } from "@/types/trade";
 import { PaginatedResponse } from "@/types/common";
 
 /**
@@ -41,6 +41,9 @@ export const tradeApi = {
 
   delete: (id: number) =>
     request<void>({ method: "DELETE", url: `/trades/${id}` }),
+
+  preview: (id: number) =>
+    request<TradePreviewResponse>({ method: "GET", url: `/trades/${id}/preview` }),
 
   confirm: (id: number, data?: { confirm_date?: string; price?: number }) =>
     request<Trade>({ method: "POST", url: `/trades/${id}/confirm`, data }),
