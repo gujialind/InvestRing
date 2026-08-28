@@ -32,10 +32,15 @@ jobs:
       # 注：pip-audit 按 requirements.txt 声明解析依赖扫描（非实际安装版本）；
       # requirements.txt 已全锁（issue #172），解析结果与 CI/生产一致。
       # 发现已知漏洞即 exit 1（比 --audit-level=high 更严格，宁可人工排除误报）。
+      #
+      # 豁免清单（新增豁免必须在此记录理由与移除条件）：
+      # - PYSEC-2026-1325（ecdsa 0.19.2，issue #252）：上游无修复版本；
+      #   ecdsa 为 python-jose 传递依赖，本仓库 JWT 仅用 HS256、不使用
+      #   EC 算法，无实际暴露面。上游发布修复版本后移除本豁免。
       - name: Run pip-audit
         run: |
           python -m pip install --upgrade pip pip-audit
-          pip-audit -r backend/requirements.txt
+          pip-audit -r backend/requirements.txt --ignore-vuln PYSEC-2026-1325
 
   frontend-audit:
     name: "npm audit (frontend)"
