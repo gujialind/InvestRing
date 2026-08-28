@@ -12,6 +12,7 @@
 # 4. cash_dividend 回归保护：基金行 shares 不变（shares_change=0 语义）
 # 5. generate 与 recalculate 两条路径对同一事件结果一致（三表数值相同），
 #    且重算的级联回退 + 自动重确认往返不丢失用户直填值
+# 6. 手动 unconfirm 保留用户直填值，重确认后快照照常应用（与 5 的级联路径互补）
 # ============================================================================
 
 from datetime import date
@@ -23,6 +24,7 @@ from app.models.share_change_event import ShareChangeEvent
 from app.services.share_change_event_service import (
     create_share_change_event as svc_create_event,
     confirm_share_change_event,
+    unconfirm_share_change_event,
 )
 from app.services.snapshot_service import generate_daily_snapshots, recalculate_snapshots
 from app.services.subscription_service import (
@@ -114,7 +116,7 @@ def _setup_real_history(db, port_code: str, investor_code: str):
 
 
 def _create_confirmed_event(db, port_code: str, *, shares_change=None, cash_change=None,
-                            div_cash=None, event_type="forced_adjustment"):
+                            div_cash=None, shares_after=None, event_type="forced_adjustment"):
     """走真实创建 + 确认流程（不直接造 confirmed 记录）"""
     event = svc_create_event(
         db,
@@ -128,6 +130,7 @@ def _create_confirmed_event(db, port_code: str, *, shares_change=None, cash_chan
         shares_change=shares_change,
         cash_change=cash_change,
         div_cash=div_cash,
+        shares_after=shares_after,
     )
     db.flush()
     confirm_share_change_event(db, event)
@@ -269,3 +272,44 @@ class TestGenerateRecalcConsistency:
         assert recalc_event.status == "confirmed"
         assert Decimal(str(recalc_event.shares_change)) == Decimal("1.00")
         assert Decimal(str(recalc_event.cash_change)) == Decimal("50.00")
+
+
+class TestManualUnconfirmPreservesUserInput:
+    """手动 unconfirm 路径：用户直填值保留（验收 5 只覆盖重算的级联回退路径）"""
+
+    def test_manual_unconfirm_keeps_user_input_and_reconfirm_applies(self, test_db):
+        """手动 unconfirm → 直填三字段保留、确认回写字段清空 → 重确认后快照仍含增量"""
+        _setup(test_db, "FA_U1")
+        event = _create_confirmed_event(
+            test_db, "FA_U1",
+            shares_change=Decimal("1.00"),
+            cash_change=Decimal("50.00"),
+            shares_after=Decimal("101.00"),
+        )
+
+        unconfirm_share_change_event(test_db, event)
+        test_db.flush()
+
+        assert event.status == "pending"
+        # 用户直填值（唯一存处）不得清空
+        assert Decimal(str(event.shares_change)) == Decimal("1.00")
+        assert Decimal(str(event.cash_change)) == Decimal("50.00")
+        assert Decimal(str(event.shares_after)) == Decimal("101.00")
+        # 确认时回写的计算字段照常清空
+        assert event.entitlement_shares is None
+        assert event.shares_before is None
+
+        # 重确认不丢失调整量，且快照照常应用
+        confirm_share_change_event(test_db, event)
+        test_db.flush()
+        assert event.status == "confirmed"
+        assert Decimal(str(event.shares_change)) == Decimal("1.00")
+        assert Decimal(str(event.cash_change)) == Decimal("50.00")
+
+        result = generate_daily_snapshots(test_db, "FA_U1", EX_DAY)
+        assert result["success"] is True
+
+        pos = _pos(test_db, "FA_U1", FUND, EX_DAY)
+        assert Decimal(str(pos.shares)) == Decimal("101.00")
+        cash_row = _pos(test_db, "FA_U1", "CASH", EX_DAY)
+        assert Decimal(str(cash_row.cash_amount)) == Decimal("1050.00")
