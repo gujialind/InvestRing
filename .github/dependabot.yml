@@ -21,6 +21,17 @@ updates:
       # 走 feature 分支 + issue 评估；届时移除本忽略规则。
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # Next 15 → 16 为 major 框架升级（middleware 等潜在破坏点），走 issue #292 评估；
+      # 完成升级后移除本规则。
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      # 类型定义须与运行时 Node 24 对齐，升 26 随运行时升级一并处理。
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # recharts 3.x 收紧 Tooltip formatter 类型，升级需代码适配（issue #291）；
+      # 适配完成后移除本规则。
+      - dependency-name: "recharts"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
