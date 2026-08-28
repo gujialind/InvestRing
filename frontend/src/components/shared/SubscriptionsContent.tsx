@@ -202,6 +202,12 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     apply_date: toDateOnly(new Date()),
   });
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+  // #248 确认弹窗门控：记录须仍在当前列表中（列表 refetch/翻页导致行消失时弹窗随之关闭，
+  // 防止空内容弹窗仍可触发确认）
+  const confirmingSub =
+    confirmState?.action === "confirm"
+      ? subscriptions.find((s) => s.id === confirmState.id) ?? null
+      : null;
   const [editHint, setEditHint] = useState(false);
   // pending 申赎编辑（issue #202）：editingSub 非空即打开编辑 Dialog
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);
@@ -823,14 +829,10 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
 
       {/* #248：确认动作改为信息核对弹窗（完整记录 + 后端预览值），弹窗内二次确认才发起请求 */}
       <SubscriptionConfirmDialog
-        open={confirmState?.action === "confirm"}
+        open={confirmState?.action === "confirm" && !!confirmingSub}
         onOpenChange={(open) => !open && setConfirmState(null)}
         subscriptionId={confirmState?.action === "confirm" ? confirmState.id : null}
-        subType={
-          confirmState?.action === "confirm"
-            ? subscriptions.find((s) => s.id === confirmState.id)?.sub_type
-            : undefined
-        }
+        subType={confirmingSub?.sub_type}
         investorNameMap={investorNameMap}
         platformNameMap={platformNameMap}
         isConfirming={confirmSubscription.isPending}

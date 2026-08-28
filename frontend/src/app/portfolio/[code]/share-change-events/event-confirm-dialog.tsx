@@ -38,12 +38,12 @@ export function EventConfirmDialog({
   onConfirm,
   isConfirming = false,
 }: EventConfirmDialogProps) {
-  const productLabel = event?.product_code ? productNameMap.get(event.product_code) : undefined;
-  const productName = event
-    ? productLabel
-      ? `${productLabel}（${event.product_code}）`
-      : event.product_code
-    : "--";
+  // product_code 类型上可选：缺失时展示 "--"（InfoRow 不做空值兜底）
+  const getProductName = () => {
+    if (!event?.product_code) return "--";
+    const label = productNameMap.get(event.product_code);
+    return label ? `${label}（${event.product_code}）` : event.product_code;
+  };
 
   return (
     <ConfirmInfoDialog
@@ -58,7 +58,7 @@ export function EventConfirmDialog({
       {event && (
         <>
           <InfoRow label="事件类型" value={EVENT_TYPE_LABELS[event.event_type] || event.event_type} />
-          <InfoRow label="产品" value={productName} />
+          <InfoRow label="产品" value={getProductName()} />
           <InfoRow
             label="平台"
             value={

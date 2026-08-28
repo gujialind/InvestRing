@@ -467,7 +467,7 @@ export default function ShareChangeEventsPage() {
 
       {/* #248：确认信息核对弹窗（事件字段均落库，无预览请求），弹窗内二次确认才发起请求 */}
       <EventConfirmDialog
-        open={confirmEventId !== null}
+        open={confirmingEvent !== null}
         onOpenChange={(open) => !open && setConfirmEventId(null)}
         event={confirmingEvent}
         productNameMap={productNameMap}

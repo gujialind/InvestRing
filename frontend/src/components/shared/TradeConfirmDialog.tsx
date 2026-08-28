@@ -37,7 +37,9 @@ export function TradeConfirmDialog({
   onConfirm,
   isConfirming = false,
 }: TradeConfirmDialogProps) {
-  const { data, isLoading, error } = useTradePreview(trade?.id ?? null, open);
+  // staleTime=0：重开弹窗命中缓存时会后台 refetch，isFetching 期间同样视为加载中，
+  // 防止基于过期预览值确认（预览==确认）
+  const { data, isLoading, isFetching, error } = useTradePreview(trade?.id ?? null, open);
   const preview = data?.preview;
   const isBuy = trade?.trade_type === "buy";
   const productName = trade
@@ -52,7 +54,7 @@ export function TradeConfirmDialog({
       onOpenChange={onOpenChange}
       title={isBuy ? "确认买入" : "确认卖出"}
       description="请核对以下信息与预览值，确认后将不可直接修改"
-      isLoading={isLoading}
+      isLoading={isLoading || isFetching}
       error={error ? getErrorMessage(error, "预览请求失败") : null}
       onConfirm={onConfirm}
       isConfirming={isConfirming}

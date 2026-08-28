@@ -32,7 +32,9 @@ export function SubscriptionConfirmDialog({
   investorNameMap,
   platformNameMap,
 }: SubscriptionConfirmDialogProps) {
-  const { data, isLoading, error } = useSubscriptionPreview(subscriptionId, open);
+  // staleTime=0：重开弹窗命中缓存时会后台 refetch，isFetching 期间同样视为加载中，
+  // 防止基于过期预览值确认（预览==确认）
+  const { data, isLoading, isFetching, error } = useSubscriptionPreview(subscriptionId, open);
   const record = data?.subscription;
   const preview = data?.preview;
   const isSubscribe = (subType ?? record?.sub_type) === "subscribe";
@@ -43,7 +45,7 @@ export function SubscriptionConfirmDialog({
       onOpenChange={onOpenChange}
       title={isSubscribe ? "确认申购" : "确认赎回"}
       description="请核对以下信息与预览值，确认后将不可直接修改"
-      isLoading={isLoading}
+      isLoading={isLoading || isFetching}
       error={error ? getErrorMessage(error, "预览请求失败") : null}
       onConfirm={onConfirm}
       isConfirming={isConfirming}

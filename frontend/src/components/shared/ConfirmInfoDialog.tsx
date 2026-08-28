@@ -48,7 +48,14 @@ export function ConfirmInfoDialog({
 }: ConfirmInfoDialogProps) {
   const blocked = isLoading || !!error || isConfirming;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // 确认请求在途时禁止 Esc/遮罩关闭（与已禁用的取消按钮一致，防止关窗后并发确认）
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && isConfirming) return;
+        onOpenChange(nextOpen);
+      }}
+    >
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

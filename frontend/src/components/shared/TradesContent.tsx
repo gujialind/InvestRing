@@ -947,7 +947,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
 
       {/* #248：确认动作改为信息核对弹窗（完整记录 + 后端预览值），弹窗内二次确认才发起请求 */}
       <TradeConfirmDialog
-        open={confirmState?.action === "confirm"}
+        open={confirmState?.action === "confirm" && !!confirmingTrade}
         onOpenChange={(open) => !open && setConfirmState(null)}
         trade={confirmingTrade}
         cashPlatformCode={confirmingCashPlatformCode}
