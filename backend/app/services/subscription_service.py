@@ -85,6 +85,8 @@ def calculate_subscription_confirm_preview(
         - amount: Decimal，确认后的金额（申购为原值，赎回为计算值）
         - confirm_date: date，T+1 交易日
         - is_first: bool，是否组合首笔确认申购
+        - portfolio: Portfolio，组合 ORM 对象（仅供 confirm_single_subscription
+          复用、避免重复查询；router 层剔除，不进 API 响应）
 
     Raises:
         InvalidStatusError: 状态不是 pending
@@ -177,6 +179,7 @@ def calculate_subscription_confirm_preview(
         "amount": amount,
         "confirm_date": confirm_date,
         "is_first": is_first,
+        "portfolio": portfolio,
     }
 
 
@@ -212,12 +215,8 @@ def confirm_single_subscription(
     nav = preview["nav"]
     confirm_date = preview["confirm_date"]
     is_first = preview["is_first"]
-
-    portfolio = (
-        db.query(Portfolio)
-        .filter(Portfolio.code == subscription.portfolio_code)
-        .first()
-    )
+    # 组合对象复用预览内的同条件查询结果，不再重复 SELECT（#257 评审）
+    portfolio = preview["portfolio"]
 
     # 4. 回写份额/金额
     subscription.unit_price = nav

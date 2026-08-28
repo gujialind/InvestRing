@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -208,6 +208,13 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     confirmState?.action === "confirm"
       ? subscriptions.find((s) => s.id === confirmState.id) ?? null
       : null;
+  // 行掉出当前列表时（refetch/翻页/他端确认）同步清空 confirmState：open 以「行在
+  // 列表中」门控属被动关闭（onOpenChange 不触发），不清 state 行重现时弹窗会自发重开
+  useEffect(() => {
+    if (confirmState?.action === "confirm" && !confirmingSub) {
+      setConfirmState(null);
+    }
+  }, [confirmState, confirmingSub]);
   const [editHint, setEditHint] = useState(false);
   // pending 申赎编辑（issue #202）：editingSub 非空即打开编辑 Dialog
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);

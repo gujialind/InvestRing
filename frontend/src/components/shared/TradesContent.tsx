@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -322,6 +322,13 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
           t.product_code === "CASH"
       )?.platform_code
     : undefined;
+  // 行掉出当前列表时（refetch/翻页/他端确认）同步清空 confirmState：open 以「行在
+  // 列表中」门控属被动关闭（onOpenChange 不触发），不清 state 行重现时弹窗会自发重开
+  useEffect(() => {
+    if (confirmState?.action === "confirm" && !confirmingTrade) {
+      setConfirmState(null);
+    }
+  }, [confirmState, confirmingTrade]);
 
   // 筛选栏控件（visual-spec §9）：顺序 = 交易日期区间 → 确认日期区间 → 状态 → 产品 → 平台 → 类型；
   // 控件统一 h-9，下拉走 ui/select（「全部 X」用 "all" 哨兵，Radix SelectItem 不允许空串值）；

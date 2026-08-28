@@ -104,6 +104,7 @@ def preview_subscription_confirm(
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     preview = calculate_subscription_confirm_preview(db, subscription)
+    preview.pop("portfolio", None)  # ORM 对象仅供 confirm 复用，不进响应 schema
     return SubscriptionPreviewResponse(
         subscription=SubscriptionResponse.from_orm(subscription),
         preview=SubscriptionPreviewResult(**preview),

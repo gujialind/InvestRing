@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,7 +58,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
-import { useProductList } from "@/hooks/useProduct";
 import { EVENT_TYPE_LABELS, EventConfirmDialog } from "./event-confirm-dialog";
 
 const PLATFORM_LEVEL_TYPES: EventType[] = ["cash_dividend", "reinvest_dividend", "forced_adjustment"];
@@ -101,9 +100,6 @@ export default function ShareChangeEventsPage() {
     queryFn: () => platformApi.list({ page_size: 100 }),
   });
 
-  // 产品列表（#248）：仅用于确认弹窗的「产品名（代码）」展示，复用缓存不新增页面依赖
-  const { data: productsData } = useProductList({ page_size: 100 });
-
   const platforms = platformsData?.items || [];
 
   const events = eventsData?.items || [];
@@ -111,10 +107,13 @@ export default function ShareChangeEventsPage() {
   // #248 确认信息核对弹窗：确认按钮先开弹窗，弹窗内二次点击才发起确认
   const [confirmEventId, setConfirmEventId] = useState<number | null>(null);
   const confirmingEvent = events.find((e) => e.id === confirmEventId) ?? null;
-  const productNameMap = useMemo(
-    () => new Map((productsData?.items ?? []).map((p) => [p.code, p.name])),
-    [productsData?.items]
-  );
+  // 行掉出当前列表时（refetch/他端确认）同步清空 confirmEventId：open 以「行在列表
+  // 中」门控属被动关闭（onOpenChange 不触发），不清 state 行重现时弹窗会自发重开
+  useEffect(() => {
+    if (confirmEventId !== null && !confirmingEvent) {
+      setConfirmEventId(null);
+    }
+  }, [confirmEventId, confirmingEvent]);
   const platformNameMap = useMemo(
     () => new Map((platformsData?.items ?? []).map((plat) => [plat.code, plat.name])),
     [platformsData?.items]
@@ -470,7 +469,6 @@ export default function ShareChangeEventsPage() {
         open={confirmingEvent !== null}
         onOpenChange={(open) => !open && setConfirmEventId(null)}
         event={confirmingEvent}
-        productNameMap={productNameMap}
         platformNameMap={platformNameMap}
         isConfirming={confirmEvent.isPending}
         onConfirm={() => {
