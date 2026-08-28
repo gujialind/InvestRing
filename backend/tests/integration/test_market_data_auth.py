@@ -9,8 +9,6 @@
 
 from unittest.mock import patch
 
-import pytest
-
 
 class TestMarketDataAuth:
     """issue #256: market_data 4 端点鉴权矩阵"""
