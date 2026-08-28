@@ -9,13 +9,20 @@ from app.models.portfolio import Portfolio
 from app.models.investor import Investor
 from app.models.platform import Platform
 from app.services.subscription_service import (
+    calculate_subscription_confirm_preview,
     confirm_single_subscription,
     unconfirm_single_subscription,
     create_subscription as create_subscription_service,
     update_subscription as update_subscription_service,
     list_subscriptions,
 )
-from app.schemas.subscription import SubscriptionCreate, SubscriptionUpdate, SubscriptionResponse
+from app.schemas.subscription import (
+    SubscriptionCreate,
+    SubscriptionUpdate,
+    SubscriptionResponse,
+    SubscriptionPreviewResult,
+    SubscriptionPreviewResponse,
+)
 from app.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
@@ -82,6 +89,26 @@ def create_subscription(
     db.commit()
     db.refresh(new_sub)
     return new_sub
+
+
+# 注意：必须注册在 GET /{id} 之前，避免路径 "preview" 被 /{id} 吞掉
+@router.get("/{id}/preview", response_model=SubscriptionPreviewResponse)
+def preview_subscription_confirm(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: Investor = Depends(get_current_admin),
+):
+    """确认前预览：返回真实确认将写入的净值/份额/金额/确认日，不落库（与 confirm 共用计算实现）"""
+    subscription = db.query(Subscription).filter(Subscription.id == id).first()
+    if not subscription:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    preview = calculate_subscription_confirm_preview(db, subscription)
+    preview.pop("portfolio", None)  # ORM 对象仅供 confirm 复用，不进响应 schema
+    return SubscriptionPreviewResponse(
+        subscription=SubscriptionResponse.from_orm(subscription),
+        preview=SubscriptionPreviewResult(**preview),
+    )
 
 
 @router.get("/{id}", response_model=SubscriptionResponse)

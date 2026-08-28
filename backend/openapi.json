@@ -3024,6 +3024,54 @@
         }
       }
     },
+    "/api/subscriptions/{id}/preview": {
+      "get": {
+        "tags": [
+          "申购赎回"
+        ],
+        "summary": "Preview Subscription Confirm",
+        "description": "确认前预览：返回真实确认将写入的净值/份额/金额/确认日，不落库（与 confirm 共用计算实现）",
+        "operationId": "preview_subscription_confirm_api_subscriptions__id__preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionPreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/subscriptions/{id}": {
       "get": {
         "tags": [
@@ -10788,6 +10836,69 @@
           "apply_date"
         ],
         "title": "SubscriptionCreate"
+      },
+      "SubscriptionPreviewResponse": {
+        "properties": {
+          "subscription": {
+            "$ref": "#/components/schemas/SubscriptionResponse"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/SubscriptionPreviewResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subscription",
+          "preview"
+        ],
+        "title": "SubscriptionPreviewResponse"
+      },
+      "SubscriptionPreviewResult": {
+        "properties": {
+          "nav": {
+            "type": "number",
+            "title": "Nav"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "confirm_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Confirm Date"
+          },
+          "is_first": {
+            "type": "boolean",
+            "title": "Is First",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "nav",
+          "confirm_date"
+        ],
+        "title": "SubscriptionPreviewResult",
+        "description": "申赎确认前预览的计算结果（与真实确认共用同一计算实现）"
       },
       "SubscriptionResponse": {
         "properties": {

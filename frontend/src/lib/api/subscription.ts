@@ -3,6 +3,7 @@ import {
   Subscription,
   SubscriptionCreate,
   SubscriptionUpdate,
+  SubscriptionPreviewResponse,
 } from "@/types/subscription";
 import { PaginatedResponse } from "@/types/common";
 
@@ -39,6 +40,9 @@ export const subscriptionApi = {
 
   delete: (id: number) =>
     request<void>({ method: "DELETE", url: `/subscriptions/${id}` }),
+
+  preview: (id: number) =>
+    request<SubscriptionPreviewResponse>({ method: "GET", url: `/subscriptions/${id}/preview` }),
 
   confirm: (id: number) =>
     request<Subscription>({ method: "POST", url: `/subscriptions/${id}/confirm` }),

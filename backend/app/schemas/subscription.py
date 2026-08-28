@@ -40,3 +40,18 @@ class SubscriptionResponse(SubscriptionBase):
 
     class Config:
         from_attributes = True
+
+
+class SubscriptionPreviewResult(BaseModel):
+    """申赎确认前预览的计算结果（与真实确认共用同一计算实现）"""
+
+    nav: float
+    shares: Optional[float] = None
+    amount: Optional[float] = None
+    confirm_date: date
+    is_first: bool = False
+
+
+class SubscriptionPreviewResponse(BaseModel):
+    subscription: SubscriptionResponse
+    preview: SubscriptionPreviewResult

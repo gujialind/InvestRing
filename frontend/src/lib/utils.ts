@@ -36,10 +36,15 @@ export function parseDateOnly(dateStr: string): Date | undefined {
 
 /**
  * 格式化日期为 YYYY-MM-DD
+ * date-only 字符串（yyyy-MM-dd）按本地零点解析（与 parseDateOnly 同口径）：
+ * new Date("yyyy-MM-dd") 按 UTC 解析，UTC 负偏移时区取本地年月日会回退一天
  */
 export function formatDate(date: string | Date | number): string {
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return "--";
+  const d =
+    typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? parseDateOnly(date)
+      : new Date(date);
+  if (!d || isNaN(d.getTime())) return "--";
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");

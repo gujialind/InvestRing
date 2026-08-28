@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -71,6 +71,7 @@ import EmptyState from "@/components/shared/EmptyState";
 import PaginationBar from "@/components/shared/PaginationBar";
 import NameCodeCell from "@/components/shared/NameCodeCell";
 import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
+import { SubscriptionConfirmDialog } from "@/components/shared/SubscriptionConfirmDialog";
 
 interface SubscriptionsContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -201,6 +202,19 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     apply_date: toDateOnly(new Date()),
   });
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+  // #248 确认弹窗门控：记录须仍在当前列表中（列表 refetch/翻页导致行消失时弹窗随之关闭，
+  // 防止空内容弹窗仍可触发确认）
+  const confirmingSub =
+    confirmState?.action === "confirm"
+      ? subscriptions.find((s) => s.id === confirmState.id) ?? null
+      : null;
+  // 行掉出当前列表时（refetch/翻页/他端确认）同步清空 confirmState：open 以「行在
+  // 列表中」门控属被动关闭（onOpenChange 不触发），不清 state 行重现时弹窗会自发重开
+  useEffect(() => {
+    if (confirmState?.action === "confirm" && !confirmingSub) {
+      setConfirmState(null);
+    }
+  }, [confirmState, confirmingSub]);
   const [editHint, setEditHint] = useState(false);
   // pending 申赎编辑（issue #202）：editingSub 非空即打开编辑 Dialog
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);
@@ -255,11 +269,11 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
     });
   };
 
+  // confirm 动作由 SubscriptionConfirmDialog 内部触发（#248），此处仅处理其余三个动作
   const runConfirm = () => {
     if (!confirmState) return;
     const { action, id } = confirmState;
-    if (action === "confirm") confirmSubscription.mutate({ id });
-    else if (action === "cancel") cancelSubscription.mutate(id);
+    if (action === "cancel") cancelSubscription.mutate(id);
     else if (action === "unconfirm") unconfirmSubscription.mutate(id);
     else if (action === "delete") deleteSubscriptionMutation.mutate(id);
     setConfirmState(null);
@@ -820,7 +834,28 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!confirmState} onOpenChange={(open) => !open && setConfirmState(null)}>
+      {/* #248：确认动作改为信息核对弹窗（完整记录 + 后端预览值），弹窗内二次确认才发起请求 */}
+      <SubscriptionConfirmDialog
+        open={confirmState?.action === "confirm" && !!confirmingSub}
+        onOpenChange={(open) => !open && setConfirmState(null)}
+        subscriptionId={confirmState?.action === "confirm" ? confirmState.id : null}
+        subType={confirmingSub?.sub_type}
+        investorNameMap={investorNameMap}
+        platformNameMap={platformNameMap}
+        isConfirming={confirmSubscription.isPending}
+        onConfirm={() => {
+          if (confirmState?.action !== "confirm") return;
+          confirmSubscription.mutate(
+            { id: confirmState.id },
+            { onSuccess: () => setConfirmState(null) }
+          );
+        }}
+      />
+
+      <AlertDialog
+        open={!!confirmState && confirmState.action !== "confirm"}
+        onOpenChange={(open) => !open && setConfirmState(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{confirmState ? CONFIRM_TEXT[confirmState.action].title : ""}</AlertDialogTitle>

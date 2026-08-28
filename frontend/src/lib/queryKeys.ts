@@ -29,11 +29,13 @@ export const queryKeys = {
     root: ["trades"] as const,
     list: () => ["trades", "list"] as const,
     detail: (id: number) => ["trades", id] as const,
+    preview: (id: number) => ["trades", id, "preview"] as const,
   },
   subscriptions: {
     root: ["subscriptions"] as const,
     list: () => ["subscriptions", "list"] as const,
     detail: (id: number) => ["subscriptions", id] as const,
+    preview: (id: number) => ["subscriptions", id, "preview"] as const,
   },
   products: {
     root: ["products"] as const,

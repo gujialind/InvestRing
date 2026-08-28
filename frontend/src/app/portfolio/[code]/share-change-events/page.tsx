@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,17 +58,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
+import { EVENT_TYPE_LABELS, EventConfirmDialog } from "./event-confirm-dialog";
 
 const PLATFORM_LEVEL_TYPES: EventType[] = ["cash_dividend", "reinvest_dividend", "forced_adjustment"];
-
-const EVENT_TYPE_LABELS: Record<EventType, string> = {
-  cash_dividend: "现金分红",
-  reinvest_dividend: "分红再投资",
-  share_split: "份额拆分",
-  share_merge: "份额合并",
-  bonus_share: "红股送股",
-  forced_adjustment: "强制调整",
-};
 
 // 状态徽标统一走 Badge variant 语义映射（#127，visual-spec §1.3）
 const STATUS_LABELS: Record<string, string> = {
@@ -111,6 +103,21 @@ export default function ShareChangeEventsPage() {
   const platforms = platformsData?.items || [];
 
   const events = eventsData?.items || [];
+
+  // #248 确认信息核对弹窗：确认按钮先开弹窗，弹窗内二次点击才发起确认
+  const [confirmEventId, setConfirmEventId] = useState<number | null>(null);
+  const confirmingEvent = events.find((e) => e.id === confirmEventId) ?? null;
+  // 行掉出当前列表时（refetch/他端确认）同步清空 confirmEventId：open 以「行在列表
+  // 中」门控属被动关闭（onOpenChange 不触发），不清 state 行重现时弹窗会自发重开
+  useEffect(() => {
+    if (confirmEventId !== null && !confirmingEvent) {
+      setConfirmEventId(null);
+    }
+  }, [confirmEventId, confirmingEvent]);
+  const platformNameMap = useMemo(
+    () => new Map((platformsData?.items ?? []).map((plat) => [plat.code, plat.name])),
+    [platformsData?.items]
+  );
 
   // 创建/确认/取消走统一 hooks
   const createEvent = useCreateShareChangeEvent(code);
@@ -426,8 +433,7 @@ export default function ShareChangeEventsPage() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => confirmEvent.mutate(event.id)}
-                                  disabled={confirmEvent.isPending}
+                                  onClick={() => setConfirmEventId(event.id)}
                                 >
                                   <CheckCircle className="h-4 w-4 text-success" />
                                 </Button>
@@ -457,6 +463,19 @@ export default function ShareChangeEventsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* #248：确认信息核对弹窗（事件字段均落库，无预览请求），弹窗内二次确认才发起请求 */}
+      <EventConfirmDialog
+        open={confirmingEvent !== null}
+        onOpenChange={(open) => !open && setConfirmEventId(null)}
+        event={confirmingEvent}
+        platformNameMap={platformNameMap}
+        isConfirming={confirmEvent.isPending}
+        onConfirm={() => {
+          if (confirmEventId === null) return;
+          confirmEvent.mutate(confirmEventId, { onSuccess: () => setConfirmEventId(null) });
+        }}
+      />
 
       {/* PLATFORM_NOT_COVERED 强制提交确认 */}
       <AlertDialog open={!!forceCoverData} onOpenChange={(open) => !open && setForceCoverData(null)}>

@@ -39,3 +39,17 @@ export interface SubscriptionUpdate {
   apply_date?: string;
   notes?: string | null;
 }
+
+// 确认前预览（#248）：与真实确认共用后端计算实现
+export interface SubscriptionPreviewResult {
+  nav: number;
+  shares?: number;
+  amount?: number;
+  confirm_date: string;
+  is_first: boolean;
+}
+
+export interface SubscriptionPreviewResponse {
+  subscription: Subscription;
+  preview: SubscriptionPreviewResult;
+}

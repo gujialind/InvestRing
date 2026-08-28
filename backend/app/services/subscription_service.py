@@ -58,26 +58,35 @@ class InvalidStatusError(BusinessError):
         super().__init__("INVALID_STATUS", message)
 
 
-def confirm_single_subscription(
+def calculate_subscription_confirm_preview(
     db: Session,
     subscription: Subscription,
-    *,
-    auto_flush: bool = False,
-) -> Subscription:
+) -> dict:
     """
-    确认单笔申购/赎回的核心逻辑。
+    计算申赎确认结果（纯计算，不落库），供确认前预览与真实确认共用。
 
-    - 确认日期由后端自动计算（T+1）
-    - 净值自动确定（首次申购固定1.0000，否则取申请日组合快照净值）
-    - 首次申购确认后自动激活组合状态
+    只做查询与计算：**不修改 subscription 对象、不创建配对 CASH trade、
+    不 flush/commit**。confirm_single_subscription 调用本函数取结果后回写，
+    保证「预览 == 真实确认」（与 trade_service.calculate_confirm_preview 同模式）。
+
+    计算规则（与确认语义完全一致）：
+    - 确认日 = 申请日的下一个交易日（T+1）
+    - 净值三级决策：申请日组合快照净值 / 初始窗口 1.0000 / 抛 NAV_NOT_AVAILABLE
+    - 申购 shares = quantize(amount / nav)；赎回 amount = quantize(shares × nav)
 
     Args:
         db: 数据库会话
         subscription: 待确认的申购/赎回记录（必须为 pending 状态）
-        auto_flush: 是否在结束时自动 flush（默认为 False，由调用者控制事务）
 
     Returns:
-        确认后的 subscription 对象
+        dict，keys：
+        - nav: Decimal，确认将写入的净值
+        - shares: Decimal，确认后的份额（申购为计算值，赎回为原值）
+        - amount: Decimal，确认后的金额（申购为原值，赎回为计算值）
+        - confirm_date: date，T+1 交易日
+        - is_first: bool，是否组合首笔确认申购
+        - portfolio: Portfolio，组合 ORM 对象（仅供 confirm_single_subscription
+          复用、避免重复查询；router 层剔除，不进 API 响应）
 
     Raises:
         InvalidStatusError: 状态不是 pending
@@ -157,14 +166,64 @@ def confirm_single_subscription(
     if subscription.sub_type == "subscribe":
         # 确认份额量化到 2 位（四舍五入）；金额为创建时已量化的用户输入（issue #94）
         shares = quantize_shares(Decimal(str(subscription.amount)) / nav)
-        subscription.unit_price = nav
-        subscription.shares = shares
+        amount = Decimal(str(subscription.amount))
     else:
         # 赎回金额量化到 2 位（issue #94）：shares(2位) × nav(4位) 四舍五入，
         # 误差计入基金财产，现金划出与平台 2 位口径一致
+        shares = Decimal(str(subscription.shares))
         amount = quantize_amount(Decimal(str(subscription.shares)) * nav)
-        subscription.unit_price = nav
-        subscription.amount = amount
+
+    return {
+        "nav": nav,
+        "shares": shares,
+        "amount": amount,
+        "confirm_date": confirm_date,
+        "is_first": is_first,
+        "portfolio": portfolio,
+    }
+
+
+def confirm_single_subscription(
+    db: Session,
+    subscription: Subscription,
+    *,
+    auto_flush: bool = False,
+) -> Subscription:
+    """
+    确认单笔申购/赎回的核心逻辑。
+
+    - 确认日期由后端自动计算（T+1）
+    - 净值自动确定（首次申购固定1.0000，否则取申请日组合快照净值）
+    - 首次申购确认后自动激活组合状态
+
+    计算全部经 calculate_subscription_confirm_preview（与预览端点共用实现）。
+
+    Args:
+        db: 数据库会话
+        subscription: 待确认的申购/赎回记录（必须为 pending 状态）
+        auto_flush: 是否在结束时自动 flush（默认为 False，由调用者控制事务）
+
+    Returns:
+        确认后的 subscription 对象
+
+    Raises:
+        InvalidStatusError: 状态不是 pending
+        NavNotAvailableError: 申请日快照不存在
+        BusinessError: CONFIRM_BEFORE_STARTED——申购确认日早于组合首笔到账日（issue #179 硬闸门）
+    """
+    preview = calculate_subscription_confirm_preview(db, subscription)
+    nav = preview["nav"]
+    confirm_date = preview["confirm_date"]
+    is_first = preview["is_first"]
+    # 组合对象复用预览内的同条件查询结果，不再重复 SELECT（#257 评审）
+    portfolio = preview["portfolio"]
+
+    # 4. 回写份额/金额
+    subscription.unit_price = nav
+    if subscription.sub_type == "subscribe":
+        subscription.shares = preview["shares"]
+    else:
+        subscription.amount = preview["amount"]
 
     # 5. 设置确认状态
     subscription.status = "confirmed"
