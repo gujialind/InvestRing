@@ -1,0 +1,271 @@
+# ============================================================================
+# 集成测试：forced_adjustment 份额变动进持仓快照 (test_snapshot_forced_adjustment.py)
+# ============================================================================
+# issue #263：forced_adjustment 是唯一「份额由用户直填」的事件类型，但其
+# shares_change 在快照生成的事件应用循环中被 `continue` 静默跳过，事件显示
+# 「已确认」、快照却不含该变动。
+#
+# 覆盖验收断言：
+# 1. 仅填份额（+1.00）→ ex_date 当日快照份额 = 前值 + 1.00
+# 2. 份额 + 现金同填 → 份额行与 CASH 行双双按增量生效
+# 3. 负份额 → 份额减少，total_value / unit_price 随之变化
+# 4. cash_dividend 回归保护：基金行 shares 不变（shares_change=0 语义）
+# 5. generate 与 recalculate 两条路径对同一事件结果一致（三表数值相同），
+#    且重算的级联回退 + 自动重确认往返不丢失用户直填值
+# ============================================================================
+
+from datetime import date
+from decimal import Decimal
+
+from app.models import PortfolioPosition, PortfolioValueSnapshot, InvestorHolding
+from app.models.price_record import PriceRecord
+from app.models.share_change_event import ShareChangeEvent
+from app.services.share_change_event_service import (
+    create_share_change_event as svc_create_event,
+    confirm_share_change_event,
+)
+from app.services.snapshot_service import generate_daily_snapshots, recalculate_snapshots
+from app.services.subscription_service import (
+    create_subscription,
+    confirm_single_subscription,
+)
+from app.services.trade_service import (
+    create_trade as create_trade_service,
+    confirm_single_trade,
+)
+from tests.factories import (
+    create_portfolio,
+    create_product,
+    create_price_record,
+    create_position_snapshot,
+    create_value_snapshot,
+    create_investor,
+    create_investor_holding,
+)
+
+D0 = date(2025, 6, 6)        # 周五（基线快照日 = 权益登记日）
+EX_DAY = date(2025, 6, 9)    # 周一（除息日 = 生成目标日）
+SUB_APPLY = date(2025, 6, 5)  # 申购申请日（T+1 确认，到账日 = D0）
+
+FUND = "FA263.OF"
+
+
+def _ensure_price(db, record_date: date, unit_price: float = 1.0):
+    """价格记录按产品维度唯一，存在则跳过"""
+    if not db.query(PriceRecord).filter(
+        PriceRecord.product_code == FUND, PriceRecord.price_date == record_date,
+    ).first():
+        create_price_record(db, FUND, "CN_OTC", record_date, unit_price)
+
+
+def _setup(db, port_code: str, fund_shares: float = 100.0, cash: float = 1000.0):
+    """工厂直造基线三表快照（D0）：仅供单日 generate 用例使用"""
+    create_portfolio(db, code=port_code, status="active")
+    create_product(db, code=FUND, market="CN_OTC",
+                   product_type="OEF", asset_class_code="ASSET_STOCK")
+    create_position_snapshot(
+        db, port_code, FUND, "CN_OTC", snapshot_date=D0,
+        shares=fund_shares, unit_price=1.0, cost_price=1.0,
+        market_value=fund_shares, platform_code="MYCF",
+    )
+    create_position_snapshot(
+        db, port_code, "CASH", "", snapshot_date=D0,
+        cash_amount=cash, unit_price=None, cost_price=None,
+        market_value=cash, platform_code="MYCF",
+    )
+    total = fund_shares + cash
+    create_value_snapshot(db, port_code, D0,
+                          total_value=total, total_shares=total, unit_price=1.0)
+    create_investor_holding(db, port_code, "VIEWER", D0, shares=total)
+    _ensure_price(db, EX_DAY)
+
+
+def _setup_real_history(db, port_code: str, investor_code: str):
+    """真实业务流构建基线（重算用例专用）：首次申购入金 1100 → 买入基金 100
+    → 生成 D0 快照（现金 1000 + 基金 100 份）。重算从零重建时可复现。"""
+    create_portfolio(db, code=port_code, status="active")
+    product = create_product(db, code=FUND, market="CN_OTC",
+                             product_type="OEF", asset_class_code="ASSET_STOCK",
+                             confirm_days=0)
+    create_investor(db, code=investor_code)
+    _ensure_price(db, D0)
+    _ensure_price(db, EX_DAY)
+
+    sub = create_subscription(
+        db, portfolio_code=port_code, investor_code=investor_code,
+        platform_code="MYCF", sub_type="subscribe",
+        amount=Decimal("1100.00"), apply_date=SUB_APPLY,
+    )
+    db.flush()
+    confirm_single_subscription(db, sub)  # 首次申购净值 1.0000
+    db.flush()
+
+    buy = create_trade_service(
+        db, portfolio_code=port_code, product_code=FUND, market="CN_OTC",
+        trade_type="buy", trade_date=D0,
+        actual_amount=Decimal("100.00"), platform_code="MYCF",
+    )
+    db.flush()
+    confirm_single_trade(db, buy, product)  # confirm_days=0 → confirm_date=D0
+    db.flush()
+
+    result = generate_daily_snapshots(db, port_code, D0)
+    assert result["success"] is True, result
+
+
+def _create_confirmed_event(db, port_code: str, *, shares_change=None, cash_change=None,
+                            div_cash=None, event_type="forced_adjustment"):
+    """走真实创建 + 确认流程（不直接造 confirmed 记录）"""
+    event = svc_create_event(
+        db,
+        portfolio_code=port_code,
+        event_type=event_type,
+        product_code=FUND,
+        market="CN_OTC",
+        platform_code="MYCF",
+        ex_date=EX_DAY,
+        entitlement_date=D0,
+        shares_change=shares_change,
+        cash_change=cash_change,
+        div_cash=div_cash,
+    )
+    db.flush()
+    confirm_share_change_event(db, event)
+    db.flush()
+    return event
+
+
+def _pos(db, port_code: str, product_code: str, snapshot_date: date):
+    return db.query(PortfolioPosition).filter(
+        PortfolioPosition.portfolio_code == port_code,
+        PortfolioPosition.product_code == product_code,
+        PortfolioPosition.snapshot_date == snapshot_date,
+    ).first()
+
+
+class TestForcedAdjustmentSharesIntoSnapshot:
+    """issue #263：forced_adjustment 份额增量随 ex_date 当日入快照"""
+
+    def test_shares_only_increment_applied(self, test_db):
+        """验收 1：仅填 +1.00 份额（现金空）→ 当日快照份额 = 前值 + 1.00"""
+        _setup(test_db, "FA_P1")
+        _create_confirmed_event(test_db, "FA_P1", shares_change=Decimal("1.00"))
+
+        result = generate_daily_snapshots(test_db, "FA_P1", EX_DAY)
+        assert result["success"] is True
+
+        pos = _pos(test_db, "FA_P1", FUND, EX_DAY)
+        assert pos is not None
+        assert Decimal(str(pos.shares)) == Decimal("101.00")
+
+    def test_shares_and_cash_both_applied(self, test_db):
+        """验收 2：份额与现金同填 → 份额行与 CASH 行双双按增量生效"""
+        _setup(test_db, "FA_P2")
+        _create_confirmed_event(
+            test_db, "FA_P2",
+            shares_change=Decimal("1.00"), cash_change=Decimal("50.00"),
+        )
+
+        result = generate_daily_snapshots(test_db, "FA_P2", EX_DAY)
+        assert result["success"] is True
+
+        pos = _pos(test_db, "FA_P2", FUND, EX_DAY)
+        assert Decimal(str(pos.shares)) == Decimal("101.00")
+        cash_row = _pos(test_db, "FA_P2", "CASH", EX_DAY)
+        assert cash_row is not None
+        assert Decimal(str(cash_row.cash_amount)) == Decimal("1050.00")
+
+    def test_negative_shares_change_applied(self, test_db):
+        """验收 3：负份额 → 份额减少，total_value / unit_price 随之变化"""
+        _setup(test_db, "FA_P3")
+        _create_confirmed_event(test_db, "FA_P3", shares_change=Decimal("-2.00"))
+
+        result = generate_daily_snapshots(test_db, "FA_P3", EX_DAY)
+        assert result["success"] is True
+
+        pos = _pos(test_db, "FA_P3", FUND, EX_DAY)
+        assert Decimal(str(pos.shares)) == Decimal("98.00")
+
+        snap = test_db.query(PortfolioValueSnapshot).filter(
+            PortfolioValueSnapshot.portfolio_code == "FA_P3",
+            PortfolioValueSnapshot.snapshot_date == EX_DAY,
+        ).one()
+        # 98 份 × 1.0 + 现金 1000 = 1098；组合总份额仅因申赎变化（仍为 1100），
+        # 故 unit_price = 1098/1100 = 0.9982 —— 随份额调整而变
+        assert Decimal(str(snap.total_value)) == Decimal("1098.00")
+        assert Decimal(str(snap.unit_price)) == Decimal("0.9982")
+
+    def test_cash_dividend_shares_unchanged(self, test_db):
+        """验收 4（回归保护）：现金分红后基金行份额不变"""
+        _setup(test_db, "FA_P4")
+        _create_confirmed_event(
+            test_db, "FA_P4", event_type="cash_dividend", div_cash=Decimal("0.05"),
+        )
+
+        result = generate_daily_snapshots(test_db, "FA_P4", EX_DAY)
+        assert result["success"] is True
+
+        pos = _pos(test_db, "FA_P4", FUND, EX_DAY)
+        assert Decimal(str(pos.shares)) == Decimal("100.00")
+        cash_row = _pos(test_db, "FA_P4", "CASH", EX_DAY)
+        # 100 份 × 0.05 = 5.00 → 1005
+        assert Decimal(str(cash_row.cash_amount)) == Decimal("1005.00")
+
+
+class TestGenerateRecalcConsistency:
+    """验收 5：同一事件分别走 generate（重建最新日）与重算全区间 → 三表一致"""
+
+    def _row_signature(self, db, port_code: str):
+        positions = {
+            (p.product_code, p.market, p.platform_code): (
+                str(p.shares) if p.shares is not None else None,
+                str(p.cash_amount) if p.cash_amount is not None else None,
+                str(p.market_value),
+            )
+            for p in db.query(PortfolioPosition).filter(
+                PortfolioPosition.portfolio_code == port_code,
+                PortfolioPosition.snapshot_date == EX_DAY,
+            ).all()
+        }
+        snap = db.query(PortfolioValueSnapshot).filter(
+            PortfolioValueSnapshot.portfolio_code == port_code,
+            PortfolioValueSnapshot.snapshot_date == EX_DAY,
+        ).one()
+        holdings = {
+            h.investor_code: str(h.shares)
+            for h in db.query(InvestorHolding).filter(
+                InvestorHolding.portfolio_code == port_code,
+                InvestorHolding.snapshot_date == EX_DAY,
+            ).all()
+        }
+        return positions, (str(snap.total_value), str(snap.total_shares), str(snap.unit_price)), holdings
+
+    def test_generate_and_recalculate_agree(self, test_db):
+        # 两个同构组合（真实申赎/交易历史支撑基线，共用同一投资人）：
+        # FA_G 走 generate，FA_R 走重算
+        _setup_real_history(test_db, "FA_G", "FA_INV")
+        _setup_real_history(test_db, "FA_R", "FA_INV")
+        for pc in ("FA_G", "FA_R"):
+            _create_confirmed_event(
+                test_db, pc,
+                shares_change=Decimal("1.00"), cash_change=Decimal("50.00"),
+            )
+
+        gen = generate_daily_snapshots(test_db, "FA_G", EX_DAY)
+        assert gen["success"] is True
+
+        recalc = recalculate_snapshots(test_db, "FA_R", D0, EX_DAY)
+        errors = [r["errors"] for r in recalc["results"] if r["errors"]]
+        assert not errors, f"重算失败: {errors}"
+        test_db.commit()  # recalculate 不 commit，事务边界归调用方
+
+        assert self._row_signature(test_db, "FA_G") == self._row_signature(test_db, "FA_R")
+
+        # 重算后事件的用户输入值不得丢失（级联回退 + 重确认往返保真）
+        recalc_event = test_db.query(ShareChangeEvent).filter(
+            ShareChangeEvent.portfolio_code == "FA_R",
+            ShareChangeEvent.event_type == "forced_adjustment",
+        ).one()
+        assert recalc_event.status == "confirmed"
+        assert Decimal(str(recalc_event.shares_change)) == Decimal("1.00")
+        assert Decimal(str(recalc_event.cash_change)) == Decimal("50.00")

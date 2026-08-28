@@ -854,9 +854,13 @@ def _cascade_unconfirm_share_change_events(
         event.confirmed_at = None
         event.entitlement_shares = None
         event.shares_before = None
-        event.shares_change = None
-        event.shares_after = None
-        event.cash_change = None
+        # issue #263：forced_adjustment 的 shares_change/shares_after/cash_change 是
+        # 用户直填值（唯一存处），回退不得清空，否则重算重确认时静默丢失调整量；
+        # 其余类型的这些字段为确认时计算值，照常清空
+        if event.event_type != "forced_adjustment":
+            event.shares_change = None
+            event.shares_after = None
+            event.cash_change = None
         result.append({"id": event.id, "action": "unconfirmed"})
         logger.info(
             f"级联取消确认事件: event_id={event.id}, "
@@ -1049,7 +1053,10 @@ def _generate_portfolio_position(
                 if cash_key not in positions:
                     positions[cash_key] = {"shares": None, "cash_amount": Decimal("0"), "cost_price": None}
                 positions[cash_key]["cash_amount"] += Decimal(str(event.cash_change))
-            continue
+            # issue #263：cash_dividend 恒有 shares_change=0（_compute_event_fields），
+            # 跳过份额应用段；forced_adjustment 份额为用户直填，须落入下方份额应用段
+            if event.event_type == "cash_dividend":
+                continue
 
         # 按平台精确匹配持仓
         fund_key = (event.product_code, event.market, event.platform_code)

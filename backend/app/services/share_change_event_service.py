@@ -389,10 +389,14 @@ def unconfirm_share_change_event(db: Session, event: ShareChangeEvent) -> ShareC
     # 置 pending 并清空确认时回写的计算字段
     event.status = "pending"
     event.confirmed_at = None
-    event.shares_change = None
-    event.shares_after = None
-    event.cash_change = None
     event.entitlement_shares = None
     event.shares_before = None
+    # issue #263：forced_adjustment 的 shares_change/shares_after/cash_change 是
+    # 用户直填值（唯一存处），unconfirm 不得清空，否则重新确认时静默丢失调整量；
+    # 其余类型的这些字段为确认时计算值，照常清空
+    if event.event_type != "forced_adjustment":
+        event.shares_change = None
+        event.shares_after = None
+        event.cash_change = None
 
     return event
