@@ -42,7 +42,7 @@ simplejson==4.1.1
 click==8.4.2
 
 # Auth
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 
 # Dev / Testing（issue #172 全锁：以干净环境实际解析版本为准，
 # 本地 + CI 全量测试验证通过；升级需配套重验）
