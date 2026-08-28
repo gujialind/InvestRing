@@ -321,7 +321,6 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 * **一切改动经 `feature/` → PR → `main`**：从最新 `origin/main` 不从本地旧 ref 重建。拉短命分支（`feature/<issue号>-<简述>`、`hotfix/<issue号>-<简述>`；AI 代理可用 `trae/xxx`、`codex/xxx` 前缀），
 
-
 * 手动部署（`deploy.yml` `workflow_dispatch`）只接受已有镜像 tag（回滚/重部署）。
 
 ### 8.2 Issue 约定
@@ -329,19 +328,15 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 * **新功能 / 大改 / 涉及业务规则或 DB 迁移**：必须先提 issue 再动手；修 bug 若影响面大或需留痕，同样先提 issue。
 
 * 按模板提交 `.github/ISSUE_TEMPLATE/`（bug\_report / feature\_request / chore）。
-* 
-* **验收断言必须可勾选**（"执行 X → 得到 Y"）：它是给 AI 的验收标准，也是后续测试用例的来源。
 
 * **标题前缀与 Conventional Commits 对齐**：`[bug]` / `[feat]` / `[chore]`（含文档/运维类）。
 
 
 ### 8.3 PR 约定
 
-* PR 描述必含：改动内容 / 关联 issue（`fixes #N` 自动关闭）/ 测试验证 / 部署影响（DB 迁移、新依赖、回滚要点）。
+* 使用 PR 模板 `.github/PULL_REQUEST_TEMPLATE.md`。
 
-* 模板见 `.github/PULL_REQUEST_TEMPLATE.md`。
-
-### 8.4 提交信息
+### 8.4 commit 信息
 
 * Conventional Commits 风格：`fix:` / `feat:` / `docs:` / `refactor:` / `chore:`，附简短说明并尽量带 issue 号（如 `fix(snapshot): 快照净值严格匹配 (#96)`）。
 

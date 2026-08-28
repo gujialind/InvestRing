@@ -2459,6 +2459,11 @@
         ],
         "summary": "Get Price Data",
         "operationId": "get_price_data_api_market_data_products__code___market__price_data_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "code",
@@ -2574,6 +2579,11 @@
         "summary": "Get Nav Coverage Endpoint",
         "description": "校验区间内净值同步覆盖情况",
         "operationId": "get_nav_coverage_endpoint_api_market_data_products__code___market__nav_coverage_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "code",
@@ -2654,6 +2664,11 @@
         ],
         "summary": "Sync Price Data Endpoint",
         "operationId": "sync_price_data_endpoint_api_market_data_products__code___market__sync_price_data_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "code",
@@ -2720,6 +2735,11 @@
         ],
         "summary": "Sync History",
         "operationId": "sync_history_api_market_data_products__code___market__sync_history_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "code",
