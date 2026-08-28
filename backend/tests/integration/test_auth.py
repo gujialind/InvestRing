@@ -4,8 +4,11 @@
 # 覆盖 POST /api/auth/login, POST /api/auth/logout, PUT /api/auth/password
 # ============================================================================
 
+import os
+import secrets
 import pytest
-from datetime import timedelta
+from datetime import datetime, timedelta
+from unittest import mock
 
 from app.utils.security import create_access_token, get_password_hash
 from tests.factories import create_investor
@@ -149,4 +152,41 @@ class TestAccessControl:
         )
         headers = {"Authorization": f"Bearer {token}"}
         resp = client.get("/api/portfolios", headers=headers)
+        assert resp.status_code == 401
+
+
+class TestSecretKeyStartupGuard:
+    """issue #255: SECRET_KEY 默认占位值启动拒绝 + 默认串签名 token 失效"""
+
+    def test_default_placeholder_secret_rejected(self):
+        """SECRET_KEY 为默认占位值时应拒绝实例化（拒绝启动）"""
+        from app.config import Settings, INSECURE_DEFAULT_SECRET_KEY
+
+        with mock.patch.dict(os.environ, {"SECRET_KEY": INSECURE_DEFAULT_SECRET_KEY}):
+            with pytest.raises(RuntimeError):
+                Settings()
+
+    def test_strong_random_secret_accepted(self):
+        """随机强密钥（≥32 字节）应正常实例化"""
+        from app.config import Settings
+
+        with mock.patch.dict(os.environ, {"SECRET_KEY": secrets.token_hex(32)}):
+            settings = Settings()
+        assert len(settings.secret_key) >= 32
+
+    def test_token_signed_with_default_secret_rejected_401(self, client):
+        """默认占位串签名的 token（轮换前的旧 token）验签失败 → 401"""
+        from jose import jwt
+        from app.config import INSECURE_DEFAULT_SECRET_KEY
+
+        token = jwt.encode(
+            {"sub": "ADMIN", "role": "admin",
+             "exp": datetime.utcnow() + timedelta(days=1)},
+            INSECURE_DEFAULT_SECRET_KEY,
+            algorithm="HS256",
+        )
+        resp = client.get(
+            "/api/portfolios",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         assert resp.status_code == 401
