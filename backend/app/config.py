@@ -1,6 +1,9 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
+# 哨兵默认值：仅为启动校验给出明确报错，任何环境都禁止实际使用（issue #255）
+INSECURE_DEFAULT_SECRET_KEY = "your-secret-key-change-in-production"
+
 
 class Settings(BaseSettings):
     # Database
@@ -12,7 +15,7 @@ class Settings(BaseSettings):
     database_url: str = ""
     
     # Security
-    secret_key: str = "your-secret-key-change-in-production"
+    secret_key: str = INSECURE_DEFAULT_SECRET_KEY
     token_expire_days: int = 7
     
     # Tushare API
@@ -44,6 +47,12 @@ class Settings(BaseSettings):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        if self.secret_key == INSECURE_DEFAULT_SECRET_KEY:
+            raise RuntimeError(
+                "SECRET_KEY 仍为默认占位值，拒绝启动（issue #255）。"
+                "请生成随机强密钥（≥32 字节，如 `openssl rand -hex 32`）"
+                "并写入 backend/.env 的 SECRET_KEY 或环境变量"
+            )
         if not self.database_url:
             self.database_url = f"mysql+pymysql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
 
