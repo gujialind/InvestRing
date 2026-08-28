@@ -352,3 +352,9 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 3. **不得引入未要求的依赖或表结构改动**；涉及 DB 变更必须同步提供 Alembic 迁移脚本。
 4. **仓库文档（README/AGENTS/runbook）随代码同一次提交更新**；设计决策与方案记录进 issue 讨论。
 5. 当你执行一项任务发现有任何执行细节不明确时，你必须向我提问，而不是自做主张，在我回答之后仍有不明确的行细节时，你需要向我追问，直到了解了所有细节。
+
+### 8.6 安全扫描响应（issue #252）
+
+* **Security Scan 红灯（定时或手动触发的 `security-scan.yml` 失败）必须在下一个工作日内评估处置**——修复漏洞或在 issue 中记录豁免理由，不允许悬空。
+* 漏洞修复与依赖升级一律走 `feature/` 分支 + PR，CI 全绿方可合入；扫描豁免（如 `--ignore-vuln`）必须在 `security-scan.yml` 内注释记录理由与移除条件。
+* Dependabot（`.github/dependabot.yml`）每周自动提依赖升级 PR，与 weekly 扫描互补；Dependabot 漏洞告警（仓库设置项）开启后同样按本条时限响应。

@@ -1,0 +1,24 @@
+# Dependabot 版本更新（issue #252）：每周检查三类生态的依赖升级并自动提 PR。
+# 与 Security Scan（security-scan.yml）互补：告警发现漏洞，这里提升级 PR。
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
