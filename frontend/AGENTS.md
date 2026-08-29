@@ -9,7 +9,18 @@
 ../scripts/verify-frontend.sh --quick  # 跳过 build
 ```
 
-等价于 `npm run lint` + `npx tsc --noEmit` + `npm run build`；构建期强制 0 error。
+等价于 `npm run lint` + `npx tsc --noEmit` + `npm run test` + `npm run build`；构建期强制 0 error。
+
+## 单元测试（Vitest，issue #253）
+
+```bash
+npm run test         # vitest run（全量，<10s）
+npm run test:watch   # watch 模式
+```
+
+- 范围：**lib 层纯逻辑**（utils format 系 / tradePairs 结对 / allocation 聚合 / dimensions 维度 / validation 表单校验），node 环境，不引 jsdom/RTL——组件交互与运行时行为归 Playwright E2E（职责不重叠）。
+- 约定：测试与源码 colocated（`src/lib/*.test.ts`），显式 `import { describe, it, expect } from "vitest"`（未开 globals）；alias `@` 在 `vitest.config.ts` 手动维护。
+- 注意：`src/lib/api/` 是纯类型化 axios 薄封装（无数据转换逻辑），不在单测范围；新增 lib 纯函数应同步补测试。
 
 ## E2E（Playwright）
 
