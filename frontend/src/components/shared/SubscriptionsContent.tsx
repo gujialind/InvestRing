@@ -43,7 +43,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatShares, formatNav, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
+import { formatCurrency, formatShares, formatSharesUnit, formatNav, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
 import { validatePlatformCode, parsePositiveNumber } from "@/lib/validation";
 import { Badge } from "@/components/ui/badge";
 import { TRADE_DIRECTION_COLORS } from "@/lib/colors";
@@ -514,7 +514,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                       <Label htmlFor="shares">份额</Label>
                       {formData.investor_code && availableShares !== undefined && (
                         <span className="text-xs text-muted-foreground">
-                          可用 {formatShares(availableShares)} 份
+                          可用 {formatSharesUnit(availableShares)}
                         </span>
                       )}
                     </div>
@@ -601,8 +601,8 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                   <TableHead>投资人</TableHead>
                   <TableHead>平台</TableHead>
                   <TableHead>类型</TableHead>
-                  <TableHead className="text-right">金额/份额</TableHead>
-                  <TableHead className="text-right">净值</TableHead>
+                  <TableHead className="number-cell">金额/份额</TableHead>
+                  <TableHead className="number-cell">净值</TableHead>
                   <TableHead>申请日期</TableHead>
                   <TableHead>确认日期</TableHead>
                   <TableHead>状态</TableHead>
@@ -616,7 +616,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                       <NameCodeCell code={sub.investor_code} nameMap={investorNameMap} />
                     </TableCell>
                     <TableCell>
-                      {sub.platform_code ? <NameCodeCell code={sub.platform_code} nameMap={platformNameMap} /> : "-"}
+                      {sub.platform_code ? <NameCodeCell code={sub.platform_code} nameMap={platformNameMap} /> : "--"}
                     </TableCell>
                     <TableCell>
                       {/* 方向标识无状态语义：neutral badge + 方向色圆点（lib/colors，#127） */}
@@ -628,10 +628,10 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                         {sub.sub_type === "subscribe" ? "申购" : "赎回"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="number-cell">
                       {sub.amount ? formatCurrency(sub.amount) : formatShares(sub.shares || 0)}
                     </TableCell>
-                    <TableCell className="text-right">{formatNav(sub.unit_price)}</TableCell>
+                    <TableCell className="number-cell">{formatNav(sub.unit_price)}</TableCell>
                     <TableCell>{sub.apply_date}</TableCell>
                     <TableCell>
                       {/* 决策②：pending 的 confirm_date 是预计确认日，主次双行标注「预计」 */}
@@ -645,7 +645,7 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                           sub.confirm_date
                         )
                       ) : (
-                        "-"
+                        "--"
                       )}
                     </TableCell>
                     <TableCell>

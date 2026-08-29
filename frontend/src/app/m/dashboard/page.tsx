@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { formatCurrency, formatShares, formatReturnRate, getReturnColorClass, getStatusBadgeVariant } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, formatReturnRate, getReturnColorClass, getStatusBadgeVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
@@ -117,7 +117,7 @@ export default function MobileDashboardPage() {
                       <p className="text-sm font-medium">
                         {sub.sub_type === "subscribe"
                           ? formatCurrency(sub.amount || 0)
-                          : `${formatShares(sub.shares || 0)} 份`
+                          : formatSharesUnit(sub.shares || 0)
                         }
                       </p>
                       <p className="text-xs text-muted-foreground">

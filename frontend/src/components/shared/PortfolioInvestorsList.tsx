@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatNumber, formatShares } from "@/lib/utils";
+import { formatNumber, formatSharesUnit } from "@/lib/utils";
 
 export interface PortfolioInvestorItem {
   investor_code: string;
@@ -46,7 +46,7 @@ export default function PortfolioInvestorsList({
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="font-medium">{formatShares(investor.shares)} 份</p>
+                  <p className="font-medium">{formatSharesUnit(investor.shares)}</p>
                   <p className="text-sm text-muted-foreground">
                     占比:{" "}
                     {totalShares > 0

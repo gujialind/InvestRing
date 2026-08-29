@@ -11,6 +11,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import { CHART_OTHER, NAV_LINE } from "@/lib/colors";
+import { formatNav } from "@/lib/utils";
 
 interface NavPoint {
   date: string;
@@ -44,10 +45,10 @@ export default function NavCurve({ data, height = 300, initialNav = 1.0 }: NavCu
         <YAxis
           domain={["auto", "auto"]}
           tick={{ fontSize: 12 }}
-          tickFormatter={(value) => value.toFixed(4)}
+          tickFormatter={(value) => formatNav(value)}
         />
         <Tooltip
-          formatter={(value: number) => [value.toFixed(4), "净值"]}
+          formatter={(value: number) => [formatNav(value), "净值"]}
           labelFormatter={(label) => `日期: ${label}`}
         />
         <ReferenceLine

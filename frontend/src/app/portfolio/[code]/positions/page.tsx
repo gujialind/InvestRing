@@ -25,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatShares, formatNav, formatReturnRate, getReturnColorClass, toDateOnly } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, formatNav, formatReturnRate, getReturnColorClass, toDateOnly } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { platformApi, ApiException } from "@/lib/api";
@@ -533,12 +533,12 @@ export default function PositionsPage() {
                       <TableHead>产品代码</TableHead>
                       <TableHead>产品名称</TableHead>
                       <TableHead>市场</TableHead>
-                      <TableHead className="text-right">持仓份额</TableHead>
-                      <TableHead className="text-right">成本价</TableHead>
-                      <TableHead className="text-right">当前价</TableHead>
-                      <TableHead className="text-right">市值</TableHead>
-                      <TableHead className="text-right">盈亏</TableHead>
-                      <TableHead className="text-right">收益率</TableHead>
+                      <TableHead className="number-cell">持仓份额</TableHead>
+                      <TableHead className="number-cell">成本价</TableHead>
+                      <TableHead className="number-cell">当前价</TableHead>
+                      <TableHead className="number-cell">市值</TableHead>
+                      <TableHead className="number-cell">盈亏</TableHead>
+                      <TableHead className="number-cell">收益率</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -547,34 +547,34 @@ export default function PositionsPage() {
                         <TableCell className="font-medium">{position.product_code}</TableCell>
                         <TableCell>{position.product_name}</TableCell>
                         <TableCell>{position.market || "--"}</TableCell>
-                        <TableCell className="text-right">
-                          {position.shares ? formatShares(position.shares) : "-"}
+                        <TableCell className="number-cell">
+                          {formatSharesUnit(position.shares)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {position.cost_price ? formatNav(position.cost_price) : "-"}
+                        <TableCell className="number-cell">
+                          {formatNav(position.cost_price)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {position.unit_price ? formatNav(position.unit_price) : "-"}
+                        <TableCell className="number-cell">
+                          {formatNav(position.unit_price)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {position.market_value ? formatCurrency(position.market_value) : "-"}
+                        <TableCell className="number-cell">
+                          {formatCurrency(position.market_value)}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="number-cell">
                           {position.profit_loss !== undefined && position.profit_loss !== null ? (
                             <span className={getReturnColorClass(position.profit_loss)}>
                               {formatCurrency(position.profit_loss)}
                             </span>
                           ) : (
-                            "-"
+                            "--"
                           )}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="number-cell">
                           {position.profit_loss_percent !== undefined && position.profit_loss_percent !== null ? (
                             <span className={getReturnColorClass(position.profit_loss_percent)}>
                               {formatReturnRate(position.profit_loss_percent)}
                             </span>
                           ) : (
-                            "-"
+                            "--"
                           )}
                         </TableCell>
                       </TableRow>

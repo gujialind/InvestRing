@@ -33,7 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatNumber, toDateOnly, parseDateOnly, getStatusBadgeVariant } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, toDateOnly, parseDateOnly, getStatusBadgeVariant } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
 import { ShareChangeEventCreate, ApiException } from "@/lib/api";
@@ -401,8 +401,8 @@ export default function ShareChangeEventsPage() {
                       <TableHead>平台</TableHead>
                       <TableHead>除息日</TableHead>
                       <TableHead>权益登记日</TableHead>
-                      <TableHead className="text-right">份额变化</TableHead>
-                      <TableHead className="text-right">现金变化</TableHead>
+                      <TableHead className="number-cell">份额变化</TableHead>
+                      <TableHead className="number-cell">现金变化</TableHead>
                       <TableHead>状态</TableHead>
                       <TableHead>操作</TableHead>
                     </TableRow>
@@ -415,11 +415,11 @@ export default function ShareChangeEventsPage() {
                         <TableCell>{event.platform_code || "全部"}</TableCell>
                         <TableCell>{event.ex_date}</TableCell>
                         <TableCell>{event.entitlement_date}</TableCell>
-                        <TableCell className="text-right">
-                          {event.shares_change ? formatNumber(event.shares_change) : "--"}
+                        <TableCell className="number-cell">
+                          {formatSharesUnit(event.shares_change)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {event.cash_change ? formatCurrency(event.cash_change) : "--"}
+                        <TableCell className="number-cell">
+                          {formatCurrency(event.cash_change)}
                         </TableCell>
                         <TableCell>
                           <Badge variant={getStatusBadgeVariant(event.status)}>

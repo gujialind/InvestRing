@@ -42,7 +42,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatShares, formatNav, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, formatNav, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TRADE_DIRECTION_COLORS } from "@/lib/colors";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo, Filter } from "lucide-react";
@@ -436,7 +436,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
       </TableCell>
       <TableCell>{formatMarketName(trade.market)}</TableCell>
       <TableCell>
-        {trade.platform_code ? <NameCodeCell code={trade.platform_code} nameMap={platformNameMap} /> : "-"}
+        {trade.platform_code ? <NameCodeCell code={trade.platform_code} nameMap={platformNameMap} /> : "--"}
       </TableCell>
       <TableCell>
         {/* 方向标识无状态语义：neutral badge + 方向色圆点（lib/colors，#127） */}
@@ -449,17 +449,17 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
         </Badge>
       </TableCell>
       {/* 金额=净额 amount（#173 口径：买入 金额+手续费=实扣、卖出 金额−手续费=实到）；
-          truthy 判断使 pending 卖出（amount≈0/fee、确认后才回填）显示 "-" */}
-      <TableCell className="text-right">
-        {trade.amount ? formatCurrency(trade.amount) : "-"}
+          真 0 正常显示 ¥0.00 / 0.00 份，空值由 format 函数 fallback 出 --（#249） */}
+      <TableCell className="number-cell">
+        {formatCurrency(trade.amount)}
       </TableCell>
-      <TableCell className="text-right">
-        {trade.shares ? formatShares(trade.shares) : "-"}
+      <TableCell className="number-cell">
+        {formatSharesUnit(trade.shares)}
       </TableCell>
-      <TableCell className="text-right">
-        {trade.fee ? formatCurrency(trade.fee) : "-"}
+      <TableCell className="number-cell">
+        {formatCurrency(trade.fee)}
       </TableCell>
-      <TableCell className="text-right">{formatNav(trade.price)}</TableCell>
+      <TableCell className="number-cell">{formatNav(trade.price)}</TableCell>
       <TableCell>{trade.trade_date}</TableCell>
       <TableCell>
         {/* 决策②：pending 的 confirm_date 是预计确认日，主次双行标注「预计」 */}
@@ -473,7 +473,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
             trade.confirm_date
           )
         ) : (
-          "-"
+          "--"
         )}
       </TableCell>
       <TableCell>
@@ -560,7 +560,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
         <TableCell />
         <TableCell />
         <TableCell />
-        <TableCell className="text-right">
+        <TableCell className="number-cell">
           <span className="text-xs text-foreground">
             {meta.sign}
             {formatCurrency(sub.amount ?? 0)}
@@ -790,10 +790,10 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                   <TableHead>市场</TableHead>
                   <TableHead>平台</TableHead>
                   <TableHead>类型</TableHead>
-                  <TableHead className="text-right">金额</TableHead>
-                  <TableHead className="text-right">份额</TableHead>
-                  <TableHead className="text-right">手续费</TableHead>
-                  <TableHead className="text-right">价格</TableHead>
+                  <TableHead className="number-cell">金额</TableHead>
+                  <TableHead className="number-cell">份额</TableHead>
+                  <TableHead className="number-cell">手续费</TableHead>
+                  <TableHead className="number-cell">价格</TableHead>
                   <TableHead>交易日期</TableHead>
                   <TableHead>确认日期</TableHead>
                   <TableHead>状态</TableHead>
@@ -864,7 +864,7 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                     <span>
                       {editingTrade.platform_code
                         ? `${platformNameMap.get(editingTrade.platform_code) ?? editingTrade.platform_code}（${editingTrade.platform_code}）`
-                        : "-"}
+                        : "--"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
