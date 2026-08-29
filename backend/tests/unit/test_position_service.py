@@ -430,3 +430,114 @@ class TestCalculateInvestorAvailableSharesAsOfDate:
             test_db, "INV_P2", "INV_I2", as_of_date=date(2025, 1, 10)
         )
         assert shares == Decimal("400")
+
+
+class TestCalculateAvailableSharesEventWindow:
+    """calculate_available_shares 的快照后事件增量口径（#277）：
+    只计平台级行、只计负向、窗口 (最新快照日, as_of]"""
+
+    SNAP = date(2025, 1, 6)      # 基线快照日（周一）
+    EX = date(2025, 1, 8)        # 事件除息日（窗口内）
+
+    def _seed(self, db, port_code: str, plat: str, shares: float = 1000.0):
+        create_portfolio(db, code=port_code, status="active")
+        create_platform(db, code=plat)
+        create_product(db, code="EWF", market="CN_OTC")
+        create_value_snapshot(
+            db, port_code, self.SNAP,
+            total_value=shares, total_shares=shares, unit_price=1.0,
+        )
+        create_position_snapshot(
+            db, port_code, "EWF", "CN_OTC", self.SNAP,
+            shares=shares, platform_code=plat,
+        )
+
+    def _event(self, db, port_code: str, *, shares_change, status="confirmed",
+               platform_code="EWF_PLAT", market="CN_OTC", ex_date=None,
+               event_type="forced_adjustment", parent_event_id=None):
+        from tests.factories import create_share_change_event
+        return create_share_change_event(
+            db, port_code, "EWF", market,
+            event_type=event_type,
+            ex_date=ex_date or self.EX,
+            entitlement_date=date(2025, 1, 3),
+            status=status, platform_code=platform_code,
+            shares_change=shares_change, parent_event_id=parent_event_id,
+        )
+
+    def test_negative_event_deducted(self, test_db):
+        """负向事件确认后、入快照前：可用份额扣减变动量"""
+        self._seed(test_db, "EWF_P1", "EWF_PLAT")
+        self._event(test_db, "EWF_P1", shares_change=Decimal("-100.00"))
+        shares = calculate_available_shares(test_db, "EWF_P1", "EWF", "CN_OTC")
+        assert shares == Decimal("900.00")
+
+    def test_positive_event_not_counted(self, test_db):
+        """正向事件窗口内保守低估：不加回（防撤销后事实超卖）"""
+        self._seed(test_db, "EWF_P2", "EWF_PLAT")
+        self._event(test_db, "EWF_P2", shares_change=Decimal("100.00"))
+        shares = calculate_available_shares(test_db, "EWF_P2", "EWF", "CN_OTC")
+        assert shares == Decimal("1000.00")
+
+    def test_parent_child_no_double_count(self, test_db):
+        """基金级父记录（持汇总值）不计入，只计平台级子记录，防父子双计"""
+        self._seed(test_db, "EWF_P3", "EWF_PLAT")
+        create_platform(test_db, code="EWF_PLAT2")
+        father = self._event(test_db, "EWF_P3", shares_change=Decimal("-200.00"),
+                             platform_code=None, event_type="share_merge")
+        self._event(test_db, "EWF_P3", shares_change=Decimal("-150.00"),
+                    parent_event_id=father.id, event_type="share_merge")
+        self._event(test_db, "EWF_P3", shares_change=Decimal("-50.00"),
+                    platform_code="EWF_PLAT2", parent_event_id=father.id,
+                    event_type="share_merge")
+        shares = calculate_available_shares(test_db, "EWF_P3", "EWF", "CN_OTC")
+        # 1000 − 150 − 50 = 800（父记录 −200 不双计）
+        assert shares == Decimal("800.00")
+
+    def test_market_filter(self, test_db):
+        """传 market 时只计同 market 事件"""
+        self._seed(test_db, "EWF_P4", "EWF_PLAT")
+        create_product(test_db, code="EWF", market="SZ")  # 事件复合外键要求产品存在
+        self._event(test_db, "EWF_P4", shares_change=Decimal("-100.00"), market="SZ")
+        assert calculate_available_shares(
+            test_db, "EWF_P4", "EWF", "CN_OTC") == Decimal("1000.00")
+        assert calculate_available_shares(
+            test_db, "EWF_P4", "EWF") == Decimal("900.00")
+
+    def test_as_of_date_upper_bound(self, test_db):
+        """as_of_date 截止：ex_date > as_of 的事件不扣"""
+        self._seed(test_db, "EWF_P5", "EWF_PLAT")
+        self._event(test_db, "EWF_P5", shares_change=Decimal("-100.00"),
+                    ex_date=date(2025, 1, 15))
+        assert calculate_available_shares(
+            test_db, "EWF_P5", "EWF", "CN_OTC",
+            as_of_date=date(2025, 1, 10)) == Decimal("1000.00")
+        assert calculate_available_shares(
+            test_db, "EWF_P5", "EWF", "CN_OTC",
+            as_of_date=date(2025, 1, 16)) == Decimal("900.00")
+
+    def test_event_within_snapshot_not_counted(self, test_db):
+        """ex_date <= 最新快照日的事件已入基线，不重复扣减"""
+        self._seed(test_db, "EWF_P6", "EWF_PLAT")
+        self._event(test_db, "EWF_P6", shares_change=Decimal("-100.00"),
+                    ex_date=self.SNAP)
+        shares = calculate_available_shares(test_db, "EWF_P6", "EWF", "CN_OTC")
+        assert shares == Decimal("1000.00")
+
+    def test_no_snapshot_counts_all(self, test_db):
+        """无快照基线时全部负向事件计入（等价现金侧 1970 哨兵）"""
+        create_portfolio(test_db, code="EWF_P7", status="active")
+        create_platform(test_db, code="EWF_PLAT")
+        create_product(test_db, code="EWF", market="CN_OTC")
+        self._event(test_db, "EWF_P7", shares_change=Decimal("-30.00"))
+        shares = calculate_available_shares(test_db, "EWF_P7", "EWF", "CN_OTC")
+        assert shares == Decimal("-30.00")
+
+    def test_pending_and_zero_events_ignored(self, test_db):
+        """pending 事件与 shares_change=0（如现金分红）不影响可用份额"""
+        self._seed(test_db, "EWF_P8", "EWF_PLAT")
+        self._event(test_db, "EWF_P8", shares_change=Decimal("-100.00"), status="pending")
+        self._event(test_db, "EWF_P8", shares_change=Decimal("0"),
+                    event_type="cash_dividend")
+        shares = calculate_available_shares(test_db, "EWF_P8", "EWF", "CN_OTC")
+        assert shares == Decimal("1000.00")

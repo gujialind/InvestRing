@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.share_change_event import ShareChangeEvent
 from app.models.portfolio import Portfolio
 from app.models.platform import Platform
+from app.models.product import Product
 from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.services.trading_utils import is_trading_day, get_latest_snapshot_date
@@ -67,6 +68,55 @@ def _compute_event_fields(event: ShareChangeEvent) -> None:
             event.shares_change = quantize_shares(Decimal(str(event.shares_change)))
         if event.cash_change is not None:
             event.cash_change = quantize_amount(Decimal(str(event.cash_change)))
+
+
+# issue #279：现金型/在途虚拟产品（product_type 口径，种子/迁移 0006），
+# 份额变动不得作用于非净值型资产（cash_amount IS NOT NULL 行）
+CASH_LIKE_PRODUCT_TYPES = {"CASH", "IN_TRANSIT"}
+# 确认时结构上必然产生份额变动的事件类型（_compute_event_fields 由基数/比例推导，
+# 与用户是否显式填写 shares_change 无关）
+STRUCTURAL_SHARE_TYPES = {"share_split", "share_merge", "bonus_share", "reinvest_dividend"}
+
+
+def _validate_adjustment_not_empty(
+    event_type: str,
+    shares_change: Optional[Decimal],
+    cash_change: Optional[Decimal],
+) -> None:
+    """issue #279：forced_adjustment 必须至少填写一项，否则确认后零效果且无告警。"""
+    if event_type == "forced_adjustment" and shares_change is None and cash_change is None:
+        raise BusinessError(
+            "EMPTY_ADJUSTMENT",
+            "forced_adjustment 必须至少填写 shares_change / cash_change 之一",
+        )
+
+
+def _validate_product_allows_shares_change(
+    db: Session,
+    product_code: Optional[str],
+    market: Optional[str],
+    event_type: str,
+    shares_change: Optional[Decimal],
+) -> None:
+    """issue #279：现金型/在途产品不得承载份额变动。
+
+    STRUCTURAL_SHARE_TYPES 无条件拒绝（确认时必产生份额变动）；
+    其余类型（含 forced_adjustment）在显式填写 shares_change 时拒绝。
+    产品不存在时放行（维持既有行为，不引入新的存在性校验）。
+    """
+    if product_code is None:
+        return
+    query = db.query(Product).filter(Product.code == product_code)
+    if market is not None:
+        query = query.filter(Product.market == market)
+    product_types = {row.product_type for row in query.all()}
+    if not (product_types & CASH_LIKE_PRODUCT_TYPES):
+        return
+    if event_type in STRUCTURAL_SHARE_TYPES or shares_change is not None:
+        raise BusinessError(
+            "SHARES_CHANGE_ON_CASH_PRODUCT",
+            f"{product_code} 为现金型/在途虚拟产品，不接受份额变动",
+        )
 
 
 def check_platform_coverage(
@@ -218,6 +268,10 @@ def create_share_change_event(
     if not portfolio:
         raise NotFoundError("NOT_FOUND", "组合不存在")
 
+    # issue #279：双空强制调整与现金型产品份额变动在创建期拦截（REST/CLI 共用）
+    _validate_adjustment_not_empty(event_type, shares_change, cash_change)
+    _validate_product_allows_shares_change(db, product_code, market, event_type, shares_change)
+
     # 分级校验：平台级必填 platform_code，基金级禁止指定
     if event_type in PLATFORM_LEVEL_TYPES:
         if not platform_code:
@@ -298,6 +352,17 @@ def update_share_change_event(
             db, event.portfolio_code, effective_ex_date, effective_entitlement_date
         )
 
+    # issue #279：按合并后值校验（event_type/product_code 不可改，恒取事件现值），
+    # 封死 PUT 改成双空或为现金型产品补填份额变动的绕过路径
+    merged_shares_change = updates.get("shares_change", event.shares_change)
+    merged_cash_change = updates.get("cash_change", event.cash_change)
+    _validate_adjustment_not_empty(
+        event.event_type, merged_shares_change, merged_cash_change
+    )
+    _validate_product_allows_shares_change(
+        db, event.product_code, event.market, event.event_type, merged_shares_change
+    )
+
     for field, value in updates.items():
         setattr(event, field, value)
     return event
@@ -307,6 +372,14 @@ def confirm_share_change_event(db: Session, event: ShareChangeEvent) -> ShareCha
     """确认份额变动事件（回写 entitlement_shares、计算、基金级自动拆分）。不 commit。"""
     if event.status != "pending":
         raise BusinessError("INVALID_STATUS", "仅 pending 状态可确认")
+
+    # issue #279：确认侧兜底校验（防存量脏数据或绕过创建/更新入口直造的记录）
+    _validate_adjustment_not_empty(
+        event.event_type, event.shares_change, event.cash_change
+    )
+    _validate_product_allows_shares_change(
+        db, event.product_code, event.market, event.event_type, event.shares_change
+    )
 
     # 校验权益登记日持仓快照是否存在
     position_snapshot = db.query(PortfolioPosition).filter(
@@ -323,16 +396,36 @@ def confirm_share_change_event(db: Session, event: ShareChangeEvent) -> ShareCha
         except ValueError as e:
             raise BusinessError("MISSING_POSITION_SNAPSHOT", str(e))
     else:
-        # 平台级事件：按 platform_code 过滤读取 entitlement_shares
-        entitlement_position = db.query(PortfolioPosition).filter(
-            PortfolioPosition.portfolio_code == event.portfolio_code,
-            PortfolioPosition.product_code == event.product_code,
-            PortfolioPosition.platform_code == event.platform_code,
-            PortfolioPosition.snapshot_date == event.entitlement_date,
-        ).first()
-        entitlement_shares = (
-            Decimal(str(entitlement_position.shares or 0)) if entitlement_position else Decimal("0")
-        )
+        if event.event_type == "forced_adjustment":
+            # issue #278：确认侧精查——权益登记日必须存在 (产品, market, 平台)
+            # 持仓行，否则事件指向不存在的持仓（LOF market 误填是最典型场景），
+            # 确认后会在快照生成中以 POSITION_NOT_FOUND 硬拒绝，此处提前快失败
+            ent_position = db.query(PortfolioPosition).filter(
+                PortfolioPosition.portfolio_code == event.portfolio_code,
+                PortfolioPosition.product_code == event.product_code,
+                PortfolioPosition.market == event.market,
+                PortfolioPosition.platform_code == event.platform_code,
+                PortfolioPosition.snapshot_date == event.entitlement_date,
+            ).first()
+            if not ent_position:
+                raise BusinessError(
+                    "POSITION_NOT_FOUND",
+                    f"权益登记日 {event.entitlement_date} 无对应持仓 "
+                    f"{event.product_code}({event.market}) 平台 {event.platform_code}，"
+                    f"请核对产品/市场/平台",
+                )
+            entitlement_shares = Decimal(str(ent_position.shares or 0))
+        else:
+            # 平台级事件：按 platform_code 过滤读取 entitlement_shares
+            entitlement_position = db.query(PortfolioPosition).filter(
+                PortfolioPosition.portfolio_code == event.portfolio_code,
+                PortfolioPosition.product_code == event.product_code,
+                PortfolioPosition.platform_code == event.platform_code,
+                PortfolioPosition.snapshot_date == event.entitlement_date,
+            ).first()
+            entitlement_shares = (
+                Decimal(str(entitlement_position.shares or 0)) if entitlement_position else Decimal("0")
+            )
         event.entitlement_shares = entitlement_shares
         event.shares_before = entitlement_shares
         _compute_event_fields(event)

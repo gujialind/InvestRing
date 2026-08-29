@@ -937,9 +937,16 @@ def _generate_portfolio_position(
     4. 计算冻结字段
 
     Returns:
-        (positions, warnings) 元组。warnings 为负现金告警列表（issue #71）：
-        CASH 条目 cash_amount < 0 时记录 negative_cash 告警但不阻断生成
-        （历史快照可能已有负现金，阻断会使重算不可用）。
+        (positions, warnings) 元组。warnings 为非阻断告警列表：
+        - negative_cash（issue #71）：CASH 条目 cash_amount < 0；
+        - event_zeroed_position（issue #278）：份额变动事件应用后持仓份额 ≤ 0。
+
+    Raises:
+        BusinessError: POSITION_NOT_FOUND（issue #278），两种情形均不得静默、
+        须先修正事件再生成——
+        ① 份额变动事件指向不存在的持仓行；
+        ② 份额变动事件作用于现金行（cash_amount IS NOT NULL 的行，行存在但
+           不得承载份额变动）。
     """
     # 获取前一日最新快照日期
     prev_snapshot = db.query(func.max(PortfolioPosition.snapshot_date)).filter(
@@ -1046,6 +1053,8 @@ def _generate_portfolio_position(
         ShareChangeEvent.platform_code.isnot(None),  # 跳过基金级父记录
     ).order_by(ShareChangeEvent.entitlement_date.asc()).all()
 
+    warnings: List[Dict[str, Any]] = []
+
     for event in confirmed_events:
         if event.event_type in ("cash_dividend", "forced_adjustment"):
             if event.cash_change:
@@ -1058,22 +1067,76 @@ def _generate_portfolio_position(
             if event.event_type == "cash_dividend":
                 continue
 
+        # 纯现金调整（无份额变动）不进份额应用段——如对 CASH 产品的合法现金修正
+        # （#279 放行），其 fund_key 恰好命中现金行，若无此守卫会被现金行守卫误杀
+        if event.shares_change is None:
+            continue
+
         # 按平台精确匹配持仓
         fund_key = (event.product_code, event.market, event.platform_code)
 
         if fund_key not in positions:
-            # 持仓不存在，创建
-            positions[fund_key] = {
-                "shares": Decimal("0"),
-                "cash_amount": None,
-                "cost_price": None,
-            }
+            # issue #278：事件指向不存在的持仓行（如 LOF market 误填、平台无持仓）
+            # 不得静默新建 0 份额行——那会让变动静默丢失或产出 market_value=None 幽灵行，
+            # 硬拒绝、由调用方回滚，须先修正（unconfirm→改产品/市场/平台→重确认）事件
+            raise BusinessError(
+                code="POSITION_NOT_FOUND",
+                message=(
+                    f"份额变动事件指向不存在的持仓: {event.product_code}({event.market}) "
+                    f"平台 {event.platform_code}（事件 id={event.id}, ex_date={event.ex_date}），"
+                    f"请先取消确认并修正事件后重新生成快照"
+                ),
+                details={
+                    "event_id": event.id,
+                    "product_code": event.product_code,
+                    "market": event.market,
+                    "platform_code": event.platform_code,
+                    "target_date": target_date.isoformat(),
+                },
+            )
+
+        if positions[fund_key]["cash_amount"] is not None:
+            # issue #278：份额事件不得作用于现金行（cash_amount IS NOT NULL 行，
+            # 如 CASH 产品 market="" 恰好命中），否则份额会在构建阶段被静默丢弃
+            raise BusinessError(
+                code="POSITION_NOT_FOUND",
+                message=(
+                    f"份额变动事件不得作用于现金行: {event.product_code}({event.market}) "
+                    f"平台 {event.platform_code}（事件 id={event.id}）"
+                ),
+                details={
+                    "event_id": event.id,
+                    "product_code": event.product_code,
+                    "market": event.market,
+                    "platform_code": event.platform_code,
+                    "target_date": target_date.isoformat(),
+                },
+            )
 
         old_shares = Decimal(str(positions[fund_key]["shares"] or 0))
 
         # 使用确认时预计算的 shares_change（不重算）
         if event.shares_change is not None:
-            positions[fund_key]["shares"] = old_shares + Decimal(str(event.shares_change))
+            new_shares = old_shares + Decimal(str(event.shares_change))
+            positions[fund_key]["shares"] = new_shares
+            if new_shares <= 0:
+                # issue #278：负向调整打空持仓行——清零是合法场景（如调仓清零后补录调整），
+                # 但不得静默消失，仿 #71 负现金产出可观测 warning（不阻断生成）
+                warnings.append({
+                    "type": "event_zeroed_position",
+                    "event_id": event.id,
+                    "event_type": event.event_type,
+                    "product_code": event.product_code,
+                    "market": event.market,
+                    "platform_code": event.platform_code,
+                    "shares_after": float(new_shares),
+                    "snapshot_date": target_date.isoformat(),
+                })
+                logger.warning(
+                    f"份额变动事件打空持仓行: portfolio={portfolio_code}, "
+                    f"event_id={event.id}, {event.product_code}({event.market}) "
+                    f"平台 {event.platform_code}, 应用后份额={new_shares}, date={target_date}"
+                )
 
     # CASH 持仓：应用 manual_market_value 绝对覆盖（日期精确匹配）
     # 现金行判定：cash_amount 非 NULL（CHECK 约束保证 shares/cash_amount 恰有其一，#128）
@@ -1184,7 +1247,6 @@ def _generate_portfolio_position(
         )
 
     # issue #71：检测负现金 CASH 条目，产出 warning（不阻断生成）
-    warnings: List[Dict[str, Any]] = []
     for pos in result_positions:
         if (
             pos.product_code == "CASH"
@@ -1588,27 +1650,10 @@ def auto_confirm_after_snapshot(
 
     for event in pending_events:
         try:
-            if event.platform_code is None:
-                # 基金级事件：自动拆分为各平台子记录
-                from app.services.share_change_event_service import _confirm_fund_level_event
-                _confirm_fund_level_event(db, event)
-            else:
-                # 平台级事件：按 platform_code 过滤读取 entitlement_shares
-                ent_position = db.query(PortfolioPosition).filter(
-                    PortfolioPosition.portfolio_code == event.portfolio_code,
-                    PortfolioPosition.product_code == event.product_code,
-                    PortfolioPosition.platform_code == event.platform_code,
-                    PortfolioPosition.snapshot_date == event.entitlement_date,
-                ).first()
-                entitlement_shares = Decimal(str(ent_position.shares or 0)) if ent_position else Decimal("0")
-
-                event.entitlement_shares = entitlement_shares
-                event.shares_before = entitlement_shares
-
-                from app.services.share_change_event_service import _compute_event_fields
-                _compute_event_fields(event)
-                event.status = "confirmed"
-                event.confirmed_at = datetime.now()
+            # 委托公共确认实现（基金级自动拆分 / 平台级回写 + #279 校验
+            # + forced_adjustment 持仓精查），重算路径不得绕过校验
+            from app.services.share_change_event_service import confirm_share_change_event
+            confirm_share_change_event(db, event)
             results.append({
                 "id": event.id,
                 "type": "event",
