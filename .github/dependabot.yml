@@ -32,6 +32,11 @@ updates:
       # 适配完成后移除本规则。
       - dependency-name: "recharts"
         update-types: ["version-update:semver-major"]
+      # eslint 10 尚未被 eslint-config-next@15.x 接受（peer 要求 ^7.23.0 || ^8.0.0 || ^9.0.0），
+      # 升级后 npm ci 直接 ERESOLVE 失败（见 PR #294 评估）。等 eslint-config-next 支持 10.x
+      # 后移除本规则。
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
