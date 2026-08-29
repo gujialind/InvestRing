@@ -34,7 +34,10 @@ cd backend && uvicorn app.main:app --reload   # 配置见 .env.example
 
 ## 依赖
 
-CI 口径是 `requirements.txt`（钉版）；`pyproject.toml` 仅宽泛范围。加依赖须同时更新 requirements.txt。
+- `requirements.txt` 是镜像与 CI 的**唯一安装来源**（`Dockerfile:30-32` + `ci.yml` 四个 job 均裸 `pip install -r requirements.txt`）；`pyproject.toml` 的 `dependencies` 全是 `>=` 下界，**不参与构建**，改它不改变任何安装结果。加依赖须更新 requirements.txt。
+- **传递依赖不显式钉版就等于没钉**：未出现在 requirements.txt 的包，版本由构建时解析决定、仓库零记录。已钉：`click`（uvicorn 传递）、`starlette`（fastapi 传递，#314）。仍浮动：`anyio`、`typing_extensions`、`h11`/`httptools`/`websockets`。
+- **本地 ≠ CI**：pip 不升级已满足下界的已装包 → 同一份 requirements.txt 在本地可能是旧版、干净环境解析成新版；排查版本相关现象先 `pip show <pkg>` 对齐。
+- `pip-audit`（`security-scan.yml`）按**声明**解析，抓不到未声明的传递依赖，别当锁文件用。
 
 ## E2E 相关脚本
 
