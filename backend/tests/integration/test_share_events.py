@@ -522,3 +522,178 @@ class TestUpdateShareChangeEvent:
         # status 字段被 schema 忽略，仍为 pending；其余合法字段正常更新
         assert updated.status == "pending"
         assert updated.notes == "n1"
+
+
+class TestForcedAdjustmentInputValidation:
+    """issue #279：forced_adjustment 双空字段与现金型产品份额变动的输入校验"""
+
+    ENT = date(2025, 12, 8)   # 权益登记日（周一）
+    EX = date(2025, 12, 10)   # 除息日（周三）
+
+    def _setup(self, test_db, port_code: str):
+        create_portfolio(test_db, code=port_code, status="active")
+        ensure_trading_day(test_db, self.ENT, is_open=True)
+        ensure_trading_day(test_db, self.EX, is_open=True)
+
+    def test_create_double_empty_adjustment_rejected(self, client, admin_headers, test_db):
+        """验收：双空 forced_adjustment 创建即拒绝且不落库"""
+        self._setup(test_db, "FAV_P1")
+        create_product(test_db, code="FUND_FAV1", market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "FAV_P1",
+                "product_code": "FUND_FAV1",
+                "market": "CN_OTC",
+                "event_type": "forced_adjustment",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "EMPTY_ADJUSTMENT"
+        assert test_db.query(ShareChangeEvent).filter(
+            ShareChangeEvent.portfolio_code == "FAV_P1"
+        ).count() == 0
+
+        # 正向对照：只填一项照常创建
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "FAV_P1",
+                "product_code": "FUND_FAV1",
+                "market": "CN_OTC",
+                "event_type": "forced_adjustment",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "platform_code": "MYCF",
+                "shares_change": 1.0,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201)
+
+    def test_update_to_double_empty_rejected(self, client, admin_headers, test_db):
+        """验收：PUT 改成双空被拒（封死 update 绕过）"""
+        self._setup(test_db, "FAV_P2")
+        create_product(test_db, code="FUND_FAV2", market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        event = create_share_change_event(
+            test_db, "FAV_P2", "FUND_FAV2", "CN_OTC",
+            event_type="forced_adjustment", ex_date=self.EX,
+            entitlement_date=self.ENT, status="pending",
+            platform_code="MYCF", shares_change=Decimal("1.00"),
+        )
+
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"shares_change": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "EMPTY_ADJUSTMENT"
+
+        # 正常单字段更新不受影响（回归）
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"notes": "adjust"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+
+    def test_create_shares_change_on_cash_product_rejected(self, client, admin_headers, test_db):
+        """验收：CASH / IN_TRANSIT 产品录入含 shares_change 的事件被拒"""
+        self._setup(test_db, "FAV_P3")
+
+        for product_code in ("CASH", "IN_TRANSIT_BUY"):
+            resp = client.post(
+                "/api/share-change-events",
+                json={
+                    "portfolio_code": "FAV_P3",
+                    "product_code": product_code,
+                    "market": "",
+                    "event_type": "forced_adjustment",
+                    "ex_date": self.EX.isoformat(),
+                    "entitlement_date": self.ENT.isoformat(),
+                    "platform_code": "MYCF",
+                    "shares_change": 1.0,
+                },
+                headers=admin_headers,
+            )
+            assert resp.status_code == 422, product_code
+            assert resp.json()["detail"]["error"] == "SHARES_CHANGE_ON_CASH_PRODUCT", product_code
+
+    def test_create_structural_event_on_cash_product_rejected(self, client, admin_headers, test_db):
+        """结构上必产生份额变动的事件类型在现金型产品上无条件拒绝"""
+        self._setup(test_db, "FAV_P4")
+
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "FAV_P4",
+                "product_code": "CASH",
+                "market": "",
+                "event_type": "share_split",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "ratio": 2.0,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "SHARES_CHANGE_ON_CASH_PRODUCT"
+
+    def test_cash_only_adjustment_on_cash_product_allowed(self, client, admin_headers, test_db):
+        """边界：现金型产品上的纯现金调整（无份额语义）仍放行"""
+        self._setup(test_db, "FAV_P5")
+
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "FAV_P5",
+                "product_code": "CASH",
+                "market": "",
+                "event_type": "forced_adjustment",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "platform_code": "MYCF",
+                "cash_change": -5.0,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201)
+
+    def test_confirm_fallback_validation(self, test_db):
+        """验收：确认侧兜底——绕过创建入口直造的脏事件在确认时被拒"""
+        from app.services.exceptions import BusinessError
+        from app.services.share_change_event_service import confirm_share_change_event
+
+        self._setup(test_db, "FAV_P6")
+        create_product(test_db, code="FUND_FAV6", market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+
+        # 双空 pending（模拟存量脏数据）
+        empty_event = create_share_change_event(
+            test_db, "FAV_P6", "FUND_FAV6", "CN_OTC",
+            event_type="forced_adjustment", ex_date=self.EX,
+            entitlement_date=self.ENT, status="pending",
+            platform_code="MYCF",
+        )
+        with pytest.raises(BusinessError) as exc:
+            confirm_share_change_event(test_db, empty_event)
+        assert exc.value.code == "EMPTY_ADJUSTMENT"
+
+        # 现金型产品带份额变动（模拟存量脏数据）
+        cash_event = create_share_change_event(
+            test_db, "FAV_P6", "CASH", "",
+            event_type="forced_adjustment", ex_date=self.EX,
+            entitlement_date=self.ENT, status="pending",
+            platform_code="MYCF", shares_change=Decimal("1.00"),
+        )
+        with pytest.raises(BusinessError) as exc:
+            confirm_share_change_event(test_db, cash_event)
+        assert exc.value.code == "SHARES_CHANGE_ON_CASH_PRODUCT"
