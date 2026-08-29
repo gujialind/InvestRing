@@ -942,8 +942,11 @@ def _generate_portfolio_position(
         - event_zeroed_position（issue #278）：份额变动事件应用后持仓份额 ≤ 0。
 
     Raises:
-        BusinessError: POSITION_NOT_FOUND——份额变动事件指向不存在的持仓行
-            或现金行（issue #278），不得静默，须先修正事件再生成。
+        BusinessError: POSITION_NOT_FOUND（issue #278），两种情形均不得静默、
+        须先修正事件再生成——
+        ① 份额变动事件指向不存在的持仓行；
+        ② 份额变动事件作用于现金行（cash_amount IS NOT NULL 的行，行存在但
+           不得承载份额变动）。
     """
     # 获取前一日最新快照日期
     prev_snapshot = db.query(func.max(PortfolioPosition.snapshot_date)).filter(

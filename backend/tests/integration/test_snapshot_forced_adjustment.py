@@ -483,3 +483,44 @@ class TestEventPositionGuards:
 
         cash_row = _pos(test_db, "FA_G7", "CASH", EX_DAY)
         assert Decimal(str(cash_row.cash_amount)) == Decimal("1080.00")
+
+
+class TestAutoConfirmEventDelegation:
+    """auto_confirm 事件段委托公共确认实现（#278/#279）：
+    失败仅记录不阻断、重算路径不绕过校验"""
+
+    def test_dirty_pending_event_records_failed_not_blocking(self, test_db):
+        """存量脏事件（双空）被委托校验拒绝 → 记 auto_confirm_failed、
+        保持 pending、不上抛；同批合法事件照常自动确认"""
+        from app.services.snapshot_service import auto_confirm_after_snapshot
+        from tests.factories import create_share_change_event
+
+        _setup(test_db, "FA_AC1")
+        # 直造存量脏数据（#279 校验前创建的双空 forced_adjustment）
+        dirty = create_share_change_event(
+            test_db, "FA_AC1", FUND, "CN_OTC",
+            event_type="forced_adjustment", ex_date=EX_DAY,
+            entitlement_date=D0, status="pending",
+            platform_code="MYCF",
+        )
+        # 同批合法事件（走真实创建入口，未确认）
+        valid = svc_create_event(
+            test_db, portfolio_code="FA_AC1", event_type="forced_adjustment",
+            product_code=FUND, market="CN_OTC", platform_code="MYCF",
+            ex_date=EX_DAY, entitlement_date=D0,
+            shares_change=Decimal("1.00"),
+        )
+        test_db.flush()
+
+        results = auto_confirm_after_snapshot(test_db, "FA_AC1", D0)
+
+        failed = [r for r in results if r.get("id") == dirty.id]
+        assert failed and failed[0]["action"] == "auto_confirm_failed"
+        assert "shares_change" in failed[0]["error"]  # EMPTY_ADJUSTMENT 文案
+        confirmed = [r for r in results if r.get("id") == valid.id]
+        assert confirmed and confirmed[0]["action"] == "auto_confirmed"
+
+        test_db.refresh(dirty)
+        test_db.refresh(valid)
+        assert dirty.status == "pending"
+        assert valid.status == "confirmed"

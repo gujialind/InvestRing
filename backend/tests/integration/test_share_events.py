@@ -697,3 +697,64 @@ class TestForcedAdjustmentInputValidation:
         with pytest.raises(BusinessError) as exc:
             confirm_share_change_event(test_db, cash_event)
         assert exc.value.code == "SHARES_CHANGE_ON_CASH_PRODUCT"
+
+    def test_update_clears_shares_change_on_cash_product_allowed(self, client, admin_headers, test_db):
+        """边界：现金型产品存量脏事件（带份额变动）经 PUT 清 null 修正放行"""
+        self._setup(test_db, "FAV_P7")
+        event = create_share_change_event(
+            test_db, "FAV_P7", "CASH", "",
+            event_type="forced_adjustment", ex_date=self.EX,
+            entitlement_date=self.ENT, status="pending",
+            platform_code="MYCF", shares_change=Decimal("1.00"),
+            cash_change=Decimal("-5.00"),
+        )
+
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"shares_change": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        test_db.refresh(event)
+        assert event.shares_change is None
+        assert Decimal(str(event.cash_change)) == Decimal("-5.00")
+
+    def test_update_fills_shares_change_on_cash_product_rejected(self, client, admin_headers, test_db):
+        """验收：PUT 给现金型产品补填 shares_change 同样被拒（封死 update 绕过）"""
+        self._setup(test_db, "FAV_P8")
+        event = create_share_change_event(
+            test_db, "FAV_P8", "CASH", "",
+            event_type="forced_adjustment", ex_date=self.EX,
+            entitlement_date=self.ENT, status="pending",
+            platform_code="MYCF", cash_change=Decimal("-5.00"),
+        )
+
+        resp = client.put(
+            f"/api/share-change-events/{event.id}",
+            json={"shares_change": 2.0},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "SHARES_CHANGE_ON_CASH_PRODUCT"
+
+    def test_reinvest_dividend_on_cash_product_rejected(self, client, admin_headers, test_db):
+        """结构型成员完整性：reinvest_dividend（唯一平台级结构型）在现金型产品上无条件拒"""
+        self._setup(test_db, "FAV_P9")
+
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "FAV_P9",
+                "product_code": "CASH",
+                "market": "",
+                "event_type": "reinvest_dividend",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "div_cash": 0.5,
+                "reinvest_nav": 1.2,
+                "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "SHARES_CHANGE_ON_CASH_PRODUCT"
