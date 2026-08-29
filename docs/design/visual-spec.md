@@ -72,20 +72,34 @@
 
 | Token | 用途 | Light | Dark 预案 |
 |---|---|---|---|
-| `--background` | 页面底 | `#FFFFFF`（现状；目标值 `#F7F8FA` hsl(220,23%,97%)，随后续主题切换统一调整） | `#0F1420` |
-| `--card` / `--popover` | 卡片/浮层底 | `#FFFFFF` | `#171E2C` |
-| `--muted` | 次级底、neutral badge 底、hover 底 | hsl(210,40%,96.1%)（目标 `#EFF1F6`） | `#232B3D` |
-| `--border` / `--input` | 边框、分隔线 | hsl(214.3,31.8%,91.4%)（目标 `#E3E7EF`） | `#2B3448` |
-| `--foreground` | 一级文字 | hsl(222.2,84%,4.9%)（目标 `#1A2333` hsl(218,32%,15%) ≈15.9:1） | `#E9EDF5` |
+| `--background` | 页面底 | `#F7F8FA` hsl(220,23%,97%) | `#0F1420` |
+| `--card` / `--popover` | 卡片/浮层底 | `#FFFFFF`（白卡浮于灰底，明度差第一层） | `#171E2C` |
+| `--muted` | 次级底、neutral badge 底、hover 底 | `#EFF1F6` hsl(223,28%,95%) | `#232B3D` |
+| `--border` / `--input` | 边框、分隔线 | `#E3E7EF` hsl(220,28%,91.5%) | `#2B3448` |
+| `--foreground` | 一级文字 | `#1A2333` hsl(218,32%,15%) ≈15.9:1 | `#E9EDF5` |
 | `--color-foreground-secondary` | 二级文字（表头、标签） | `#5A6577` hsl(217,14%,41%) ≈5.9:1 | `#A6B0C6` |
-| `--muted-foreground` | 三级文字（12px 辅助、占位符） | hsl(215.4,16.3%,46.9%)（目标 `#64708A`，≈5.0:1，为 12px 辅助文字守 4.5 底线，**禁止再浅**） | `#8A94AB` |
+| `--muted-foreground` | 三级文字（12px 辅助、占位符） | `#64708A` hsl(221,16%,47%) ≈5.0:1（为 12px 辅助文字守 4.5 底线，**禁止再浅**） | `#8A94AB` |
 | `--primary` / `--ring` | 主按钮、链接、选中态、focus 环 | = success `#2B5CD7` | `#7FA3F0` |
 
-> 中性色现状值与配色方案目标值有出入的，以「目标值」为演进方向渐进收敛，不在 #127 一次性切换。层级策略：页面灰底 → 白卡浮起 → 边框轻勾勒，三级明度差小、扁平金融风；文字三级 15/41/47% 明度。
+> 目标值已于 2026-08-29 一次性切换落地（此前为「shadcn 默认 slate 现状值 → 目标值」双轨渐进，见 §20）；`--secondary` / `--accent` 底与 muted 同源同值。层级策略：页面灰底 → 白卡浮起 → 边框轻勾勒，三级明度差小、扁平金融风；文字三级 15/41/47% 明度。
 
 ### 1.5 护栏（ESLint）
 
-`eslint.config.mjs` 内置 `no-restricted-syntax`（error）：禁止 `(text|bg|border)-(red|green|yellow|blue|amber|emerald|orange|purple|indigo|pink|teal|cyan)-<数字>` 调色板类名（含字符串字面量与模板字符串）。新增颜色需求一律先加语义 token。**豁免清单**：当前无豁免；确需豁免时在代码处加 `eslint-disable-next-line` 并在本节逐条登记（位置 + 理由）。
+`eslint.config.mjs` 内置 `no-restricted-syntax`（error），两道拦截（均含字符串字面量与模板字符串）：
+
+1. **调色板类名**：禁止 `(text|bg|border)-(red|green|yellow|blue|amber|emerald|orange|purple|indigo|pink|teal|cyan)-<数字>`。新增颜色需求一律先加语义 token。
+2. **任意值类名**（2026-08-29 起）：禁止 `text-[…]`（§5 四档之外）、`p/px/py/pt/pb/pl/pr-[…]`、`gap/gap-x/gap-y-[…]`、`rounded-[…]`（§7 派生档之外）。m 系 / space 系 / w·h 系任意值**暂不拦截**（多为视口比例或一次性尺寸，如 `h-[60vh]`、`sm:max-w-[500px]`，是否纳入待后续评估）。
+
+**豁免清单**（overrides 登记，临时项只减不增、收敛后移出；豁免文件仍受调色板拦截）：
+
+| 范围 | 类型 | 理由 |
+|---|---|---|
+| `src/components/ui/**` | 永久 | shadcn 基件 vendor 源码（`min-w-[8rem]` 等为官方实现），保持与上游同步、降低升级摩擦；基件内部不视为业务违规 |
+| `src/app/portfolio/[code]/page.tsx` | 临时（ratchet） | 存量 `text-[15px]`×2、`text-[13px]`×1，改动该页时顺手收敛后移出 |
+| `src/components/shared/PositionSections.tsx` | 临时（ratchet） | 存量 `text-[11/13/15/17px]` 共 9 处，同上 |
+| `src/components/layout/NotificationBell.tsx` | 临时（ratchet） | 存量 `text-[10px]` 1 处，同上 |
+
+确需新增豁免时在代码处加 `eslint-disable-next-line` 并在本节逐条登记（位置 + 理由）。
 
 ---
 
@@ -104,10 +118,16 @@
 | `CHART_COLORS[6]` C7 灰蓝 | `#8A97AC` | 低饱和，**专供「其他」合并项**（`CHART_OTHER`） |
 | `CHART_COLORS[7]` C8 深灰蓝 | `#4A5578` | 备用第 8 色 / 次数据线 |
 | `NAV_LINE` | = C1 | 净值曲线主线恒为靛蓝，**不用红绿**；涨跌靠坐标轴数值与 tooltip 的 `text-gain/loss` 表达 |
-| `ASSET_TYPE_COLORS` | 股票=C1 / 债券=C4 / 黄金=C2 / 现金=C7 / 在途=C3 / 其他=C8 | 饼图与持仓分区共用（`lib/allocation.ts` 消费） |
+| `assetClassColor(sortOrder)` | 股票=C1 / 债券=C4 / 商品=C2 / 现金=C7 | 资产大类色（#128 起字典驱动）：`ASSET_CLASS_PALETTE` 按 asset_class 字典 sort_order 取色；饼图（`buildAllocation`）与持仓分区共用（`lib/allocation.ts` 消费）；原「黄金」序位由「商品」承继 |
+| `IN_TRANSIT_COLOR` | 在途=C3 天蓝 | 在途资金伪大类（现金的轻量态），固定插现金大类后 |
+| `OTHER_COLOR` | 资产「其他」=C8 深灰蓝 | 资产分布「其他」伪大类（派生缺失/字典未收录的兜底），固定垫底 |
 | `TRADE_DIRECTION_COLORS` | buy=C1 / sell=C6 | 仅用于买/卖方向小圆点，不表达涨跌 |
 
 **色盲友好性（如实说明）**：Deuteranopia/Protanopia 下 C1↔C4、C2↔C6 会趋近，靠 ≥7% 明度差与图例位置兜底；**超过 6 类必须合并为「其他」（C7），这是规范条目而非建议**。Tritanopia（极罕见）下全体可区分。
+
+**两个「其他」色，不可混用**（2026-08-29 评审补登）：通用多序列合并项用 `CHART_OTHER`（C7 灰蓝）；资产分布的「其他」伪大类用 `OTHER_COLOR`（C8 深灰蓝，#128）。边界原因：**现金大类色 = C7**——资产饼图若合并项也用 C7，会与现金切片同色无法区分。故资产维度一律走 `assetClassColor` / `OTHER_COLOR`，`CHART_OTHER` 只用于无「现金」语义的普通多序列。
+
+**已知耦合（#128 登记）**：`assetClassColor` 以 `ASSET_CLASS_PALETTE` 序位绑定 asset_class 字典 `sort_order`——**调整字典排序即换色**。改 sort_order 前须评估饼图/分区配色连续性；新增第 5 大类时序位超出现有 4 色将兜底 C8（与「其他」同色），届时须先扩 `ASSET_CLASS_PALETTE`。
 
 ---
 
@@ -127,7 +147,7 @@
 
 ## 4. 占比精度分层
 
-- **行级占比 1 位小数**：一律经 `largestRemainderPercents`（最大余数法，issue #99），全部行加总恒为 100.0%；禁止各处自行 `toFixed(1)`（会产生 ±0.1%×n 漂移）。
+- **行级占比 1 位小数**：一律经 `largestRemainderPercents`（最大余数法，issue #99），全部行加总恒为 100.0%；禁止各处自行 `toFixed(1)`（会产生 ±0.1%×n 漂移）。**渲染口径**：返回值为百分比数值（如 `62.4`），展示统一 `percent.toFixed(1)%`（保底一位小数，`62.0%` 不缩为 `62%`）；**不要**走 `formatPercent`——其输入为小数形式、默认 2 位且带 `+` 号，口径不符。
 - **分区头/聚合占比取整**：分区头、chip 合计由行级占比**加总后取整**，不再独立计算，保证同分区口径一致（issue #114）；名目 chip 合计恒显示，即使只有一行。
 - 饼图图例直接展示行级加总的 1 位小数值（`buildAllocation` 输出），与分区头严格自洽。
 
@@ -140,7 +160,9 @@
 | 正文 | 14px / 400 / 1.6 | `text-sm` | 表格、表单、正文数值 |
 | 辅助 | 12px / 400 / 1.5 | `text-xs` | 标签、时间戳、secondary 信息 |
 
-配套规则：数值一律叠加 `number-cell`；**禁用 text-base/lg 之外的中间档**——`text-base`/`text-xl`/`text-3xl` 及 `text-[Npx]` 任意值属违规存量，后续改动页面时顺手收敛（本规范不强制一次性清零）。
+配套规则：数值一律叠加 `number-cell`；**只允许上表四档**——`text-base` / `text-xl` / `text-3xl` 等中间档与 `text-[Npx]` 任意值均属违规（新增代码由 ESLint 拦截，见 §1.5；存量 13 处豁免登记在 §1.5，改动页面时顺手收敛，不强制一次性清零）。
+
+**字体栈（现状登记，2026-08-29）**：未自定义，走 Tailwind 默认栈——正文 `font-sans`（system-ui 系）、数值 `number-cell` 内 `font-mono`（ui-monospace/SFMono 系）。`tabular-nums` 依赖字体自带等宽数字特性，系统栈下各平台字形有差异（Windows 回退 Segoe UI / Consolas）；中文环境数字渲染一致性**未实测**。如需跨平台严格对齐的金融报表观感，后续可评估引入统一数字字体，届时在此更新决策。
 
 ## 6. 双端差异约定
 
@@ -153,6 +175,8 @@
 - **圆角**：统一走 `--radius` 派生档位——卡片/对话框 `rounded-lg`、输入与按钮 `rounded-md`、badge/chip/状态点 `rounded-full`、checkbox `rounded-sm`（基件规格登记见 §13）；禁用 `rounded-[Npx]` 任意值。
 - **阴影**：扁平金融风，**卡片一律无投影**，靠「页面底 → 白卡 → 边框」三级明度差分层；投影仅用于浮层例外——Toast / 下拉 / Popover 用 `shadow-lg`，模态遮罩不动卡片本体。
 - **内边距**：卡片内容桌面 `p-6`（CardContent 默认）、移动 `p-3`；区块间距桌面 `space-y-6`/移动 `space-y-4` 为既有惯例，新页面沿用，禁用 `p-[Npx]`/`gap-[Npx]` 任意值。
+- **z-index（现状登记，2026-08-29）**：浮层统一 `z-50`（shadcn 基件默认：Dialog/AlertDialog 遮罩与内容、Select/Dropdown/Popover/Tooltip、移动端底部导航）；Toast 容器 `z-[100]`——**唯一例外**，须盖过模态层。不自定义其他层级；新增浮层一律复用基件，不手写 z 值。
+- **focus 态（现状登记，2026-08-29）**：走基件默认 `focus-visible:ring`（`ring-ring` = primary 靛蓝，§1.4；button/checkbox/input/switch/tabs 已带），不自定义 ring 宽度/offset；自绘可交互元素必须保留等价 focus 可见反馈。
 
 ## 8. 表格规范
 
@@ -169,7 +193,7 @@
 > 流水类列表页（申赎/调仓/快照等）的标准配置，全站首个落地为 #125/#126。本节只定跨页一致决策，控件本身读 `components/ui/`。
 
 - **容器**：置于表格上方、与表格同卡片内容区顶部，不单独卡片包裹；横向 `flex flex-wrap`、控件间距 `gap-2`，与下方表格的间距走 §7 区块档位。
-- **控件尺寸**：筛选栏控件统一紧凑档 `h-9`（Select/Input/日期触发按钮同高）；表单对话框内仍为 `h-10`，两档不混用。
+- **控件尺寸**：筛选栏控件统一紧凑档 `h-9`（Select/Input/日期触发按钮同高）；表单对话框内仍为 `h-10`，两档不混用。**已知例外**（2026-08-29 登记）：`h-9` = 36px 低于移动端 44px 触控目标建议值——筛选栏为桌面优先的密度场景，移动端筛选面板内控件现状同样沿用 `h-9`；后续做触控专项时移动端面板内控件升 `h-10` 即可（桌面不变），不在本次一刀切。
 - **标签**：筛选栏省略 `Label`，以 placeholder 表意；placeholder 统一「全部 + 维度名」（全部状态/全部平台/全部产品）。默认有值的筛选（如"最近 1 年"）显示实际值而非 placeholder。
 - **控件排序**：全站统一——时间区间 → 状态 → 实体维度（投资人/平台/产品）→ 类型；多页并存时顺序一致。
 - **生效方式**：变更即时查询，不设「查询」按钮；文本输入类防抖 300ms，下拉/日期选择即时生效。
@@ -222,24 +246,54 @@
 - **后台任务进度**（sync-job 类，#146 起）：进行中 = 状态 Badge（`running`→`warning`，§1.3）+ `Loader2` + 文案的行内区块；不引入 Progress 条组件（任务无可靠百分比，YAGNI）。终态反馈仍走上述 toast 分工，页面数据随之刷新。
 - **危险操作**（删除、关闭组合、强制操作）统一 `AlertDialog` 二次确认，确认按钮 solid `bg-destructive text-white`；普通确认走 `default`（primary 靛蓝）。
 - **破坏性操作两段式确认**（dry_run → confirm，#146 起）：第一步预览 AlertDialog 列出影响范围，文案模板「将删除 X 张快照（YYYY-MM-DD ~ YYYY-MM-DD），此操作不可恢复」；确认按钮沿用 solid `bg-destructive text-white`；拿不到预览结果时禁止直接执行。
+- **动效（现状登记，2026-08-29；克制原则）**：全站仅三类动效——① 加载 spinner（`Loader2 animate-spin`）；② toast 滑入（globals.css `slideIn` keyframes，唯一消费点 ToastContainer）；③ 基件内置过渡（tailwindcss-animate `animate-in/out`、hover/状态切换 `transition-colors`）。不新造关键帧、不引入滚动/视差动效——金融界面以静为默认。
 
 ## 15. 图表表达规范
 
-- **饼图扇区从大到小排序**（资产分布即按市值降序），色板按 `CHART_COLORS` 顺序消费；**超过 6 类必须合并为「其他」**（`CHART_OTHER` 灰蓝），这是规范条目而非建议。
+- **饼图扇区从大到小排序**（资产分布即按市值降序），色板按 `CHART_COLORS` 顺序消费；**超过 6 类必须合并为「其他」**，这是规范条目而非建议。合并项用色分场景（§2）：资产分布用 `OTHER_COLOR`（C8 深灰蓝，与现金 C7 区分）；无「现金」语义的普通多序列用 `CHART_OTHER`（C7 灰蓝）。
 - **图例位置**：环形图左图右例（移动端上下堆叠），图例 = 色点 + 名称 + 占比（1 位小数，§4）；不单独发明图例样式。
 - **tooltip**：金额 `${formatCurrency(value)}`（可带「元」补语义）、净值 `formatNav`、占比 1 位小数；tooltip 内涨跌数值用 `text-gain`/`text-loss`，图表元素本身（线/柱/扇区）永不用涨跌色。
 - **折线**：净值主线恒 `NAV_LINE`（C1 靛蓝）、无数据点圆点（`dot={false}`）、参考线用 `CHART_OTHER` 灰蓝虚线；多序列按 C1→C8 顺序取色。
 
-## 16. 图标着色
+## 16. 图标体系与着色
 
+- **图标库**：全站统一 `lucide-react`（49 处消费，唯一图标来源）；不引入第二图标库、不内联自绘 SVG 图标。
+- **尺寸档（现状登记，2026-08-29）**：默认 `h-4 w-4`（16px，与 14px 正文配套）；移动端导航/大触面 `h-5 w-5`（20px）；紧凑徽章内 `h-3.5 w-3.5`（14px）。三档之外不新造。
 - 图标默认继承文字色（不加颜色类）；需要语义时与同行文字共用同一 token：成功 `text-success`、警告 `text-warning`、失败 `text-destructive`、涨跌图标随数值走 `getReturnColorClass`。
 - 状态指示小圆点（通知级别、交易日标记、方向标识）用对应 token 的 solid 色（`bg-success` / `bg-warning` / `bg-destructive`）或 `lib/colors.ts` 分类色，不用 `-soft`。
 
 ## 17. Dark mode 启用条件（暂缓）
 
-token 已备双套值，启用前必须完成：① 实测全部 dark 预案值对比度（当前为同构推算）；② 存量 `slate/gray` 中性类名与任意值色（`[#xxx]`）清理；③ 图表色板暗色适配评审。未满足前禁止在代码中加 `dark` 类或 `dark:` 变体。
+token 已备双套值，启用前必须完成：⓪ **先对齐双通道**——`globals.css` `.dark` 的中性色现状仍为 shadcn 默认 slate 值（如 muted `217.2 32.6% 17.5%`），**并非** §1.2/§1.4 登记的 dark 预案值，须先按预案值改写 `.dark` 再进入实测；① 实测全部 dark 预案值对比度（当前为同构推算）；② 存量 `slate/gray` 中性类名与任意值色（`[#xxx]`）清理；③ 图表色板暗色适配评审。未满足前禁止在代码中加 `dark` 类或 `dark:` 变体。
 
 ## 18. 存量债与迁移策略
 
-- 本规范落地时已完成：语义 token、Badge variant、盈亏色函数、图表色板、全部 `(text|bg|border)-调色板-数字` 类名清零（#127）。
-- 已登记、渐进收敛的存量：中间档字号（§5）、`text-[Npx]` 等任意值（29 处）、`slate/gray` 中性类名、中性色目标值切换（§1.4）、快照页原生 `<input type="checkbox">` 手写件（#146 收敛为 §13 登记的 checkbox 基件）。原则：**改动到该页面时顺手替换，不单独开重构 issue**。
+- 本规范落地时已完成：语义 token、Badge variant、盈亏色函数、图表色板、全部 `(text|bg|border)-调色板-数字` 类名清零（#127）；中性色目标值一次性切换（2026-08-29，§1.4）。
+- 已登记、渐进收敛的存量：中间档字号与 `text-[Npx]` 任意值（13 处 / 3 文件，ESLint ratchet 豁免见 §1.5）、w·h 系一次性尺寸任意值（如 `h-[60vh]`、`sm:max-w-[500px]`，未拦截、不强制清理）、`slate/gray` 中性类名、快照页原生 `<input type="checkbox">` 手写件（#146 收敛为 §13 登记的 checkbox 基件）。原则：**改动到该页面时顺手替换，不单独开重构 issue**。
+
+---
+
+## 19. 新页面 / 大改自检清单
+
+提交前对照（全部「是」方可合入）：
+
+1. 颜色只出现语义 token 与 `lib/colors.ts` 导出，无调色板类名、无组件内 hex 字面量（ESLint 已过）。
+2. 涨跌数值色只来自 `getReturnColorClass` / `getReturnBgClass`；badge 状态色经 `getStatusBadgeVariant()`，未占用涨跌色（§1.1/§1.3）。
+3. 数字全部经 `lib/utils.ts` 格式化函数；表格数值列右对齐 + `number-cell`；占比走 `largestRemainderPercents`，无散装 `toFixed`（§3/§4/§8）。
+4. 字号只用四档（24/18/14/12）；无 `text-[Npx]`、`p-[Npx]`、`gap-[Npx]`、`rounded-[Npx]` 任意值（§5/§7）。
+5. 卡片无投影（浮层除外）；圆角走 `--radius` 派生档；间距走既有档位（桌面 `p-6`/`space-y-6`、移动 `p-3`/`space-y-4`）（§7）。
+6. 表格：表头 muted 常规字重、无底色无斑马纹；空态 / 首次加载 / 局部刷新加载按 §8/§14 既有形态，不自造。
+7. 筛选栏 / 日期区间 / 分页如使用，形态与控件排序符合 §9–§11（控件 `h-9`、时间→状态→实体→类型、即时生效、无结果空态带重置入口）。
+8. 状态徽标一律 `Badge` + variant；无手写 `bg-*-100 text-*-800` 件；弹窗走 `Dialog` / `AlertDialog`，提示走 toast / `Alert`（§13/§14）。
+9. 图表：色板按序消费、净值主线 `NAV_LINE` 不用红绿、超 6 类合并「其他」（场景用色见 §15）、图表元素本身不着涨跌色（§2/§15）。
+10. 双端同语义：共享组件 + `variant` 适配，未发明端侧独有色彩或字号（§6）。
+
+## 20. 变更记录
+
+| 日期 | 版本 | 变更 | 关联 |
+|---|---|---|---|
+| 2026-08-11 | v1 | 初版：语义 token、双红分离、success 兼 primary、Badge variant 收敛、图表色板、ESLint 调色板护栏 | #127 |
+| （随 v1 后陆续追记） | v1.x | 主次双行单元格（#124）、结对行（#126）、筛选栏 + date-range-picker + 分页（#125/#126）、弹层草稿态与双月并排（#154/#161）、checkbox 基件登记（#146） | 各 issue |
+| （同上） | v1.x | 资产大类色改字典驱动 `assetClassColor`，「黄金」序位由「商品」承继；新增 `IN_TRANSIT_COLOR` / `OTHER_COLOR` | #128 |
+| 2026-08-29 | v1.1 | 评审修订：①§2 补 #128 字典驱动现状、「两个其他色」分工与 sort_order 耦合登记；②§17 补 dark 双通道对齐前置项（CSS `.dark` 现状 ≠ 文档预案值）；③§5 歧义句改写 + 字体栈现状登记；④§4 补占比渲染口径（`percent.toFixed(1)%`，不走 formatPercent）；⑤中性色目标值一次性切换落地（`globals.css` `:root`）；⑥ESLint 护栏扩任意值类名（ratchet 豁免 3 文件 + `components/ui/**` 永久豁免）；⑦新增 §19 自检清单、§20 变更记录 | 视觉系统评审 |
+| 2026-08-29 | v1.1 补 | 现状补登（同一评审续）：§7 z-index（浮层 `z-50` / Toast `z-[100]`）与 focus 态（基件默认 ring，不自绘元素须等价）；§9 触控目标例外（`h-9`=36px < 44px，移动端面板内后续可升 `h-10`）；§14 动效三分类（spinner / toast 滑入 / 基件过渡，不新造）；§16 扩为图标体系（lucide-react 唯一来源、`h-4`/`h-5`/`h-3.5` 三档） | 视觉系统评审 |

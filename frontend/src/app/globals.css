@@ -53,28 +53,29 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
+  /* 中性色：配色方案 v1 目标值（2026-08-29 一次性切换，visual-spec §1.4） */
+  --background: 220 23% 97%; /* #F7F8FA 页面灰底 */
+  --foreground: 218 32% 15%; /* #1A2333 一级文字 */
+  --card: 0 0% 100%; /* 白卡浮于灰底 */
+  --card-foreground: 218 32% 15%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
+  --popover-foreground: 218 32% 15%;
   /* primary/ring = success 靛蓝（#2B5CD7，品牌主色，issue #127） */
   --primary: 223 68% 51%;
   --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
+  --secondary: 223 28% 95%; /* 与 muted 同源 #EFF1F6 */
+  --secondary-foreground: 218 32% 15%;
+  --muted: 223 28% 95%; /* #EFF1F6 */
+  --muted-foreground: 221 16% 47%; /* #64708A，12px 辅助文字 4.5 底线，禁止再浅 */
+  --accent: 223 28% 95%; /* 与 muted 同源 */
+  --accent-foreground: 218 32% 15%;
   /* 异常红 = 绛红（#C22745，与涨红朱红双红分离）；destructive-foreground 为 soft 底上文字，
      solid 危险按钮文字用纯白 text-white */
   --destructive: 348 67% 46%;
   --destructive-soft: 347 64% 95%;
   --destructive-foreground: 347 69% 33%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
+  --border: 220 28% 91.5%; /* #E3E7EF */
+  --input: 220 28% 91.5%;
   --ring: 223 68% 51%;
   /* 涨跌（红涨绿跌）与状态色（配色方案 v1 §1） */
   --gain: 5 69% 48%;
@@ -114,7 +115,8 @@
   --border: 217.2 32.6% 17.5%;
   --input: 217.2 32.6% 17.5%;
   --ring: 221 79% 72%;
-  /* 语义色 dark 预案值（未启用、未实测，启用前须实测对比度，visual-spec §14） */
+  /* 语义色 dark 预案值（未启用、未实测；本 .dark 中性色仍为 shadcn 默认 slate 值，
+     启用前须先按 visual-spec §1.2/§1.4 预案值对齐双通道再实测，见 visual-spec §17） */
   --gain: 8 83% 66%;
   --gain-soft: 9 30% 18%;
   --gain-foreground: 9 82% 78%;
