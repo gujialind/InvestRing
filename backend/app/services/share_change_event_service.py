@@ -396,16 +396,36 @@ def confirm_share_change_event(db: Session, event: ShareChangeEvent) -> ShareCha
         except ValueError as e:
             raise BusinessError("MISSING_POSITION_SNAPSHOT", str(e))
     else:
-        # 平台级事件：按 platform_code 过滤读取 entitlement_shares
-        entitlement_position = db.query(PortfolioPosition).filter(
-            PortfolioPosition.portfolio_code == event.portfolio_code,
-            PortfolioPosition.product_code == event.product_code,
-            PortfolioPosition.platform_code == event.platform_code,
-            PortfolioPosition.snapshot_date == event.entitlement_date,
-        ).first()
-        entitlement_shares = (
-            Decimal(str(entitlement_position.shares or 0)) if entitlement_position else Decimal("0")
-        )
+        if event.event_type == "forced_adjustment":
+            # issue #278：确认侧精查——权益登记日必须存在 (产品, market, 平台)
+            # 持仓行，否则事件指向不存在的持仓（LOF market 误填是最典型场景），
+            # 确认后会在快照生成中以 POSITION_NOT_FOUND 硬拒绝，此处提前快失败
+            ent_position = db.query(PortfolioPosition).filter(
+                PortfolioPosition.portfolio_code == event.portfolio_code,
+                PortfolioPosition.product_code == event.product_code,
+                PortfolioPosition.market == event.market,
+                PortfolioPosition.platform_code == event.platform_code,
+                PortfolioPosition.snapshot_date == event.entitlement_date,
+            ).first()
+            if not ent_position:
+                raise BusinessError(
+                    "POSITION_NOT_FOUND",
+                    f"权益登记日 {event.entitlement_date} 无对应持仓 "
+                    f"{event.product_code}({event.market}) 平台 {event.platform_code}，"
+                    f"请核对产品/市场/平台",
+                )
+            entitlement_shares = Decimal(str(ent_position.shares or 0))
+        else:
+            # 平台级事件：按 platform_code 过滤读取 entitlement_shares
+            entitlement_position = db.query(PortfolioPosition).filter(
+                PortfolioPosition.portfolio_code == event.portfolio_code,
+                PortfolioPosition.product_code == event.product_code,
+                PortfolioPosition.platform_code == event.platform_code,
+                PortfolioPosition.snapshot_date == event.entitlement_date,
+            ).first()
+            entitlement_shares = (
+                Decimal(str(entitlement_position.shares or 0)) if entitlement_position else Decimal("0")
+            )
         event.entitlement_shares = entitlement_shares
         event.shares_before = entitlement_shares
         _compute_event_fields(event)

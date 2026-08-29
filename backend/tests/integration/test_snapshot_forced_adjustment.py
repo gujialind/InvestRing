@@ -313,3 +313,173 @@ class TestManualUnconfirmPreservesUserInput:
         assert Decimal(str(pos.shares)) == Decimal("101.00")
         cash_row = _pos(test_db, "FA_U1", "CASH", EX_DAY)
         assert Decimal(str(cash_row.cash_amount)) == Decimal("1050.00")
+
+
+class TestEventPositionGuards:
+    """issue #278：事件指向不存在持仓的静默失败防线
+    （确认侧精查 + 快照侧硬拒绝 + 清零告警）"""
+
+    def test_event_pointing_to_nonexistent_position_hard_rejected(self, test_db):
+        """验收 1：存量坏事件指向不存在持仓 → 快照生成失败，无幽灵行"""
+        import pytest
+        from app.services.exceptions import BusinessError
+        from tests.factories import create_share_change_event
+
+        _setup(test_db, "FA_G1")
+        create_product(test_db, code="GHOST.OF", market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        # 直造存量坏事件（绕过创建/确认入口，模拟历史脏数据）
+        create_share_change_event(
+            test_db, "FA_G1", "GHOST.OF", "CN_OTC",
+            event_type="forced_adjustment", ex_date=EX_DAY,
+            entitlement_date=D0, status="confirmed",
+            platform_code="MYCF", shares_change=Decimal("10.00"),
+            entitlement_shares=Decimal("0"), shares_before=Decimal("0"),
+        )
+
+        with pytest.raises(BusinessError) as exc:
+            generate_daily_snapshots(test_db, "FA_G1", EX_DAY)
+        assert exc.value.code == "POSITION_NOT_FOUND"
+        assert exc.value.details["product_code"] == "GHOST.OF"
+        # 无幽灵持仓行（生成在任何写入前失败）
+        assert test_db.query(PortfolioPosition).filter(
+            PortfolioPosition.portfolio_code == "FA_G1",
+            PortfolioPosition.product_code == "GHOST.OF",
+        ).count() == 0
+
+    def test_cash_row_guard(self, test_db):
+        """存量份额事件命中现金行 → 硬拒绝（份额不得静默丢弃）"""
+        import pytest
+        from app.services.exceptions import BusinessError
+        from tests.factories import create_share_change_event
+
+        _setup(test_db, "FA_G2")
+        create_share_change_event(
+            test_db, "FA_G2", "CASH", "",
+            event_type="forced_adjustment", ex_date=EX_DAY,
+            entitlement_date=D0, status="confirmed",
+            platform_code="MYCF", shares_change=Decimal("1.00"),
+        )
+
+        with pytest.raises(BusinessError) as exc:
+            generate_daily_snapshots(test_db, "FA_G2", EX_DAY)
+        assert exc.value.code == "POSITION_NOT_FOUND"
+
+    def test_lof_market_misfill_rejected_at_confirm(self, test_db):
+        """验收 1（提前快失败）：LOF market 误填在确认侧即被精查拒绝"""
+        import pytest
+        from app.services.exceptions import BusinessError
+
+        _setup(test_db, "FA_G3")
+        create_product(test_db, code="LOF278", market="SZ",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        create_product(test_db, code="LOF278", market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        create_position_snapshot(
+            test_db, "FA_G3", "LOF278", "SZ", snapshot_date=D0,
+            shares=50.0, unit_price=1.0, cost_price=1.0,
+            market_value=50.0, platform_code="MYCF",
+        )
+
+        # market 误填为场外 → 确认拒绝
+        event = svc_create_event(
+            test_db, portfolio_code="FA_G3", event_type="forced_adjustment",
+            product_code="LOF278", market="CN_OTC", platform_code="MYCF",
+            ex_date=EX_DAY, entitlement_date=D0,
+            shares_change=Decimal("1.00"),
+        )
+        test_db.flush()
+        with pytest.raises(BusinessError) as exc:
+            confirm_share_change_event(test_db, event)
+        assert exc.value.code == "POSITION_NOT_FOUND"
+        assert event.status == "pending"
+
+        # 正向对照：market 正确则照常确认
+        event_ok = svc_create_event(
+            test_db, portfolio_code="FA_G3", event_type="forced_adjustment",
+            product_code="LOF278", market="SZ", platform_code="MYCF",
+            ex_date=EX_DAY, entitlement_date=D0,
+            shares_change=Decimal("1.00"),
+        )
+        test_db.flush()
+        confirm_share_change_event(test_db, event_ok)
+        assert event_ok.status == "confirmed"
+
+    def test_negative_adjustment_zeroed_position_warning(self, test_db):
+        """验收 2：负向调整打空持仓行 → 生成成功但携带 event_zeroed_position 告警"""
+        _setup(test_db, "FA_G4")
+        event = _create_confirmed_event(
+            test_db, "FA_G4", shares_change=Decimal("-100.00"))  # 100 − 100 = 0
+
+        result = generate_daily_snapshots(test_db, "FA_G4", EX_DAY)
+        assert result["success"] is True
+
+        warnings = result["warnings"]
+        assert warnings, "应携带清零告警"
+        zeroed = [w for w in warnings if w["type"] == "event_zeroed_position"]
+        assert len(zeroed) == 1
+        assert zeroed[0]["product_code"] == FUND
+        assert zeroed[0]["platform_code"] == "MYCF"
+        assert zeroed[0]["event_id"] == event.id
+        # 持仓行不写入快照（份额 ≤ 0 跳过）
+        assert _pos(test_db, "FA_G4", FUND, EX_DAY) is None
+
+    def test_recalculate_with_bad_event_fails_and_leaves_no_residue(self, test_db):
+        """重算路径：坏事件致逐日失败 → errors 非空，调用方不 commit 则无残留"""
+        from tests.factories import create_share_change_event
+
+        _setup_real_history(test_db, "FA_BAD", "FA_BAD_INV")
+        create_product(test_db, code="GHOST2.OF", market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        create_share_change_event(
+            test_db, "FA_BAD", "GHOST2.OF", "CN_OTC",
+            event_type="forced_adjustment", ex_date=EX_DAY,
+            entitlement_date=D0, status="confirmed",
+            platform_code="MYCF", shares_change=Decimal("10.00"),
+            entitlement_shares=Decimal("0"), shares_before=Decimal("0"),
+        )
+
+        recalc = recalculate_snapshots(test_db, "FA_BAD", D0, EX_DAY)
+        errors = [r["errors"] for r in recalc["results"] if r["errors"]]
+        assert errors, "坏事件应使重算失败"
+
+        test_db.rollback()  # 有 errors → 调用方整体回滚（「要么完整成功，要么无变化」）
+        # 基线快照完好、无重算残留
+        assert _pos(test_db, "FA_BAD", FUND, D0) is not None
+        assert test_db.query(PortfolioPosition).filter(
+            PortfolioPosition.portfolio_code == "FA_BAD",
+            PortfolioPosition.snapshot_date == EX_DAY,
+        ).count() == 0
+
+    def test_cash_only_adjustment_regression(self, test_db):
+        """回归：只填 cash_change 的 forced_adjustment 照常生效（#279 校验不误伤）"""
+        _setup(test_db, "FA_G6")
+        _create_confirmed_event(test_db, "FA_G6", cash_change=Decimal("50.00"))
+
+        result = generate_daily_snapshots(test_db, "FA_G6", EX_DAY)
+        assert result["success"] is True
+
+        pos = _pos(test_db, "FA_G6", FUND, EX_DAY)
+        assert Decimal(str(pos.shares)) == Decimal("100.00")  # 基金份额不变
+        cash_row = _pos(test_db, "FA_G6", "CASH", EX_DAY)
+        assert Decimal(str(cash_row.cash_amount)) == Decimal("1050.00")
+
+    def test_cash_product_cash_only_adjustment_snapshot_ok(self, test_db):
+        """对 CASH 产品的纯现金调整（#279 放行）不得被现金行守卫误杀"""
+        _setup(test_db, "FA_G7")
+        event = svc_create_event(
+            test_db, portfolio_code="FA_G7", event_type="forced_adjustment",
+            product_code="CASH", market="", platform_code="MYCF",
+            ex_date=EX_DAY, entitlement_date=D0,
+            cash_change=Decimal("80.00"),
+        )
+        test_db.flush()
+        confirm_share_change_event(test_db, event)
+        test_db.flush()
+        assert event.status == "confirmed"
+
+        result = generate_daily_snapshots(test_db, "FA_G7", EX_DAY)
+        assert result["success"] is True
+
+        cash_row = _pos(test_db, "FA_G7", "CASH", EX_DAY)
+        assert Decimal(str(cash_row.cash_amount)) == Decimal("1080.00")
