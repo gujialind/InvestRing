@@ -51,13 +51,14 @@ jobs:
           pip install -r requirements.txt
 
       # SQLite 模式运行全量测试（unit + integration + e2e）；
-      # 覆盖率仅在本 job 收集（不设阈值，先度量观察基线，issue #171）
+      # 覆盖率仅在本 job 收集；口径（含分支）与硬阈值 fail_under 见
+      # backend/pyproject.toml [tool.coverage.*]（issue #254 设防期，#171 观察期已结束）
       - name: Run tests with pytest
         env:
           SECRET_KEY: test-secret-key-for-ci
           SCHEDULER_ENABLED: "false"
         run: |
-          pytest tests/ -q --tb=short --strict-markers --cov=app --cov-report=xml
+          pytest tests/ -q --tb=short --strict-markers --cov=app --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage report
         if: always()
