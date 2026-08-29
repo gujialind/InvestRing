@@ -64,7 +64,7 @@ export default function CashTransferListDialog({
               <TableRow>
                 <TableHead>转移日期</TableHead>
                 <TableHead>转出 → 转入</TableHead>
-                <TableHead className="text-right">金额</TableHead>
+                <TableHead className="number-cell">金额</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -80,7 +80,7 @@ export default function CashTransferListDialog({
                     <TableCell>
                       {t.from_platform} → {t.to_platform}
                     </TableCell>
-                    <TableCell className="text-right">{formatCurrency(t.amount)}</TableCell>
+                    <TableCell className="number-cell">{formatCurrency(t.amount)}</TableCell>
                     <TableCell>{t.cross_day ? "跨天到账" : "当天完成"}</TableCell>
                     <TableCell>
                       <Badge variant={isPending ? "warning" : getStatusBadgeVariant(t.sell_status)}>

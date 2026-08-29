@@ -2,7 +2,7 @@
 
 import MainLayout from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency, formatShares, formatReturnRate, getReturnColorClass, getStatusBadgeVariant } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, formatReturnRate, getReturnColorClass, getStatusBadgeVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
@@ -68,10 +68,10 @@ export default function DashboardPage() {
                     <span className="text-warning-foreground">
                       {sub.sub_type === "subscribe" ? "申购" : "赎回"} - {sub.portfolio_code}
                     </span>
-                    <span className="text-warning-foreground font-mono tabular-nums">
+                    <span className="text-warning-foreground number-cell">
                       {sub.sub_type === "subscribe"
                         ? formatCurrency(sub.amount || 0)
-                        : `${formatShares(sub.shares || 0)} 份`
+                        : formatSharesUnit(sub.shares || 0)
                       }
                     </span>
                   </div>
@@ -102,10 +102,10 @@ export default function DashboardPage() {
                     <span className="text-warning-foreground">
                       {trade.trade_type === "buy" ? "买入" : "卖出"} - {trade.product_code}
                     </span>
-                    <span className="text-warning-foreground font-mono tabular-nums">
+                    <span className="text-warning-foreground number-cell">
                       {trade.trade_type === "buy"
                         ? formatCurrency(trade.amount || 0)
-                        : `${formatShares(trade.shares || 0)} 份`
+                        : formatSharesUnit(trade.shares || 0)
                       }
                     </span>
                   </div>
@@ -186,7 +186,7 @@ export default function DashboardPage() {
                       <p className="font-medium">
                         {sub.sub_type === "subscribe"
                           ? formatCurrency(sub.amount || 0)
-                          : `${formatShares(sub.shares || 0)} 份`
+                          : formatSharesUnit(sub.shares || 0)
                         }
                       </p>
                       <p className="text-sm text-muted-foreground">

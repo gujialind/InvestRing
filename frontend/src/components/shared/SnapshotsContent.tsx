@@ -56,7 +56,7 @@ import EmptyState from "@/components/shared/EmptyState";
 import {
   formatCurrency,
   formatNav,
-  formatShares,
+  formatSharesUnit,
   getNumberCellClass,
   getSignedReturn,
   getStatusBadgeVariant,
@@ -526,7 +526,7 @@ export default function SnapshotsContent({ basePath, variant = "desktop" }: Snap
                           <TableCell className={getNumberCellClass()}>
                             <span className={ret.colorClass}>{ret.text}</span>
                           </TableCell>
-                          <TableCell className={getNumberCellClass()}>{formatShares(item.total_shares)}</TableCell>
+                          <TableCell className={getNumberCellClass()}>{formatSharesUnit(item.total_shares)}</TableCell>
                           <TableCell className={getNumberCellClass()}>{formatCurrency(item.total_value)}</TableCell>
                           <TableCell className={getNumberCellClass()}>{formatCurrency(item.in_transit_total)}</TableCell>
                           <TableCell className="text-right">

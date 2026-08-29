@@ -39,6 +39,48 @@ const arbitraryValueSelectors = [
   },
 ];
 
+// 2026-08-29（issue #249）：数值展示规范护栏（visual-spec §3/§8/§12）。
+// ① JSX 内手写 "-" 占位 → 走 format 函数 fallback（统一 "--"）；
+//    限定 JSXExpressionContainer 后代（三元分支的 Literal 是孙级），
+//    不误伤 .replace("-", "/") 等 JSX 外的语义字符串。
+// ② className 内联 font-mono tabular-nums → 用 number-cell utility
+//   （需拼接时 getNumberCellClass()）；限定 JSXAttribute，不误伤 utils.ts 定义。
+// ③ 份额语义量调 formatNumber → formatShares / formatSharesUnit（份额口径 2 位量化，
+//    #87/#94）；覆盖 formatNumber(shares) 与 formatNumber(position.shares) 两种形态。
+// 金额类 formatNumber 刻意不拦（概览大字「数字 + 元」为例外设计，见 §12），
+// 切勿补全金额选择器——门禁与规范须保持一致。
+const numberDisplaySelectors = [
+  {
+    selector: 'JSXExpressionContainer Literal[value="-"]',
+    message:
+      '禁止在 JSX 内手写 "-" 作为空值占位。请走 format 系函数 fallback（统一回显 "--"），见 docs/design/visual-spec.md §12（issue #249）。',
+  },
+  {
+    selector:
+      'JSXAttribute[name.name="className"] Literal[value=/font-mono tabular-nums/]',
+    message:
+      "禁止内联 font-mono tabular-nums。数值单元格请用 number-cell utility（需拼接类名时用 getNumberCellClass()），见 docs/design/visual-spec.md §3/§8（issue #249）。",
+  },
+  {
+    selector:
+      'JSXAttribute[name.name="className"] TemplateElement[value.cooked=/font-mono tabular-nums/]',
+    message:
+      "禁止内联 font-mono tabular-nums。数值单元格请用 number-cell utility（需拼接类名时用 getNumberCellClass()），见 docs/design/visual-spec.md §3/§8（issue #249）。",
+  },
+  {
+    selector:
+      'CallExpression[callee.name="formatNumber"] > Identifier[name=/[Ss]hares/]',
+    message:
+      "份额展示禁止用 formatNumber（可能偏离 2 位量化口径）。请用 formatShares / formatSharesUnit，见 docs/design/visual-spec.md §3（issue #249）。",
+  },
+  {
+    selector:
+      'CallExpression[callee.name="formatNumber"] > MemberExpression[property.name=/[Ss]hares/]',
+    message:
+      "份额展示禁止用 formatNumber（可能偏离 2 位量化口径）。请用 formatShares / formatSharesUnit，见 docs/design/visual-spec.md §3（issue #249）。",
+  },
+];
+
 const eslintConfig = [
   // 复刻 `next lint` 的默认忽略范围，避免扫描 node_modules / 构建产物
   {
@@ -63,6 +105,7 @@ const eslintConfig = [
         "error",
         ...paletteColorSelectors,
         ...arbitraryValueSelectors,
+        ...numberDisplaySelectors,
       ],
     },
   },

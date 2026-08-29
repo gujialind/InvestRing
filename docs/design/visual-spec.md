@@ -139,6 +139,7 @@
 |---|---|---|
 | 金额 | `formatCurrency` / `formatCompactCurrency`（概览大字） | 千分位 + 2 位小数 + `¥` |
 | 份额 | `formatShares` | 固定 2 位小数，不带货币符号（勿用 formatCurrency 代替） |
+| 份额带单位 | `formatSharesUnit` | `formatShares` + 「份」后缀（`8,933.89 份`，负数 `-1,000.00 份` 符号在数字内、单位在外）；份额上屏一律用它，禁止手写 `` `${formatShares(x)} 份` `` 模板串（#249） |
 | 净值/价格 | `formatNav` | 固定 4 位小数，不带 `¥` |
 | 精确对账金额 | `formatAmount4` | 4 位小数，仅用于与后端/CLI 对账场景 |
 | 百分比/收益率 | `formatPercent` / `formatReturnRate` | 默认 2 位小数、自带 `+/-` 符号 |
@@ -180,7 +181,7 @@
 
 ## 8. 表格规范
 
-- **数字列右对齐 + `number-cell`**（等宽 tabular-nums），文本列左对齐，操作列右对齐；列表头与数据列对齐方式一致。
+- **数字列右对齐 + `number-cell`**（等宽 tabular-nums；份额/金额/净值与整数计数列一视同仁），文本列左对齐，操作列右对齐（`text-right`）；列表头与数据列对齐方式一致（数字列表头同样 `number-cell`）。禁止对数值单元格手写裸 `text-right` 或内联 `font-mono tabular-nums`（#249 起 ESLint 拦截）；需与其他类拼接时（如 `cn("text-muted-foreground", …)`）用 `lib/utils.ts` 的 `getNumberCellClass()`。
 - **表头**：`text-muted-foreground` 常规字重，不加底色、不加粗（层级靠字号与文字色，不靠底纹）。
 - **斑马纹**：不用。行分隔靠 `border-b`，hover 行 `hover:bg-muted/50` 足够表达可点行。
 - **空态**：表体空时表下方居中 `text-muted-foreground` 文案（或 `EmptyState` 组件），不渲染空表壳外的额外颜色。空态变体登记：① 数据空（默认）；② 筛选无结果——文案「无符合筛选条件的记录」+ 内嵌「重置筛选」入口（见 §9）；③ 无权限——文案「无权限访问本页」+ 返回入口按钮（`EmptyState` action 位）。
@@ -227,8 +228,9 @@
 - **日期**：统一 `YYYY-MM-DD`（`formatDate`）；带时分秒用 `formatDateTime`；相对时间（今天/N 天前）仅限通知等弱精确场景（`formatRelativeDate`）。
 - **百分比**：自带 `+/-` 符号（`formatPercent`/`formatReturnRate` 默认 showSign），禁止手工拼 `+`；负号由数值自带。
 - **金额**：带 `¥`、千分位、2 位小数；概览大字可用 `formatCompactCurrency` 的万/亿紧凑格式（`¥X.XX 万` / `¥X.XX 亿`），表格内不用紧凑格式。
-- **空值占位**：统一 `--`（各 format 函数 fallback），禁止 `N/A`、`null`、空字符串上屏。
-- **单位**：份额数值后带「份」、金额不重复写「元」（`¥` 已表意）；图表 tooltip 中金额可带「元」补语义。
+- **空值占位**：统一 `--`（各 format 函数 fallback），禁止 `N/A`、`null`、空字符串上屏；JSX 内禁止手写 `-`/`"--"` 字面量当占位——空值判断交回 format 函数（`null`/`undefined`/空串/`NaN` → fallback `--`），不要用 truthy 三元短路（真 0 会被误判为缺失，如 `fee=0` 应显示 `¥0.00`；#249 起 ESLint 拦截 JSX 内 `-`）。
+- **单位**：份额数值后带「份」（一律 `formatSharesUnit`，见 §3）、金额不重复写「元」（`¥` 已表意，例外见下条）；图表 tooltip 中金额可带「元」补语义。
+- **概览大字「数字 + 元」例外**（#249 登记，设计来源 #99/#114/#117）：概览大字与分区/分组合计允许 `formatNumber(...)` + 手写「元」后缀（适用清单：`PositionSections` 持仓金额卡/大类分区头合计/名目 chip 合计/在途合计、`PortfolioStatsCards` 统计卡），大字区「数字 + 元」比 `¥` 更紧凑、不与表格内 `¥` 争视觉层级。**边界**：仅覆盖上列概览大字与分区/分组合计；表格数值单元格、卡片小字明细（如 `PositionCard` 的份额/成本价/当前价）不在例外内，仍走 §3 format 函数。**规范与实现二选一**：若未来决定代码侧统一为 `formatCurrency`，须先撤回本条例外，不允许两者并存。
 
 ## 13. 组件复用红线
 

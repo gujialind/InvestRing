@@ -494,8 +494,8 @@ export default function ProductsContent({ variant = "desktop" }: ProductsContent
                   <TableHead>市场</TableHead>
                   <TableHead>名称</TableHead>
                   <TableHead>类型</TableHead>
-                  <TableHead>确认天数</TableHead>
-                  <TableHead>估值滞后</TableHead>
+                  <TableHead className="number-cell">确认天数</TableHead>
+                  <TableHead className="number-cell">估值滞后</TableHead>
                   <TableHead>QDII</TableHead>
                   <TableHead>数据源</TableHead>
                   <TableHead className="text-right">操作</TableHead>
@@ -505,12 +505,12 @@ export default function ProductsContent({ variant = "desktop" }: ProductsContent
                 {products.map((product) => (
                   <TableRow key={`${product.code}-${product.market || "null"}`}>
                     <TableCell className="font-medium">{product.code}</TableCell>
-                    <TableCell>{product.market || "-"}</TableCell>
+                    <TableCell>{product.market || "--"}</TableCell>
                     <TableCell>{product.name}</TableCell>
                     <TableCell>{product.product_type}</TableCell>
-                    <TableCell>{product.confirm_days}</TableCell>
+                    <TableCell className="number-cell">{product.confirm_days}</TableCell>
                     {/* issue #228：快照估值取价日，0 显示 T，N 显示 T-N */}
-                    <TableCell>
+                    <TableCell className="number-cell">
                       {(product.nav_lag_days ?? 0) > 0 ? `T-${product.nav_lag_days}` : "T"}
                     </TableCell>
                     <TableCell>{product.is_qdii ? "是" : "否"}</TableCell>
@@ -631,14 +631,14 @@ export default function ProductsContent({ variant = "desktop" }: ProductsContent
                 <TableHeader>
                   <TableRow>
                     <TableHead>日期</TableHead>
-                    <TableHead className="text-right">价格/净值</TableHead>
+                    <TableHead className="number-cell">价格/净值</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {priceData.map((record) => (
                     <TableRow key={record.price_date}>
                       <TableCell>{record.price_date}</TableCell>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="number-cell font-medium">
                         {formatNav(record.unit_price)}
                       </TableCell>
                     </TableRow>

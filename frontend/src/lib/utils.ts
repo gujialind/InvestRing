@@ -132,6 +132,21 @@ export function formatShares(
 }
 
 /**
+ * 格式化份额并带「份」单位（visual-spec §12，issue #249）。
+ * 符号在数字内、单位在外（-1,000.00 份）；空值走 fallback，消除各处散写的
+ * `${formatShares(x)} 份` 模板串。
+ */
+export function formatSharesUnit(
+  num: number | string | undefined | null,
+  fallback: string = "--"
+): string {
+  if (num === undefined || num === null || num === "" || Number.isNaN(Number(num))) {
+    return fallback;
+  }
+  return `${formatShares(num)} 份`;
+}
+
+/**
  * 格式化净值/价格（固定 4 位小数，对齐后端 Numeric(10,4)）。
  * 净值不是货币量，不带 ¥ 符号。
  */
