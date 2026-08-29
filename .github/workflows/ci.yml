@@ -219,6 +219,10 @@ jobs:
       - name: TypeScript type check
         run: npx tsc --noEmit
 
+      # 单元测试（issue #253）：lib 纯逻辑层快速拦截，置于耗时的 build 之前
+      - name: Unit tests
+        run: npm run test
+
       # next build 内部也会跑 lint + tsc，但单独前置两步能更快定位失败原因
       - name: Next.js build
         env:
