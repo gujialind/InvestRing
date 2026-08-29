@@ -14,6 +14,9 @@ export interface SnapshotValidationResult {
 // 后端非阻断告警（issue #71：如负现金）
 export type SnapshotWarning = Record<string, unknown>;
 
+// auto_confirm_after_snapshot 逐条结果（#305：成功/失败均透传，失败携 code）
+export type AutoConfirmEntry = Record<string, unknown>;
+
 export interface SnapshotGenerationResult {
   success: boolean;
   message: string;
@@ -29,8 +32,19 @@ export interface RecalculationPortfolioResult {
   portfolio_code: string;
   processed_dates: string[];
   total_processed: number;
-  errors: Array<{ date: string; error: string }>;
+  errors: Array<{
+    date: string;
+    error: string;
+    code?: string;
+    details?: Record<string, unknown>;
+  }>;
   warnings?: SnapshotWarning[] | null;
+  /** #305：逐日 auto_confirm 结果（含 auto_confirm_failed 条目与 code） */
+  auto_confirmed?: AutoConfirmEntry[] | null;
+  /** #305：删旧快照级联回退的申赎明细 */
+  cascaded_unconfirmed?: AutoConfirmEntry[] | null;
+  /** #305：end_date 后存在快照时自动扩展到的实际重算终点 */
+  end_date_extended_to?: string | null;
 }
 
 export interface RecalculationResult {
@@ -78,6 +92,12 @@ export interface SnapshotCatchUpResult {
   message?: string | null;
   failed_date?: string | null;
   error?: string | null;
+  /** #305：中断错误的结构化 code/details（error 仍为消息文本） */
+  error_code?: string | null;
+  error_details?: Record<string, unknown> | null;
+  /** #305：逐日生成累积的非阻断告警（每条带 date） */
+  warnings?: SnapshotWarning[] | null;
+  auto_confirmed?: AutoConfirmEntry[] | null;
 }
 
 export interface SnapshotGenerateNextResult {
@@ -89,6 +109,7 @@ export interface SnapshotGenerateNextResult {
   total_shares?: number;
   unit_price?: number;
   warnings?: SnapshotWarning[] | null;
+  auto_confirmed?: AutoConfirmEntry[] | null;
 }
 
 export interface RecalculateAsyncSubmitResult {

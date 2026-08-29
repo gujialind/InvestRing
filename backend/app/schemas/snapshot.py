@@ -42,6 +42,12 @@ class SnapshotCatchUpResult(BaseModel):
     message: Optional[str] = None
     failed_date: Optional[str] = None
     error: Optional[str] = None
+    # #305：逐日告警（带 date 键）与自动确认结果透传，无则 None
+    warnings: Optional[List[Dict[str, Any]]] = None
+    auto_confirmed: Optional[List[Dict[str, Any]]] = None
+    # #305：中断点的结构化错误（error 仍为消息文本，向后兼容）
+    error_code: Optional[str] = None
+    error_details: Optional[Dict[str, Any]] = None
 
 
 class SnapshotGenerateNextResult(BaseModel):
@@ -54,6 +60,8 @@ class SnapshotGenerateNextResult(BaseModel):
     total_shares: Optional[float] = None
     unit_price: Optional[float] = None
     warnings: Optional[List[Dict[str, Any]]] = None
+    # #305：自动确认结果透传（含失败条目），无则 None
+    auto_confirmed: Optional[List[Dict[str, Any]]] = None
 
 
 class ValidationCheckResult(BaseModel):
@@ -92,6 +100,12 @@ class RecalculationPortfolioResult(BaseModel):
     errors: List[Dict[str, Any]]
     # issue #71：逐日重建累积的负现金告警（与 errors 聚合风格一致）
     warnings: Optional[List[Dict[str, Any]]] = None
+    # #305：逐日自动确认结果透传（含 auto_confirm_failed 条目），空列表为 []
+    auto_confirmed: Optional[List[Dict[str, Any]]] = None
+    # #305：删旧快照级联回退的申购记录，无则 []
+    cascaded_unconfirmed: Optional[List[Dict[str, Any]]] = None
+    # #305：end_date 因后续快照自动扩展到的实际重算终点（未扩展则无此字段）
+    end_date_extended_to: Optional[str] = None
 
 
 class RecalculationResult(BaseModel):

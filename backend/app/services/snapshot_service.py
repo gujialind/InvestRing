@@ -12,10 +12,11 @@
 import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Callable, Dict, Any, List, Optional, Tuple
 
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func, and_, or_, delete
+from sqlalchemy.exc import DBAPIError
 
 from app.models import (
     Portfolio, PortfolioPosition, PortfolioValueSnapshot, InvestorHolding,
@@ -33,6 +34,17 @@ from app.models.manual_market_value import ManualMarketValue
 from app.utils.quantize import quantize_shares
 
 logger = logging.getLogger(__name__)
+
+
+def _error_info(e: Exception) -> Dict[str, Any]:
+    """异常 → 结构化错误条目（#305）：BusinessError 保留 code 与 details，
+    其余异常以类型名作 code，客户端可按码分支。"""
+    if isinstance(e, BusinessError):
+        info: Dict[str, Any] = {"code": e.code, "message": e.message}
+        if e.details:
+            info["details"] = e.details
+        return info
+    return {"code": type(e).__name__, "message": str(e)}
 
 
 def _compute_in_transit_amounts(
@@ -422,7 +434,8 @@ def recalculate_snapshots(
                     error_msg = "; ".join([v["message"] for v in failed])
                     result["errors"].append({
                         "date": current_date.isoformat(),
-                        "error": f"校验失败: {error_msg}"
+                        "error": f"校验失败: {error_msg}",
+                        "code": "VALIDATION_FAILED",
                     })
                     # #35: 单日校验失败即停止，避免后续日基于缺失数据生成错误快照
                     break
@@ -457,12 +470,16 @@ def recalculate_snapshots(
 
             except Exception as e:
                 # 不在此 rollback：回滚交调用方（errors 非空时统一回滚整个事务）
+                err = _error_info(e)
                 result["errors"].append({
                     "date": current_date.isoformat(),
-                    "error": str(e)
+                    "error": err["message"],
+                    "code": err["code"],
+                    **({"details": err["details"]} if "details" in err else {}),
                 })
                 logger.error(
-                    f"重算失败: portfolio={portfolio.code}, date={current_date}, error={str(e)}"
+                    f"重算失败: portfolio={portfolio.code}, date={current_date}, "
+                    f"code={err['code']}, error={err['message']}"
                 )
                 # #35: 单日异常即停止，避免后续日基于缺失数据继续
                 break
@@ -524,6 +541,8 @@ def catch_up_snapshots(
         "to_date": to_date.isoformat(),
         "generated_count": 0,
         "generated_dates": [],
+        "warnings": [],
+        "auto_confirmed": [],
     }
 
     current = get_next_trading_day(db, latest, days=1)
@@ -536,18 +555,27 @@ def catch_up_snapshots(
 
     while current and current <= to_date:
         try:
-            generate_daily_snapshots(db, portfolio_code, current)
-            auto_confirm_after_snapshot(db, portfolio_code, current)
+            gen_result = generate_daily_snapshots(db, portfolio_code, current)
+            # #305：逐日告警补 date 键后透传（如 event_zeroed_position/negative_cash）
+            for w in gen_result.get("warnings") or []:
+                result["warnings"].append({**w, "date": current.isoformat()})
+            auto_results = auto_confirm_after_snapshot(db, portfolio_code, current)
+            result["auto_confirmed"].extend(auto_results)
             # 逐日 checkpoint commit：已完成日立即落库
             db.commit()
             result["generated_dates"].append(current.isoformat())
             result["generated_count"] += 1
         except Exception as e:
             db.rollback()
+            err = _error_info(e)
             result["failed_date"] = current.isoformat()
-            result["error"] = str(e)
+            result["error"] = err["message"]
+            result["error_code"] = err["code"]
+            if "details" in err:
+                result["error_details"] = err["details"]
             logger.error(
-                f"追平快照失败: portfolio={portfolio_code}, date={current}, error={str(e)}"
+                f"追平快照失败: portfolio={portfolio_code}, date={current}, "
+                f"code={err['code']}, error={err['message']}"
             )
             break
         # 防死循环：日历耗尽时 get_next_trading_day 返回 None 或 current 本身
@@ -558,6 +586,8 @@ def catch_up_snapshots(
 
     final_latest = get_latest_snapshot_date(db, portfolio_code)
     result["latest_snapshot_date"] = final_latest.isoformat() if final_latest else None
+    result["warnings"] = result["warnings"] or None
+    result["auto_confirmed"] = result["auto_confirmed"] or None
     if "failed_date" in result:
         result["message"] = (
             f"追平中断于 {result['failed_date']}，已生成 {result['generated_count']} 日快照"
@@ -602,7 +632,7 @@ def generate_next_snapshot(
         )
 
     gen_result = generate_daily_snapshots(db, portfolio_code, next_day)
-    auto_confirm_after_snapshot(db, portfolio_code, next_day)
+    auto_results = auto_confirm_after_snapshot(db, portfolio_code, next_day)
     db.commit()
 
     return {
@@ -614,6 +644,7 @@ def generate_next_snapshot(
         "total_shares": gen_result["total_shares"],
         "unit_price": gen_result["unit_price"],
         "warnings": gen_result.get("warnings"),
+        "auto_confirmed": auto_results or None,
     }
 
 
@@ -1474,6 +1505,50 @@ def _generate_investor_holding(
     return result_holdings
 
 
+def _auto_confirm_guarded(
+    db: Session, entry: Dict[str, Any], confirm_fn: Callable[[], Any]
+) -> bool:
+    """单条自动确认包连接级 savepoint 执行（#305）。
+
+    - BusinessError / DB 层失败（IntegrityError 等）：savepoint 内回滚、外层事务
+      保持可用，条目记 auto_confirm_failed 与 code/details，循环继续；
+    - 连接级失效（断连等）：整个事务不可恢复，条目记根因后返回 False，
+      调用方应终止本段——杜绝后续条目逐条产生误导性 PendingRollbackError。
+
+    成功时回填 entry action=auto_confirmed/status=success。
+    """
+    pending_before = set(db.new)
+    sp = db.connection().begin_nested()
+    try:
+        confirm_fn()
+        db.flush()  # 强制约束错误在 savepoint 内暴露
+        sp.commit()
+    except Exception as e:
+        try:
+            sp.rollback()
+        except Exception:
+            pass
+        # savepoint 回滚不影响 session 身份映射：清理段内新增的 pending 对象
+        # （如配对 CASH 腿），否则下次 flush 会重复 INSERT
+        for obj in set(db.new) - pending_before:
+            db.expunge(obj)
+        # 丢弃回滚后残留的 dirty ORM 态
+        db.expire_all()
+        info = _error_info(e)
+        entry["action"] = "auto_confirm_failed"
+        entry["error"] = info["message"]
+        entry["code"] = info["code"]
+        if "details" in info:
+            entry["details"] = info["details"]
+        if isinstance(e, DBAPIError) and e.connection_invalidated:
+            entry["code"] = "SESSION_ABORTED"
+            return False
+        return True
+    entry["action"] = "auto_confirmed"
+    entry["status"] = "success"
+    return True
+
+
 def auto_confirm_after_snapshot(
     db: Session,
     portfolio_code: str,
@@ -1490,6 +1565,10 @@ def auto_confirm_after_snapshot(
     乱序补录的早期申购可能抛 CONFIRM_BEFORE_STARTED（issue #179 闸门），
     被捕获为 auto_confirm_failed、不阻断整批，需手动按序处理。
 
+    #305：单条确认包连接级 savepoint——DB 级失败（IntegrityError 等）不毒化
+    session、循环继续；连接级失效记一条根因（code=SESSION_ABORTED）后终止。
+    失败条目携带 code 与 details（BusinessError 透传）。
+
     Args:
         db: 数据库会话
         portfolio_code: 组合代码
@@ -1498,11 +1577,7 @@ def auto_confirm_after_snapshot(
     Returns:
         确认结果列表
     """
-    from app.services.subscription_service import (
-        confirm_single_subscription,
-        NavNotAvailableError,
-        InvalidStatusError,
-    )
+    from app.services.subscription_service import confirm_single_subscription
 
     pending_subs = (
         db.query(Subscription)
@@ -1519,40 +1594,30 @@ def auto_confirm_after_snapshot(
     for sub in pending_subs:
         sub_id = sub.id
         sub_type = sub.sub_type
-        try:
-            confirm_single_subscription(db, sub, auto_flush=True)
-            results.append({
-                "id": sub_id,
-                "sub_type": sub_type,
-                "apply_date": snapshot_date.isoformat(),
-                "action": "auto_confirmed",
-                "status": "success",
-            })
+        entry: Dict[str, Any] = {
+            "id": sub_id,
+            "sub_type": sub_type,
+            "apply_date": snapshot_date.isoformat(),
+        }
+        if not _auto_confirm_guarded(
+            db, entry, lambda s=sub: confirm_single_subscription(db, s, auto_flush=True)
+        ):
+            results.append(entry)
+            logger.error(
+                f"自动确认段中断（session 失效）: portfolio={portfolio_code}, "
+                f"subscription_id={sub_id}, error={entry.get('error')}"
+            )
+            return results
+        results.append(entry)
+        if entry["action"] == "auto_confirmed":
             logger.info(
                 f"自动确认: subscription_id={sub_id}, "
                 f"portfolio={portfolio_code}, apply_date={snapshot_date}"
             )
-        except (NavNotAvailableError, InvalidStatusError) as e:
-            results.append({
-                "id": sub_id,
-                "sub_type": sub_type,
-                "apply_date": snapshot_date.isoformat(),
-                "action": "auto_confirm_failed",
-                "error": str(e),
-            })
+        else:
             logger.warning(
-                f"自动确认失败: subscription_id={sub_id}, error={str(e)}"
-            )
-        except Exception as e:
-            results.append({
-                "id": sub_id,
-                "sub_type": sub_type,
-                "apply_date": snapshot_date.isoformat(),
-                "action": "auto_confirm_failed",
-                "error": str(e),
-            })
-            logger.error(
-                f"自动确认异常: subscription_id={sub_id}, error={str(e)}"
+                f"自动确认失败: subscription_id={sub_id}, "
+                f"code={entry.get('code')}, error={entry.get('error')}"
             )
 
     # #33: auto_confirm(D) 确认 confirm_date == next_trading_day(D) 的交易/事件，
@@ -1572,30 +1637,34 @@ def auto_confirm_after_snapshot(
     ).all()
 
     for trade in pending_trades:
-        try:
+        trade_id = trade.id
+        entry: Dict[str, Any] = {"id": trade_id, "type": "trade"}
+
+        def _confirm_trade(t=trade):
             product = db.query(Product).filter(
-                Product.code == trade.product_code,
-                Product.market == trade.market,
+                Product.code == t.product_code,
+                Product.market == t.market,
             ).first()
             # 走公共确认逻辑：净值型产品按 T 日净值重算 shares/amount，
             # 并原子同步 transfer_group 配对腿（#29）；重算历史时现金/份额基线
             # 尚未逐日重建，跳过可用量校验（#78；#182 起含卖出份额校验）
-            confirm_single_trade(db, trade, product, skip_available_check=True)
-            results.append({
-                "id": trade.id,
-                "type": "trade",
-                "action": "auto_confirmed",
-                "status": "success",
-            })
-            logger.info(f"自动确认 Trade: trade_id={trade.id}, portfolio={portfolio_code}")
-        except Exception as e:
-            results.append({
-                "id": trade.id,
-                "type": "trade",
-                "action": "auto_confirm_failed",
-                "error": str(e),
-            })
-            logger.warning(f"Trade auto-confirm failed: trade_id={trade.id}, {e}")
+            confirm_single_trade(db, t, product, skip_available_check=True)
+
+        if not _auto_confirm_guarded(db, entry, _confirm_trade):
+            results.append(entry)
+            logger.error(
+                f"自动确认段中断（session 失效）: portfolio={portfolio_code}, "
+                f"trade_id={trade_id}, error={entry.get('error')}"
+            )
+            return results
+        results.append(entry)
+        if entry["action"] == "auto_confirmed":
+            logger.info(f"自动确认 Trade: trade_id={trade_id}, portfolio={portfolio_code}")
+        else:
+            logger.warning(
+                f"Trade auto-confirm failed: trade_id={trade_id}, "
+                f"code={entry.get('code')}, error={entry.get('error')}"
+            )
 
     # 跨天转移 auto_confirm（两腿均 pending，需同时确认）
     # 仅当 confirm_date == next_trading_day(D)（与其它交易同一时序）时处理
@@ -1611,33 +1680,37 @@ def auto_confirm_after_snapshot(
         if trade.transfer_group in processed_groups:
             continue
         processed_groups.add(trade.transfer_group)
-        try:
-            # TRANSFER_NOT_READY 守卫
-            if trade.confirm_date and trade.confirm_date > date.today():
-                logger.info(f"跨天转移 {trade.transfer_group} 未到确认日，跳过")
-                continue
+        group = trade.transfer_group
+        # TRANSFER_NOT_READY 守卫
+        if trade.confirm_date and trade.confirm_date > date.today():
+            logger.info(f"跨天转移 {group} 未到确认日，跳过")
+            continue
+        entry: Dict[str, Any] = {"transfer_group": group, "type": "cross_day_transfer"}
+
+        def _confirm_pair(g=group):
             # 同时确认两腿
             paired_trades = db.query(Trade).filter(
-                Trade.transfer_group == trade.transfer_group,
+                Trade.transfer_group == g,
                 Trade.status == "pending",
             ).all()
             for pt in paired_trades:
                 pt.status = "confirmed"
-            results.append({
-                "transfer_group": trade.transfer_group,
-                "type": "cross_day_transfer",
-                "action": "auto_confirmed",
-                "status": "success",
-            })
-            logger.info(f"自动确认跨天转移: transfer_group={trade.transfer_group}")
-        except Exception as e:
-            results.append({
-                "transfer_group": trade.transfer_group,
-                "type": "cross_day_transfer",
-                "action": "auto_confirm_failed",
-                "error": str(e),
-            })
-            logger.warning(f"Cross-day transfer auto-confirm failed: {trade.transfer_group}, {e}")
+
+        if not _auto_confirm_guarded(db, entry, _confirm_pair):
+            results.append(entry)
+            logger.error(
+                f"自动确认段中断（session 失效）: portfolio={portfolio_code}, "
+                f"transfer_group={group}, error={entry.get('error')}"
+            )
+            return results
+        results.append(entry)
+        if entry["action"] == "auto_confirmed":
+            logger.info(f"自动确认跨天转移: transfer_group={group}")
+        else:
+            logger.warning(
+                f"Cross-day transfer auto-confirm failed: {group}, "
+                f"code={entry.get('code')}, error={entry.get('error')}"
+            )
 
     # Event 自动确认（ex_date == next_trading_day(D) 的 pending events）
     # 只处理父/独立记录（跳过子记录，子记录由父记录确认时自动生成）
@@ -1648,27 +1721,30 @@ def auto_confirm_after_snapshot(
         ShareChangeEvent.parent_event_id.is_(None),  # 只处理父/独立记录
     ).all()
 
+    # 委托公共确认实现（基金级自动拆分 / 平台级回写 + #279 校验
+    # + forced_adjustment 持仓精查），重算路径不得绕过校验
+    from app.services.share_change_event_service import confirm_share_change_event
+
     for event in pending_events:
-        try:
-            # 委托公共确认实现（基金级自动拆分 / 平台级回写 + #279 校验
-            # + forced_adjustment 持仓精查），重算路径不得绕过校验
-            from app.services.share_change_event_service import confirm_share_change_event
-            confirm_share_change_event(db, event)
-            results.append({
-                "id": event.id,
-                "type": "event",
-                "action": "auto_confirmed",
-                "status": "success",
-            })
-            logger.info(f"自动确认 Event: event_id={event.id}, portfolio={portfolio_code}")
-        except Exception as e:
-            results.append({
-                "id": event.id,
-                "type": "event",
-                "action": "auto_confirm_failed",
-                "error": str(e),
-            })
-            logger.warning(f"Event auto-confirm failed: event_id={event.id}, {e}")
+        event_id = event.id
+        entry: Dict[str, Any] = {"id": event_id, "type": "event"}
+        if not _auto_confirm_guarded(
+            db, entry, lambda ev=event: confirm_share_change_event(db, ev)
+        ):
+            results.append(entry)
+            logger.error(
+                f"自动确认段中断（session 失效）: portfolio={portfolio_code}, "
+                f"event_id={event_id}, error={entry.get('error')}"
+            )
+            return results
+        results.append(entry)
+        if entry["action"] == "auto_confirmed":
+            logger.info(f"自动确认 Event: event_id={event_id}, portfolio={portfolio_code}")
+        else:
+            logger.warning(
+                f"Event auto-confirm failed: event_id={event_id}, "
+                f"code={entry.get('code')}, error={entry.get('error')}"
+            )
 
     return results
 
