@@ -164,7 +164,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 * 遵循**快照连续原则**，不能仅删除中间的快照，删除某日的快照其后的快照也一并删除。
 
-* **重算**（`recalculate_snapshots`）为**单一事务**：删除任何快照前先对整区间做净值完整性预校验，失败直接拒绝、不删任何快照；随后逐交易日「删旧快照 → 级联回退 → 重建 → auto\_confirm」全程不 commit，任一日失败记录 error 并停止，由调用方按 errors 统一 rollback/commit——对外表现为「要么完整成功，要么无变化」。`auto_confirm_after_snapshot` 每日后自动重确认 `apply_date==D` 的申购、`confirm_date==D` 的 trade、`ex_date==D` 的事件，单笔失败仅记录为 `auto_confirm_failed`、不阻断当日流程。
+* **重算**（`recalculate_snapshots`）为**单一事务**：删除任何快照前先对整区间做净值完整性预校验，失败直接拒绝、不删任何快照；随后逐交易日「删旧快照 → 级联回退 → 重建 → auto\_confirm」全程不 commit，任一日失败记录 error 并停止，由调用方按 errors 统一 rollback/commit——对外表现为「要么完整成功，要么无变化」。`auto_confirm_after_snapshot` 每日后自动重确认 `apply_date==D` 的申购、`confirm_date==D` 的 trade、`ex_date==D` 的事件，单笔失败仅记录为 `auto_confirm_failed`、不阻断当日流程。**可观测性**（#305）：重算 / catch-up / generate-next / 调度路径响应（调度为任务日志）携带逐日 `auto_confirmed` 与 `warnings`，逐日错误条目含 `code`/`details`；auto\_confirm 循环单条 DB 级失败经连接级 savepoint 隔离，不毒化 session、不产生级联误导性记录（连接级失效记 `SESSION_ABORTED` 后终止本段）。
 
 * **零快照 + 目标日前已有确认交易**（#180）：无任何快照但存在 `confirm_date < target_date` 的确认申赎/交易时，单日 `generate` 拒绝 `SNAPSHOT_REQUIRES_RECALCULATE`——增量窗口无前序快照时退化为仅目标日，早期到账会被静默漏掉（首快照「失忆」）；须用 `recalculate` 从最早 `confirm_date` 逐日重建。目标日即最早到账日的真正首次生成不受影响。
 

@@ -596,6 +596,9 @@ def calculate_available_shares(
 
     as_of_date 为 None 时基线取当前最新快照日；传入时取 <= as_of_date 的最新快照日，
     confirmed 卖出仅计 confirm_date 在 (latest_date, as_of_date] 的。
+
+    基线口径（#305）：最新快照日的全部持仓行份额求和（market 为空时跨市场、
+    恒跨平台），与卖出/事件增量的汇总口径一致。
     """
     if as_of_date is not None:
         latest_date = get_latest_snapshot_date_le(db, portfolio_code, as_of_date)
@@ -610,9 +613,19 @@ def calculate_available_shares(
         query = query.filter(PortfolioPosition.market == market)
     if as_of_date is not None:
         query = query.filter(PortfolioPosition.snapshot_date <= as_of_date)
-    latest_position = query.order_by(PortfolioPosition.snapshot_date.desc()).first()
-
-    shares = Decimal(latest_position.shares) if latest_position and latest_position.shares else Decimal("0")
+    # #305：基线 = 最新快照日全部行份额求和（跨市场/跨平台），与下方卖出/事件
+    # 增量的汇总口径一致；旧实现单行 .first() 在 LOF 多市场/多平台场景少取行
+    latest_pos_date = query.with_entities(
+        func.max(PortfolioPosition.snapshot_date)
+    ).scalar()
+    shares = Decimal("0")
+    if latest_pos_date is not None:
+        baseline_total = query.filter(
+            PortfolioPosition.snapshot_date == latest_pos_date,
+            PortfolioPosition.shares.isnot(None),
+        ).with_entities(func.sum(PortfolioPosition.shares)).scalar()
+        if baseline_total is not None:
+            shares = Decimal(str(baseline_total))
 
     pending_sells = (
         db.query(Trade)

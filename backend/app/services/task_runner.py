@@ -164,16 +164,20 @@ def run_snapshot_generate(db: Session, log_id: Optional[int] = None) -> dict:
 
     仅处理 active 且开启自动快照（auto_snapshot_enabled）的组合；依赖当日净值
     同步先成功，缺净值将由快照校验 fail-fast 并记入日志（次日回补自愈）。
+
+    #305：返回值含逐日告警与自动确认失败条目，供手动触发响应与任务日志可见。
     """
     target_date = datetime.now().date() - timedelta(days=1)
-    snapshots_generated = _generate_snapshots_for_date(db, target_date)
+    gen = _generate_snapshots_for_date(db, target_date)
     return {
-        "snapshots_generated": snapshots_generated,
+        "snapshots_generated": gen["generated"],
+        "warnings": gen["warnings"],
+        "auto_confirm_failed": gen["auto_confirm_failed"],
         "target_date": target_date.isoformat(),
     }
 
 
-def _generate_snapshots_for_date(db: Session, target_date) -> int:
+def _generate_snapshots_for_date(db: Session, target_date) -> dict:
     """为开启自动快照的活跃组合逐日补齐快照：从每组合最新快照日之后首个交易日起，
     逐交易日 generate + auto_confirm，直到 target_date（含）。
     单组合单日失败即停止该组合回补（#35 fail-fast）。
@@ -182,21 +186,27 @@ def _generate_snapshots_for_date(db: Session, target_date) -> int:
     手动生成/重算端点不经此过滤。
 
     逐日 commit/rollback 是编排层有意的 checkpoint 语义（与 recalculate 的
-    整体原子语义相反）：多日回补中已完成的日子须保留，失败日仅回滚当日。"""
+    整体原子语义相反）：多日回补中已完成的日子须保留，失败日仅回滚当日。
+
+    #305 返回结构：{"generated": int, "warnings": [...], "auto_confirm_failed": [...]}
+    ——告警逐条补 date 键；自动确认失败条目透传（含 code）。
+    """
     from app.services.snapshot_service import generate_daily_snapshots, auto_confirm_after_snapshot
+    from app.services.exceptions import BusinessError
     from app.services.trading_utils import is_trading_day, get_next_trading_day, get_prev_trading_day
     from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
     from sqlalchemy import func
 
+    outcome = {"generated": 0, "warnings": [], "auto_confirm_failed": []}
+
     end_date = target_date if is_trading_day(db, target_date) else get_prev_trading_day(db, target_date, days=1)
     if not end_date:
-        return 0
+        return outcome
 
     active_portfolios = db.query(Portfolio).filter(
         Portfolio.status == "active",
         Portfolio.auto_snapshot_enabled.is_(True),
     ).all()
-    count = 0
     for portfolio in active_portfolios:
         latest_snapshot = db.query(func.max(PortfolioValueSnapshot.snapshot_date)).filter(
             PortfolioValueSnapshot.portfolio_code == portfolio.code
@@ -204,19 +214,27 @@ def _generate_snapshots_for_date(db: Session, target_date) -> int:
         current = get_next_trading_day(db, latest_snapshot, days=1) if latest_snapshot else end_date
         while current and current <= end_date:
             try:
-                generate_daily_snapshots(db=db, portfolio_code=portfolio.code, target_date=current)
-                auto_confirm_after_snapshot(db=db, portfolio_code=portfolio.code, snapshot_date=current)
+                gen_result = generate_daily_snapshots(db=db, portfolio_code=portfolio.code, target_date=current)
+                for w in gen_result.get("warnings") or []:
+                    outcome["warnings"].append({**w, "date": current.isoformat()})
+                auto_results = auto_confirm_after_snapshot(db=db, portfolio_code=portfolio.code, snapshot_date=current)
+                outcome["auto_confirm_failed"].extend(
+                    r for r in auto_results if r.get("action") == "auto_confirm_failed"
+                )
                 db.commit()
-                count += 1
+                outcome["generated"] += 1
             except Exception as e:
                 db.rollback()
-                logger.error(f"组合 {portfolio.code} 于 {current} 快照生成失败: {str(e)}")
+                code = e.code if isinstance(e, BusinessError) else type(e).__name__
+                logger.error(
+                    f"组合 {portfolio.code} 于 {current} 快照生成失败: code={code}, error={str(e)}"
+                )
                 break
             nxt = get_next_trading_day(db, current, days=1)
             if not nxt or nxt == current:
                 break
             current = nxt
-    return count
+    return outcome
 
 
 def _detect_dividends(db: Session, products: list) -> int:

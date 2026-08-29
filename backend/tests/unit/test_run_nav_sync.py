@@ -154,10 +154,10 @@ class TestBackfillLoop:
             total_value=10000.0, total_shares=10000.0, unit_price=1.0,
         )
 
-        count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
+        result = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
 
         # 从 09-01 之后首个交易日 09-02 逐日到 09-03，共 2 天
-        assert count == 2
+        assert result["generated"] == 2
         generated_dates = [c.kwargs["target_date"] for c in mock_gen.call_args_list]
         assert generated_dates == [date(2025, 9, 2), date(2025, 9, 3)]
 
@@ -182,10 +182,10 @@ class TestBackfillLoop:
 
         mock_gen.side_effect = ValueError("依赖数据校验失败")
 
-        count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
+        result = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
 
         # 首日 09-02 失败即 break，不继续 09-03
-        assert count == 0
+        assert result["generated"] == 0
         assert mock_gen.call_count == 1
 
 
@@ -206,16 +206,16 @@ class TestRunSnapshotGenerate:
                          auto_snapshot_enabled=True)
         ensure_trading_day(test_db, date(2025, 9, 3), is_open=True)
 
-        count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
+        result = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
 
-        assert count == 1
+        assert result["generated"] == 1
         portfolio_codes = [c.kwargs["portfolio_code"] for c in mock_gen.call_args_list]
         assert portfolio_codes == ["SNAP_ON"]
 
     @patch("app.services.task_runner._generate_snapshots_for_date")
     def test_target_date_is_yesterday(self, mock_snap, test_db):
         """run_snapshot_generate 以昨天为 target_date 调回补，返回结构含两者"""
-        mock_snap.return_value = 0
+        mock_snap.return_value = {"generated": 0, "warnings": [], "auto_confirm_failed": []}
 
         result = run_snapshot_generate(test_db, log_id=None)
 
@@ -246,7 +246,7 @@ class TestRunSnapshotGenerate:
 
         mock_gen.side_effect = ValueError("依赖数据校验失败")
 
-        count = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
+        result = _generate_snapshots_for_date(test_db, date(2025, 9, 3))
 
-        assert count == 0
+        assert result["generated"] == 0
         assert mock_gen.call_count == 1

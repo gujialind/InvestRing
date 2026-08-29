@@ -110,7 +110,26 @@ def run_task(
         elif code == "snapshot_generate":
             result = run_snapshot_generate(db, log.id)
             task.last_run_at = datetime.now()
-            log.status = "success"
+            # #305：自动确认失败/告警写入任务日志，调度触发路径可观测
+            warnings = result.get("warnings") or []
+            failed = result.get("auto_confirm_failed") or []
+            if failed:
+                log.status = "partial_success"
+                summary = "; ".join(
+                    f"{r.get('code', 'UNKNOWN')}: {r.get('error', '')}" for r in failed
+                )
+                if warnings:
+                    summary += " | warnings: " + "; ".join(
+                        w.get("type", "unknown") for w in warnings
+                    )
+                log.error_message = summary[:1000]
+            elif warnings:
+                log.status = "success"
+                log.error_message = (
+                    "warnings: " + "; ".join(w.get("type", "unknown") for w in warnings)
+                )[:1000]
+            else:
+                log.status = "success"
             log.finished_at = datetime.now()
             db.commit()
             return {"message": f"任务 {code} 执行完成", **result}
