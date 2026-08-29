@@ -219,14 +219,15 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
     await expect(trig).toHaveText(/20\d{2}-\d{2}-18/);
   });
 
-  // ---- 用例 9：键盘层级——Esc 关闭行为与 Tab 焦点不逃逸（评审新增）----
-  // 已知限制（实测，修复前后一致，非 #191 回归）：react-dialog@pin react-
-  // dismissable-layer@1.1.12 与 react-popover@pin 1.1.11 版本不同，node_modules
-  // 内存在双实例、layers 栈不互通——两个 layer 各自认为自己是最高层，Esc 会
-  // 同时关闭日历弹层与 Dialog（Radix 单实例时才会逐层关闭）。若未来依赖对齐
-  // 为单实例，下面应恢复「第一次 Esc 仅关日历、Dialog 保留，再 Esc 关 Dialog」
-  // 的逐层断言；当前按现状行为守护（防进一步劣化）。
-  test('键盘层级：Esc 关闭弹层体系、Tab 焦点不逃逸', async ({ page }, testInfo) => {
+  // ---- 用例 9：键盘层级——Esc 逐层关闭与 Tab 焦点不逃逸（评审新增）----
+  // Radix react-dismissable-layer 单实例下 layers 栈互通，Esc 只关最高层：第一次关
+  // 日历弹层、Dialog 保留（焦点回落到 DialogContent），第二次才关 Dialog。
+  // 历史上此处是双实例——react-popover 自带嵌套 dismissable-layer@1.1.11 副本、与
+  // react-dialog 用的 hoisted 1.1.19 不同实例，两个 layer 各自认为自己是最高层，
+  // 一次 Esc 同关两层（#191 评审时按当时现状断言，并预留了「依赖对齐为单实例后
+  // 恢复逐层断言」的迁移条件）。#315：popover 升到 1.1.23 后嵌套副本消失、与 dialog
+  // 共用单实例，该条件达成，下面按逐层语义守护。
+  test('键盘层级：Esc 逐层关闭弹层、Tab 焦点不逃逸', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '移动端无物理键盘语义，仅桌面项目断言');
     await gotoSnapshotsPage(page);
     await page.getByRole('button', { name: '追平至日期' }).click();
@@ -236,9 +237,13 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
     await pickerTrigger(dlg).click();
     await page.locator('button.rdp-day_button').first().waitFor();
 
-    // Esc：现状为弹层与 Dialog 同关（双实例根因见上）；日历必须先关
+    // Esc 1：仅关日历弹层，Dialog 必须保留（layers 栈互通的逐层语义）
     await page.keyboard.press('Escape');
     await expect(page.locator('button.rdp-day_button')).toHaveCount(0);
+    await expect(dlg).toBeVisible();
+
+    // Esc 2：弹层已关，此时 Dialog 是最高层，再按才关闭
+    await page.keyboard.press('Escape');
     await expect(dlg).toHaveCount(0);
 
     // Tab 焦点应始终在 Dialog（含注入其中的日历弹层）体系内
@@ -255,6 +260,10 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
       });
       expect(inside, `第 ${i + 1} 次 Tab 后焦点逃逸出弹层体系`).toBe(true);
     }
+    // Tab 循环结束时日历弹层仍开着：Esc 1 只关弹层、Dialog 保留，Esc 2 才关 Dialog
+    await page.keyboard.press('Escape');
+    await expect(page.locator('button.rdp-day_button')).toHaveCount(0);
+    await expect(dlg).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(dlg).toHaveCount(0);
   });
