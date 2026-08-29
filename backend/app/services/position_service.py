@@ -588,6 +588,11 @@ def calculate_available_shares(
     基金可用份额 = 最新快照份额
                 - SUM(pending卖出份额)
                 - SUM(confirmed卖出份额 WHERE 快照未生成)
+                + SUM(confirmed事件负向shares_change WHERE ex_date > 最新快照日 [≤ as_of])
+
+    事件增量口径（issue #277）：与现金侧 cash_change 增量同窗口——
+    只计平台级行（platform_code IS NOT NULL，基金级父记录持汇总值、防父子双计）；
+    只计负向（正向变动入快照前保守低估，防事件被撤销后已放行的卖出成事实超卖）。
 
     as_of_date 为 None 时基线取当前最新快照日；传入时取 <= as_of_date 的最新快照日，
     confirmed 卖出仅计 confirm_date 在 (latest_date, as_of_date] 的。
@@ -639,6 +644,23 @@ def calculate_available_shares(
         ):
             shares -= Decimal(t.shares) if t.shares else Decimal("0")
 
+    # 快照后 confirmed event 负向 shares_change（issue #277，与现金侧 cash_change 增量同窗口口径）
+    event_query = db.query(ShareChangeEvent).filter(
+        ShareChangeEvent.portfolio_code == portfolio_code,
+        ShareChangeEvent.product_code == product_code,
+        ShareChangeEvent.status == "confirmed",
+        ShareChangeEvent.platform_code.isnot(None),  # 跳过基金级父记录（持汇总值，防父子双计）
+        ShareChangeEvent.shares_change < 0,  # 只计负向（正向保守低估，见 docstring）
+    )
+    if latest_date is not None:
+        event_query = event_query.filter(ShareChangeEvent.ex_date > latest_date)
+    if as_of_date is not None:
+        event_query = event_query.filter(ShareChangeEvent.ex_date <= as_of_date)
+    if market:
+        event_query = event_query.filter(ShareChangeEvent.market == market)
+    for e in event_query.all():
+        shares += Decimal(str(e.shares_change))
+
     return shares
 
 
@@ -656,6 +678,10 @@ def calculate_investor_available_shares(
 
     as_of_date 为 None 时基线取当前最新快照日；传入时取 <= as_of_date 的最新快照日，
     confirmed 赎回仅计 confirm_date 在 (latest_date, as_of_date] 的。
+
+    issue #277：份额变动事件不并入本函数——组合份额仅因申赎变化，事件作用于
+    基金/平台维度、不改投资人份额账本；其影响是确认至入快照窗口内赎回按旧净值
+    计价的估值陈旧，属既有系统性特性，故不做近似换算扣减。
     """
     from app.models.investor_holding import InvestorHolding
 

@@ -87,7 +87,10 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 
 ### 2.3 实时可用量计算
 
-冻结份额/现金必须**实时计算**，不能仅读快照 frozen 字段：基金/投资人可用份额 = 最新快照份额 − SUM(pending 卖出/赎回) − SUM(快照未覆盖的 confirmed 卖出/赎回)；可用现金见 §2.2 `calculate_available_cash`。
+冻结份额/现金必须**实时计算**，不能仅读快照 frozen 字段。可用现金见 §2.2 `calculate_available_cash`；份额口径：
+
+* **基金可用份额** = 最新快照份额 − SUM(pending 卖出) − SUM(快照未覆盖的 confirmed 卖出) + SUM(快照未覆盖的 confirmed 事件**负向** `shares_change`，`ex_date > 最新快照日` [≤ T])（#277）。事件增量只计平台级行（`platform_code IS NOT NULL`，基金级父记录持汇总值、防父子双计）；**正向变动不计入**——入快照前保守低估，防事件被撤销后已放行的卖出成事实超卖。
+* **投资人可用份额** = 最新快照份额 − SUM(pending 赎回) − SUM(快照未覆盖的 confirmed 赎回)；份额变动事件不并入——组合份额仅因申赎变化，事件作用于基金/平台维度、不改投资人份额账本（#277）。
 
 ### 2.4 净值·成本·市值
 
@@ -293,6 +296,10 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 * **分级**：基金级（`share_split`/`share_merge`/`bonus_share`，`platform_code` 空，确认时按平台自动拆子记录）；平台级（`cash_dividend`/`reinvest_dividend`/`forced_adjustment`，每个有持仓平台各录 1 条）。
 
 * 日期约束：`ex_date > entitlement_date` 且均为交易日；`ex_date` 须晚于最新快照日。平台级未全覆盖有持仓平台默认阻断（`PLATFORM_NOT_COVERED`），`force_cover=true` 降为 warning。
+
+* 输入校验（#279，创建/更新/确认三路径同口径）：`forced_adjustment` 必须至少一项（`shares_change`/`cash_change`）非空，否则 `EMPTY_ADJUSTMENT`；现金型产品（`product_type` 为 CASH/IN_TRANSIT）不接受份额变动（结构型事件无条件拒、其余类型显式 `shares_change` 拒，`SHARES_CHANGE_ON_CASH_PRODUCT`）。
+
+* 持仓存在性防线（#278）：`forced_adjustment` 确认时精查权益登记日 `(产品, market, 平台)` 持仓行，无行拒绝 `POSITION_NOT_FOUND`（LOF market 误填提前快失败）；快照生成对指向不存在持仓行/现金行的份额事件硬拒绝 `POSITION_NOT_FOUND`（不静默新建 0 份额行），负向调整打空持仓行产出 `event_zeroed_position` 告警（不阻断）。
 
 ### 7.4 组合管理
 
