@@ -44,6 +44,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { formatCurrency, formatShares, formatSharesUnit, formatNav, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
+import { validatePlatformCode, parsePositiveNumber } from "@/lib/validation";
 import { Badge } from "@/components/ui/badge";
 import { TRADE_DIRECTION_COLORS } from "@/lib/colors";
 import { Plus, ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, Trash2, Undo, Filter } from "lucide-react";
@@ -247,9 +248,9 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.platform_code) {
-      // 原生 <select required> 替换为自定义组件后浏览器校验失效，须手动拦截
-      addToast({ type: "error", title: "表单校验失败", message: "请选择平台" });
+    const platformError = validatePlatformCode(formData.platform_code);
+    if (platformError) {
+      addToast({ type: "error", title: "表单校验失败", message: platformError });
       return;
     }
     const payload = {
@@ -301,12 +302,12 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
       notes: editFormData.notes || null,
     };
     if (editingSub.sub_type === "subscribe") {
-      const amount = parseFloat(editFormData.amount);
-      if (!Number.isFinite(amount) || amount <= 0) return; // required/min 已拦，双保险
+      const amount = parsePositiveNumber(editFormData.amount);
+      if (amount === null) return; // required/min 已拦，双保险
       payload.amount = amount;
     } else {
-      const shares = parseFloat(editFormData.shares);
-      if (!Number.isFinite(shares) || shares <= 0) return;
+      const shares = parsePositiveNumber(editFormData.shares);
+      if (shares === null) return;
       payload.shares = shares;
     }
     // 失败时 hook 已 toast，Dialog 保持打开可重试（不挂 onError 关闭逻辑）

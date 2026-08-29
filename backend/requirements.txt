@@ -2,7 +2,7 @@
 # Generated from backend/deps/ versions (2026-07-12)
 # Runtime dependencies
 
-fastapi==0.136.1
+fastapi==0.141.1
 uvicorn[standard]==0.52.4
 SQLAlchemy==2.0.52
 pydantic==2.13.4
@@ -40,6 +40,16 @@ simplejson==4.1.1
 
 # uvicorn dependency
 click==8.4.2
+
+# Transitive dependencies（显式钉住 fastapi 的传递依赖，issue #314）
+# 钉版原因：fastapi 仅声明 starlette>=0.46.0（无上界），故其版本由每次构建时 pip 现场解析决定、
+# 不落任何文件；且 pip 不升级「已满足下界」的已装包，导致本地 0.50.0 与 CI 解析的 1.6.0 长期分裂。
+# 本行固定为 CI 实际解析并经 CI 验证的版本，消除浮动，使镜像每个包版本均可从仓库读出并 review。
+# 升级 fastapi 时必须同步复核本行（取该 fastapi 组合经 CI 验证的 starlette 版本）。
+# 注意：本行只闭合 starlette 一处。干净解析实测共 79 个包、本文件仅声明 30 个，
+# 其余 50 个传递依赖（anyio、typing_extensions、pydantic_core、cryptography、
+# h11/httptools/websockets 等）仍由构建时现场解析、仓库无记录，清单见 issue #314。
+starlette==1.6.0
 
 # Auth
 python-dotenv==1.2.3

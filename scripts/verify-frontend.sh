@@ -3,12 +3,12 @@
 # 前端本地验证脚本（推送前门禁）
 # ============================================================================
 # 与 CI 的 "Frontend Lint & Build" job 完全同口径：
-#   ESLint → TypeScript 类型检查 → next build
+#   ESLint → TypeScript 类型检查 → 单元测试（Vitest，issue #253）→ next build
 # 本地通过则 CI 前端门禁基本不会挂，避免推送后浪费一轮 CI。
 #
 # 用法：
 #   ./scripts/verify-frontend.sh          # 完整门禁
-#   ./scripts/verify-frontend.sh --quick  # 仅 lint + tsc（跳过耗时的 build）
+#   ./scripts/verify-frontend.sh --quick  # 仅 lint + tsc + 单测（跳过耗时的 build）
 # ============================================================================
 set -euo pipefail
 
@@ -51,21 +51,25 @@ QUICK=false
 [ "${1:-}" = "--quick" ] && QUICK=true
 
 echo ""
-echo "=== [1/$([ "$QUICK" = true ] && echo 2 || echo 3)] ESLint ==="
+echo "=== [1/$([ "$QUICK" = true ] && echo 3 || echo 4)] ESLint ==="
 npm run lint
 
 echo ""
-echo "=== [2/$([ "$QUICK" = true ] && echo 2 || echo 3)] TypeScript 类型检查 ==="
+echo "=== [2/$([ "$QUICK" = true ] && echo 3 || echo 4)] TypeScript 类型检查 ==="
 npx tsc --noEmit
+
+echo ""
+echo "=== [3/$([ "$QUICK" = true ] && echo 3 || echo 4)] 单元测试（Vitest） ==="
+npm run test
 
 if [ "$QUICK" = true ]; then
   echo ""
-  echo "✅ quick 模式通过（lint + tsc）"
+  echo "✅ quick 模式通过（lint + tsc + 单测）"
   exit 0
 fi
 
 echo ""
-echo "=== [3/3] Next.js 生产构建 ==="
+echo "=== [4/4] Next.js 生产构建 ==="
 NEXT_TELEMETRY_DISABLED=1 npm run build
 
 echo ""
