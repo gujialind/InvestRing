@@ -45,6 +45,8 @@ export interface ProductListParams {
   style_code?: string;
   size_code?: string;
   segment_code?: string;
+  /** issue #327：后端默认排除虚拟产品（product_type 为 CASH/IN_TRANSIT），管理页传 true 展示全部 */
+  include_virtual?: boolean;
 }
 
 export const productApi = {

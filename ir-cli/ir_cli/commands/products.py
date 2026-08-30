@@ -14,6 +14,7 @@ def list_products(
     market: Optional[str] = typer.Option(None, "--market", help="市场类型(CN_EXCHANGE/CN_OTC/...)"),
     data_source: Optional[str] = typer.Option(None, "--data-source", help="数据源(tushare/akshare)"),
     data_source_status: Optional[str] = typer.Option(None, "--data-source-status", help="同步状态(pending/success/failed/error/skipped)"),
+    include_virtual: bool = typer.Option(False, "--include-virtual", help="包含虚拟产品(CASH/IN_TRANSIT，#327 起默认排除)"),
     page: int = typer.Option(1, "--page", help="页码"),
     page_size: int = typer.Option(20, "--page-size", help="每页大小"),
     all_pages: bool = typer.Option(False, "--all", help="自动翻页获取全部记录"),
@@ -27,6 +28,8 @@ def list_products(
         data_source=data_source,
         data_source_status=data_source_status,
     )
+    if include_virtual:
+        params["include_virtual"] = True
     run_list(client, "/api/products", params, page=page, page_size=page_size, all_pages=all_pages, fields=fields)
 
 

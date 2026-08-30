@@ -27,6 +27,8 @@ VALID_PRODUCT_TYPES = ("ETF", "OEF", "LOF", "CASH", "IN_TRANSIT")
 VALID_MARKETS = ("CN_EXCHANGE", "CN_OTC", "HK_MUTUAL")
 # 系统虚拟产品（部署期种子），product_type/market 为系统语义，禁止纠错修改
 SYSTEM_PRODUCT_CODES = ("CASH", "IN_TRANSIT_BUY", "IN_TRANSIT_SELL")
+# issue #327：虚拟产品（不可交易）的 product_type 判定口径，产品列表默认按此排除
+VIRTUAL_PRODUCT_TYPES = ("CASH", "IN_TRANSIT")
 
 # 维度字段 → 字典 dimension（issue #128）
 DIMENSION_FIELDS = ("asset_class_code", "region_code", "style_code", "size_code", "segment_code")

@@ -221,8 +221,8 @@ class TestProductListAttrFilter:
         assert "AF002.OF" not in codes
 
     def test_confirm_days_zero_matches_virtual(self, client, admin_headers):
-        """?confirm_days=0 → 含种子 CASH/IN_TRANSIT_BUY/IN_TRANSIT_SELL/510300.SH（全为 0），
-        验证 0 值不被 `if param:` 假值陷阱跳过"""
+        """?confirm_days=0 验证 0 值不被 `if param:` 假值陷阱跳过；
+        #327：默认排除虚拟产品，include_virtual=true 时种子 CASH/IN_TRANSIT 一并命中"""
         resp = client.get("/api/products?confirm_days=0", headers=admin_headers)
         assert resp.status_code == 200
         data = resp.json()
@@ -230,8 +230,17 @@ class TestProductListAttrFilter:
         assert data["total"] == len(items)
         assert all(i["confirm_days"] == 0 for i in items)
         codes = [i["code"] for i in items]
+        assert "510300.SH" in codes
+        for virtual_code in ("CASH", "IN_TRANSIT_BUY", "IN_TRANSIT_SELL"):
+            assert virtual_code not in codes
+
+        resp_all = client.get(
+            "/api/products?confirm_days=0&include_virtual=true", headers=admin_headers
+        )
+        assert resp_all.status_code == 200
+        codes_all = [i["code"] for i in resp_all.json()["items"]]
         for seed_code in ("CASH", "IN_TRANSIT_BUY", "IN_TRANSIT_SELL", "510300.SH"):
-            assert seed_code in codes
+            assert seed_code in codes_all
 
     def test_nav_lag_days_filter(self, client, admin_headers, test_db):
         """?nav_lag_days=1 → 谓词成立且自建 code 在列；?nav_lag_days=0 不含该 code"""
@@ -300,7 +309,7 @@ class TestProductListAttrFilter:
             "/api/products?confirm_days=0&page_size=100", headers=admin_headers
         ).json()
         expected_total = baseline["total"]
-        assert expected_total >= 6  # 种子 confirm_days=0 共 4 只 + 自建 2 只
+        assert expected_total >= 4  # 种子 confirm_days=0 非虚拟 2 只（510300.SH/161017.SZ）+ 自建 2 只（#327 起虚拟产品默认排除）
 
         page1 = client.get(
             "/api/products?confirm_days=0&page_size=2&page=1", headers=admin_headers
@@ -328,16 +337,89 @@ class TestProductListAttrFilter:
         assert len(page_last["items"]) == expected_total - 2 * (last_page - 1)
 
     def test_backward_compat_no_params(self, client, admin_headers, test_db):
-        """不传三参数时不过滤：结果集混合多种 confirm_days / is_qdii 取值"""
+        """不传三参数时不过滤：结果集混合多种 confirm_days / is_qdii 取值
+        （#327：虚拟产品默认排除，confirm_days=0 假值由真实种子 510300.SH 承重）"""
         create_product(test_db, code="AF007.OF", market="CN_OTC", confirm_days=2, is_qdii=True)
         resp = client.get("/api/products?page_size=100", headers=admin_headers)
         assert resp.status_code == 200
         items = resp.json()["items"]
         codes = [i["code"] for i in items]
         assert "AF007.OF" in codes  # is_qdii=True 未被默认排除
-        assert "CASH" in codes  # confirm_days=0 未被默认排除
+        assert "510300.SH" in codes  # confirm_days=0 未被默认排除
+        assert "CASH" not in codes  # 虚拟产品默认排除（#327）
         assert {i["is_qdii"] for i in items} == {True, False}
         assert len({i["confirm_days"] for i in items}) > 1
+
+
+class TestProductListVirtualFilter:
+    """虚拟产品排除（issue #327）：product_type ∈ {CASH, IN_TRANSIT} 的虚拟产品默认不出现在列表，
+    include_virtual=true 显式包含；排除发生在服务端过滤（分页 total 随之变化，非客户端剔除）。"""
+
+    VIRTUAL_CODES = ("CASH", "IN_TRANSIT_BUY", "IN_TRANSIT_SELL")
+
+    def test_default_excludes_virtual(self, client, admin_headers):
+        """无参默认：三个系统虚拟产品不在列、真实种子在列，total 为排除后口径"""
+        resp = client.get("/api/products?page_size=100", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == len(data["items"])
+        codes = [i["code"] for i in data["items"]]
+        for code in self.VIRTUAL_CODES:
+            assert code not in codes
+        assert "510300.SH" in codes
+        assert all(i["product_type"] not in ("CASH", "IN_TRANSIT") for i in data["items"])
+
+    def test_include_virtual_true(self, client, admin_headers):
+        """include_virtual=true：虚拟产品出现，total 含之"""
+        resp = client.get(
+            "/api/products?page_size=100&include_virtual=true", headers=admin_headers
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == len(data["items"])
+        codes = [i["code"] for i in data["items"]]
+        for code in self.VIRTUAL_CODES:
+            assert code in codes
+
+    def test_include_virtual_false_same_as_default(self, client, admin_headers):
+        """显式 include_virtual=false 与不传等价"""
+        default = client.get("/api/products?page_size=100", headers=admin_headers).json()
+        explicit = client.get(
+            "/api/products?page_size=100&include_virtual=false", headers=admin_headers
+        ).json()
+        assert explicit["total"] == default["total"]
+        assert [i["code"] for i in explicit["items"]] == [i["code"] for i in default["items"]]
+
+    def test_pagination_total_reflects_exclusion(self, client, admin_headers):
+        """分页契约：排除发生在服务端，include_virtual 开/关的 total 差恰为种子虚拟产品数"""
+        excluded = client.get("/api/products?page_size=100", headers=admin_headers).json()
+        included = client.get(
+            "/api/products?page_size=100&include_virtual=true", headers=admin_headers
+        ).json()
+        assert included["total"] - excluded["total"] == len(self.VIRTUAL_CODES)
+
+    def test_keyword_does_not_resurrect_virtual(self, client, admin_headers):
+        """keyword 命中虚拟产品 code 时默认仍排除；include_virtual=true 才命中"""
+        resp = client.get("/api/products?keyword=CASH", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+        resp_all = client.get(
+            "/api/products?keyword=CASH&include_virtual=true", headers=admin_headers
+        )
+        assert "CASH" in [i["code"] for i in resp_all.json()["items"]]
+
+    def test_explicit_product_type_cash_default_empty(self, client, admin_headers):
+        """AND 语义：product_type=CASH 与默认排除叠加 → 空；include_virtual=true → 命中种子 CASH"""
+        resp = client.get("/api/products?product_type=CASH", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+        resp_all = client.get(
+            "/api/products?product_type=CASH&include_virtual=true", headers=admin_headers
+        )
+        assert resp_all.json()["total"] == 1
+        assert resp_all.json()["items"][0]["code"] == "CASH"
 
 
 class TestProductListDimFilter:

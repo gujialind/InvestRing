@@ -1243,6 +1243,16 @@
             }
           },
           {
+            "name": "include_virtual",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Virtual"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,

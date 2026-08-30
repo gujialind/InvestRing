@@ -120,6 +120,8 @@ export default function ProductsContent({ variant = "desktop" }: ProductsContent
     style_code: dimFilters.style,
     size_code: dimFilters.size,
     segment_code: dimFilters.segment,
+    // 管理页展示全部（含 CASH/IN_TRANSIT 系统虚拟产品）；#327 起后端默认排除
+    include_virtual: true,
   };
   const { data, isLoading, isFetching, isError } = useProductList(listParams);
 
