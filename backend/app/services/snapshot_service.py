@@ -268,7 +268,7 @@ def generate_daily_snapshots(
     # 2. 删除已有快照（如果存在）
     _delete_existing_snapshots(db, portfolio_code, target_date)
     
-    # 3. 生成持仓快照（issue #71：附带负现金 warnings，不阻断生成）
+    # 3. 生成持仓快照（负现金命中即抛 NEGATIVE_CASH 阻断，#203）
     positions, warnings = _generate_portfolio_position(db, portfolio_code, target_date)
     
     # 无持仓时跳过快照生成（组合尚无资产，如首次申购确认前）
@@ -452,7 +452,7 @@ def recalculate_snapshots(
                 snapshot_result = generate_daily_snapshots(
                     db, portfolio.code, current_date, check_continuity=False,
                 )
-                # issue #71：累积每日负现金 warnings（与 errors 聚合风格一致）
+                # 累积每日告警（如 event_zeroed_position；负现金已改走 NEGATIVE_CASH 硬阻断，#203）
                 if snapshot_result.get("warnings"):
                     result["warnings"].extend(snapshot_result["warnings"])
 
