@@ -48,7 +48,7 @@ export default function NavCurve({ data, height = 300, initialNav = 1.0 }: NavCu
           tickFormatter={(value) => formatNav(value)}
         />
         <Tooltip
-          formatter={(value: number) => [formatNav(value), "净值"]}
+          formatter={(value) => [formatNav(Number(value)), "净值"]}
           labelFormatter={(label) => `日期: ${label}`}
         />
         <ReferenceLine

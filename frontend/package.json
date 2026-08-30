@@ -40,7 +40,7 @@
     "react": "^19.0.0",
     "react-day-picker": "^10.0.1",
     "react-dom": "^19.0.0",
-    "recharts": "^2.15.0",
+    "recharts": "^3.10.1",
     "tailwind-merge": "^2.5.0",
     "typescript": "~5.9.3",
     "zustand": "^5.0.15"
