@@ -7,8 +7,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { useProductList } from "@/hooks/useProduct";
+import { MARKET_OPTIONS } from "@/lib/market";
 import { cn, formatMarketName } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ProductSelection } from "@/components/shared/ProductFilterDialog";
@@ -28,6 +36,12 @@ interface SearchableProductSelectProps {
  * 市场标识（#259）：选项行三段式——名称可截断 / (code) 独立不截断 / 尾部市场
  * Badge（market 为空不渲染），行挂完整 title；选中回显「名称 (code) · 市场名」，
  * 名称截断、后缀不截断，触发按钮挂 title。E2E 定位：product-option + data-code/data-market。
+ * 市场筛选（#324）：搜索框与列表之间一行 Select（全部市场/A股场内/内地场外/香港互认），
+ * 服务端过滤（market 参数），数据层消除 LOF 一码多市场歧义；筛选不持久——
+ * 点选即弃、重开复位「全部市场」，不同步 market、不加拦截。
+ * ⚠️ Popover modal=false 而 Radix Select 为 modal：Select 打开时焦点移到其 portal
+ * （Popover 外）会触发外层 focus-outside 误关弹层，PopoverContent 须
+ * onInteractOutside preventDefault 阻止（Radix 社区公认方案）。
  */
 export default function SearchableProductSelect({
   value,
@@ -47,8 +61,11 @@ export default function SearchableProductSelect({
     return () => clearTimeout(timer);
   }, [keywordInput]);
 
+  // 市场筛选（#324）：undefined = 全部市场；不持久——重开复位（见 onOpenChange）
+  const [market, setMarket] = useState<string | undefined>(undefined);
+
   const { data, isLoading, isFetching } = useProductList(
-    { page_size: 50, keyword: keyword || undefined },
+    { page_size: 50, keyword: keyword || undefined, market: market || undefined },
     { enabled: hasOpened }
   );
   const items = useMemo(() => data?.items ?? [], [data?.items]);
@@ -95,7 +112,11 @@ export default function SearchableProductSelect({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (next) setHasOpened(true);
+        if (next) {
+          setHasOpened(true);
+          // 筛选不持久（#324）：无论上次的关闭路径（点选/外部点击/Esc），重开一律复位
+          setMarket(undefined);
+        }
       }}
     >
       <PopoverTrigger asChild>
@@ -114,7 +135,13 @@ export default function SearchableProductSelect({
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-0">
+      {/* onInteractOutside preventDefault：内部市场 Select（modal）打开时焦点/点击
+          落在其 body portal（Popover 外），阻止外层 Popover 误判 outside 交互关闭（#324） */}
+      <PopoverContent
+        align="start"
+        className="w-80 p-0"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <div className="relative border-b p-2">
           {isFetching && (
             <Loader2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
@@ -125,6 +152,25 @@ export default function SearchableProductSelect({
             placeholder="搜索产品代码/名称"
             className="h-8"
           />
+        </div>
+        {/* 市场条件行（#324）：服务端过滤，LOF 按市场分行后数据层消除一码多市场歧义 */}
+        <div className="border-b p-2">
+          <Select
+            value={market ?? "all"}
+            onValueChange={(v) => setMarket(v === "all" ? undefined : v)}
+          >
+            <SelectTrigger className="h-8 w-full">
+              <SelectValue placeholder="全部市场" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部市场</SelectItem>
+              {MARKET_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="max-h-64 overflow-y-auto p-1">
           {isLoading ? (
