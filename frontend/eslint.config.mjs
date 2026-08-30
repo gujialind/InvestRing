@@ -1,8 +1,5 @@
-import { FlatCompat } from "@eslint/eslintrc";
-
-const compat = new FlatCompat({
-  baseDirectory: import.meta.dirname,
-});
+import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
+import nextTypescript from "eslint-config-next/typescript";
 
 // issue #127：禁止调色板硬编码颜色类名，一律走语义 token（docs/design/visual-spec.md §1.5）
 // 全部源码适用（含豁免文件）。
@@ -94,13 +91,17 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  ...nextCoreWebVitals,
+  ...nextTypescript,
   {
     // 只作用于前端源码；排除配置文件自身（message 示例文本也会被 selector 匹配）
     files: ["src/**"],
     rules: {
       // Next 15 + React 19 新 JSX 转换不再需要显式 React 导入
       "react/react-in-jsx-scope": "off",
+      // eslint-config-next v16 新增规则，存量代码大量命中，暂不启用
+      "react-hooks/set-state-in-effect": "off",
+      "@next/next/no-location-assign-relative-destination": "off",
       "no-restricted-syntax": [
         "error",
         ...paletteColorSelectors,
