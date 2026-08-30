@@ -104,7 +104,8 @@ export default function SearchablePlatformSelect({
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-0">
+      {/* #328：宽度跟随触发框（Radix 注入 trigger 宽度变量），min-w-56 保底窄触发框下搜索框可读 */}
+      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-56 p-0">
         <div className="border-b p-2">
           <Input
             autoFocus

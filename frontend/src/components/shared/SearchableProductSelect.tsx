@@ -136,10 +136,11 @@ export default function SearchableProductSelect({
         </button>
       </PopoverTrigger>
       {/* onInteractOutside preventDefault：内部市场 Select（modal）打开时焦点/点击
-          落在其 body portal（Popover 外），阻止外层 Popover 误判 outside 交互关闭（#324） */}
+          落在其 body portal（Popover 外），阻止外层 Popover 误判 outside 交互关闭（#324）；
+          #328：宽度跟随触发框（Radix 注入 trigger 宽度变量），min-w-56 保底搜索框可读 */}
       <PopoverContent
         align="start"
-        className="w-80 p-0"
+        className="w-[var(--radix-popover-trigger-width)] min-w-56 p-0"
         onInteractOutside={(e) => e.preventDefault()}
       >
         <div className="relative border-b p-2">
