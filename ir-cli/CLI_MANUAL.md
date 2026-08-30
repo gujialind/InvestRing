@@ -887,12 +887,13 @@ ir market sync-history <PRODUCT_CODE> <MARKET>
 获取产品列表。
 
 ```bash
-ir product list [--product-type <类型>] [--page N] [--page-size N] [--all]
+ir product list [--product-type <类型>] [--include-virtual] [--page N] [--page-size N] [--all]
 ```
 
 | 参数 | 说明 |
 |------|------|
 | `--product-type` | 按类型过滤：`ETF` / `OEF` / `LOF` / `CASH` / `IN_TRANSIT` |
+| `--include-virtual` | 包含虚拟产品（CASH/IN_TRANSIT*）；#327 起后端默认排除虚拟产品，本旗标显式包含 |
 
 #### `ir product create`
 

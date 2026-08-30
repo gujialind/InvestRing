@@ -28,12 +28,18 @@ def get_products(
     style_code: Optional[str] = None,
     size_code: Optional[str] = None,
     segment_code: Optional[str] = None,
+    # issue #327：默认排除虚拟产品（product_type ∈ VIRTUAL_PRODUCT_TYPES，不可交易），
+    # 产品管理页等需查看全部的场景显式传 include_virtual=true；
+    # 与其余过滤为 AND 关系（如 product_type=CASH 且默认排除时结果为空）
+    include_virtual: bool = False,
     page: Optional[int] = 1,
     page_size: Optional[int] = 20,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     query = db.query(Product)
+    if not include_virtual:
+        query = query.filter(Product.product_type.notin_(product_service.VIRTUAL_PRODUCT_TYPES))
     if product_type:
         query = query.filter(Product.product_type == product_type)
     if market:
