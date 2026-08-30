@@ -400,6 +400,11 @@ def delete_snapshot(
             response["message"] += f"（级联回退了 {len(cascaded_events)} 笔份额变动事件）"
         
         return response
+    except BusinessError:
+        # 业务错误（如级联回退失败整体中止，#203）交全局 handler 返回具体错误码，
+        # 不回退为 DELETE_FAILED
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -493,6 +498,11 @@ def delete_snapshots_bulk(
             })
             # 逐日 commit：单日删除立即落库，避免末尾统一提交放大回滚范围
             db.commit()
+        except BusinessError:
+            # 业务错误（如级联回退失败整体中止当日删除，#203）交全局 handler
+            # 返回具体错误码；逐日 commit 语义下已成功的日期保留（端点既有语义）
+            db.rollback()
+            raise
         except Exception as e:
             db.rollback()
             raise HTTPException(

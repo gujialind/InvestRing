@@ -24,8 +24,8 @@ from app.services.trading_utils import (
     get_latest_snapshot_date,
 )
 from app.services.position_service import (
+    calculate_available_cash,
     calculate_investor_available_shares,
-    compute_cash_balance,
 )
 from app.services.exceptions import BusinessError, NotFoundError
 from app.utils.quantize import quantize_amount, quantize_shares
@@ -188,6 +188,7 @@ def confirm_single_subscription(
     subscription: Subscription,
     *,
     auto_flush: bool = False,
+    skip_cash_check: bool = False,
 ) -> Subscription:
     """
     确认单笔申购/赎回的核心逻辑。
@@ -202,6 +203,9 @@ def confirm_single_subscription(
         db: 数据库会话
         subscription: 待确认的申购/赎回记录（必须为 pending 状态）
         auto_flush: 是否在结束时自动 flush（默认为 False，由调用者控制事务）
+        skip_cash_check: 跳过赎回现金充足性校验（auto_confirm 重算历史场景专用，
+            对齐调仓确认 skip_available_check 口径；重算按日序重放，当日现金
+            流入交易可能尚未重确认，实时校验会误杀）
 
     Returns:
         确认后的 subscription 对象
@@ -209,7 +213,8 @@ def confirm_single_subscription(
     Raises:
         InvalidStatusError: 状态不是 pending
         NavNotAvailableError: 申请日快照不存在
-        BusinessError: CONFIRM_BEFORE_STARTED——申购确认日早于组合首笔到账日（issue #179 硬闸门）
+        BusinessError: CONFIRM_BEFORE_STARTED——申购确认日早于组合首笔到账日（issue #179 硬闸门）；
+            INSUFFICIENT_CASH——赎回确认时平台可用现金不足以支付赎回金额（issue #203 消费点校验）
     """
     preview = calculate_subscription_confirm_preview(db, subscription)
     nav = preview["nav"]
@@ -217,6 +222,27 @@ def confirm_single_subscription(
     is_first = preview["is_first"]
     # 组合对象复用预览内的同条件查询结果，不再重复 SELECT（#257 评审）
     portfolio = preview["portfolio"]
+
+    # 赎回现金充足性校验（issue #203 消费点）：确认生成的配对 CASH sell 腿扣减
+    # 平台现金，确认日时点可用现金不足即拒绝，从源头阻断负现金快照；
+    # 金额与可用现金均 2 位口径精确比较（无容差，同调仓买入口径）
+    if subscription.sub_type == "redeem" and not skip_cash_check:
+        amount_d = quantize_amount(Decimal(str(preview["amount"])))
+        available = calculate_available_cash(
+            db, subscription.portfolio_code, subscription.platform_code,
+            as_of_date=confirm_date,
+        )
+        if amount_d > available:
+            raise BusinessError(
+                "INSUFFICIENT_CASH",
+                f"平台 {subscription.platform_code} 可用现金不足"
+                f"（需 {amount_d}，可用 {available}），无法确认赎回",
+                details={
+                    "deficit": str(amount_d - available),
+                    "required": str(amount_d),
+                    "available": str(available),
+                },
+            )
 
     # 4. 回写份额/金额
     subscription.unit_price = nav
@@ -292,8 +318,7 @@ def unconfirm_single_subscription(
 
     Raises:
         InvalidStatusError: 状态不是 confirmed
-        BusinessError: 确认日及之后已有快照（SNAPSHOT_DEPENDENCY）；
-            申购入金已被后续交易消耗（UNCONFIRM_WOULD_NEGATIVE_CASH，issue #180）
+        BusinessError: 确认日及之后已有快照（SNAPSHOT_DEPENDENCY）
     """
     if subscription.status != "confirmed":
         raise InvalidStatusError("仅 confirmed 状态可取消确认")
@@ -315,21 +340,9 @@ def unconfirm_single_subscription(
                 f"请先删除 {subscription.confirm_date} 及之后的快照",
             )
 
-    # 负现金防护（issue #180 回滚链）：申购的 CASH buy 腿删除后，若该入金已被
-    # 后续交易消耗将使平台现金为负——拒绝而非级联回滚下游（不隐式破坏已确认
-    # 交易）。赎回的 CASH sell 腿只会加现金，无需校验。
-    # 位于任何回退赋值之前，避免抛错后残留脏 ORM 状态。
-    if subscription.sub_type == "subscribe":
-        as_of = max(date.today(), subscription.confirm_date)
-        balance = compute_cash_balance(
-            db, subscription.portfolio_code, subscription.platform_code, as_of
-        )
-        if balance - Decimal(str(subscription.amount)) < 0:
-            raise BusinessError(
-                "UNCONFIRM_WOULD_NEGATIVE_CASH",
-                f"取消确认将使平台 {subscription.platform_code} 现金为负"
-                f"（该笔入金已被后续交易消耗），请先取消依赖该现金的交易",
-            )
+    # 负现金防护（issue #203 重构）：原 #180 在此拦截申购 unconfirm 的守卫已移除——
+    # 该守卫会阻断快照删除级联回退、且无法覆盖其他现金消耗路径。现金充足性改由
+    # 两处保证：①赎回确认消费点校验（INSUFFICIENT_CASH）②快照生成阻断（NEGATIVE_CASH）。
 
     subscription.status = "pending"
     # 重算期望确认日（申赎恒 T+1）而非置 None，保持 pending 记录 confirm_date 非空，

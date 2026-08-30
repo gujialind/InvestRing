@@ -162,6 +162,16 @@ class TestRedeemAmountPrecision:
         create_value_snapshot(test_db, "AMT_P2", T,
                               total_value=7537.44, total_shares=6837.30,
                               unit_price=1.1024)
+        # #203 消费点校验：赎回确认需平台可用现金覆盖赎回金额，预置确认入金
+        test_db.add(Trade(
+            portfolio_code="AMT_P2", platform_code="MYCF",
+            product_code="CASH", market="",
+            trade_type="buy", amount=Decimal("7537.44"), price=Decimal("1"),
+            fee=Decimal("0"), actual_amount=Decimal("7537.44"),
+            trade_date=SNAP, confirm_date=SNAP, status="confirmed",
+            transfer_group="amt_p2_seed",
+        ))
+        test_db.flush()
         confirm_single_subscription(test_db, sub)
         test_db.flush()
 
