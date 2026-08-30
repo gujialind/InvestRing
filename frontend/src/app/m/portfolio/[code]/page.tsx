@@ -96,12 +96,12 @@ function MobilePortfolioDetailInner() {
   const isDraft = portfolio.status === "draft";
   const allocation = buildAllocation(positions, assetClasses);
 
-  /* 页尾「管理」列表项（低频入口，替换旧 Quick Links）；
-     份额变动暂无移动端路由，不在列表展示（桌面详情页有入口） */
+  /* 页尾「管理」列表项（低频入口，替换旧 Quick Links） */
   const manageLinks = [
     { label: "持仓管理", href: `/m/portfolio/${code}/positions` },
     { label: "申购赎回记录", href: `/m/portfolio/${code}/subscriptions` },
     { label: "调仓交易记录", href: `/m/portfolio/${code}/trades` },
+    { label: "份额变动事件", href: `/m/portfolio/${code}/share-change-events` },
     { label: "快照管理", href: `/m/portfolio/${code}/snapshots` },
   ];
 
