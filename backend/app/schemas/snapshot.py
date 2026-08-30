@@ -88,7 +88,7 @@ class SnapshotGenerationResult(BaseModel):
     total_value: Optional[float] = None
     total_shares: Optional[float] = None
     unit_price: Optional[float] = None
-    # issue #71：负现金等非阻断性告警（无告警时为 None，旧客户端可忽略）
+    # 非阻断性告警（如 event_zeroed_position；无告警时为 None，旧客户端可忽略）
     warnings: Optional[List[Dict[str, Any]]] = None
 
 
@@ -98,7 +98,7 @@ class RecalculationPortfolioResult(BaseModel):
     processed_dates: List[str]  # ISO格式日期列表
     total_processed: int
     errors: List[Dict[str, Any]]
-    # issue #71：逐日重建累积的负现金告警（与 errors 聚合风格一致）
+    # 逐日重建累积的告警（如 event_zeroed_position；负现金已走 NEGATIVE_CASH 进 errors）
     warnings: Optional[List[Dict[str, Any]]] = None
     # #305：逐日自动确认结果透传（含 auto_confirm_failed 条目），空列表为 []
     auto_confirmed: Optional[List[Dict[str, Any]]] = None
