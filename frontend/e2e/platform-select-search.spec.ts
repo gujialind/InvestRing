@@ -23,10 +23,21 @@
  */
 import { test, expect, type Page, type Locator } from '@playwright/test';
 
-/** 收集页面未捕获异常（客户端崩溃防线），用例末尾断言为空 */
+/**
+ * 收集页面未捕获异常（客户端崩溃防线），用例末尾断言为空。
+ * 豁免 Next.js standalone/mobile 的 RSC `_rsc` prefetch 被重定向层拦下的
+ * 框架级 `access control` 噪音（`/m/...?_rsc=... due to access control checks`），
+ * 与 product-select-market.spec.ts 同口径：页面功能与渲染均正常，非产品 bug；
+ * 其余错误照常严格断言。
+ */
 function collectPageErrors(page: Page): string[] {
   const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('pageerror', (e) => {
+    const msg = e.message;
+    // 仅豁免确认无害的 Next.js RSC 移动端访问控制噪音；其余（真实 JS 崩溃/异常）保留
+    if (/access control checks/.test(msg) && /_rsc=/.test(msg)) return;
+    errors.push(msg);
+  });
   return errors;
 }
 

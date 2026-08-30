@@ -1,6 +1,6 @@
 # frontend/AGENTS.md — 前端模块操作指南
 
-> 双端路由/Middleware 约定与组件复用三层模型见根 `AGENTS.md` §5；视觉规范（语义色/涨跌色/图表色/数字格式）见 `docs/design/visual-spec.md`——**写前端代码前必读**。本文件只写怎么跑、怎么验。
+> 双端路由/Proxy 约定与组件复用三层模型见根 `AGENTS.md` §5；视觉规范（语义色/涨跌色/图表色/数字格式）见 `docs/design/visual-spec.md`——**写前端代码前必读**。本文件只写怎么跑、怎么验。
 
 ## 质量门禁
 

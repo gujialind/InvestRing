@@ -243,9 +243,9 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 > **前端视觉规范**（语义色/涨跌色/图表色/数字格式/字号，issue #127）见 `docs/design/visual-spec.md`——写 frontend/ 代码前必读。
 
-### 5.1 双端路由与 Middleware（约定）
+### 5.1 双端路由与 Proxy（约定）
 
-* 移动端 `/m/` 前缀、PC 端根路径；`src/middleware.ts` 按 User-Agent 自动重定向；未登录（无 `token` cookie）重定向到对应登录页。页面清单直接看 `frontend/src/app/**/page.tsx`；移动端多为薄壳页，套 `MobileLayout` 后渲染共享内容组件。
+* 移动端 `/m/` 前缀、PC 端根路径；`src/proxy.ts`（Next 16 起由 `middleware.ts` 更名）按 User-Agent 自动重定向；未登录（无 `token` cookie）重定向到对应登录页。页面清单直接看 `frontend/src/app/**/page.tsx`；移动端多为薄壳页，套 `MobileLayout` 后渲染共享内容组件。
 
 ### 5.2 组件复用与质量门禁（约定）
 
