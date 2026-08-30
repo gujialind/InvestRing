@@ -133,7 +133,9 @@ export default function ProductFilterSelect({
             <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-80 p-0">
+        {/* #328：宽度跟随触发框（Radix 注入 trigger 宽度变量），min-w-56 保底窄触发框下搜索框可读
+            （触发按钮为容器内 flex-1 区，224px 与 220px 外层容器视觉齐平） */}
+        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-56 p-0">
           <div className="relative border-b p-2">
             {isFetching && (
               <Loader2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
