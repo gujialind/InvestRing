@@ -44,8 +44,8 @@ export default function AssetAllocationPie({ items, height = 180 }: AssetAllocat
               ))}
             </Pie>
             <Tooltip
-              formatter={(value: number, name: string) => [
-                `${formatNumber(value)} 元`,
+              formatter={(value, name) => [
+                `${formatNumber(Number(value))} 元`,
                 name,
               ]}
             />
