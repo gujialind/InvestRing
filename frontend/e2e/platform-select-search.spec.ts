@@ -349,11 +349,21 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     const dlg = dialogByTitle(page, '新建份额变动事件');
     await dlg.waitFor();
 
-    // 事件类型选平台级「现金分红」→ 平台选择框出现；填产品代码、平台刻意不选
+    // 事件类型选平台级「现金分红」→ 平台选择框出现；选产品（可搜索下拉取第一项）、平台刻意不选
     await dlg.getByRole('combobox').click();
     await page.getByRole('option', { name: '现金分红' }).click();
     await expect(platformTrigger(dlg, '选择平台')).toBeVisible();
-    await dlg.getByLabel('产品代码').fill('000001');
+    await productTrigger(dlg, '请选择产品').click();
+    const productPopover = page
+      .getByPlaceholder('搜索产品代码/名称')
+      .locator('xpath=ancestor::div[@role="dialog"][1]');
+    const productRows = productPopover.locator('div.cursor-pointer');
+    try {
+      await productRows.first().waitFor({ timeout: 10_000 });
+    } catch {
+      test.skip(true, '环境中没有产品数据');
+    }
+    await productRows.first().click();
 
     // 提交 → 前端拦截：校验 toast 出现、Dialog 保持打开、未发出创建请求
     let createRequested = false;

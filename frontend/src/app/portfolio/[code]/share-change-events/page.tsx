@@ -58,6 +58,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
+import SearchableProductSelect from "@/components/shared/SearchableProductSelect";
 import { EVENT_TYPE_LABELS, EventConfirmDialog } from "./event-confirm-dialog";
 
 const PLATFORM_LEVEL_TYPES: EventType[] = ["cash_dividend", "reinvest_dividend", "forced_adjustment"];
@@ -241,11 +242,20 @@ export default function ShareChangeEventsPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="product_code">产品代码</Label>
-                      <Input
+                      <SearchableProductSelect
                         id="product_code"
-                        value={formData.product_code}
-                        onChange={(e) => setFormData({ ...formData, product_code: e.target.value })}
-                        required
+                        value={
+                          formData.product_code
+                            ? { code: formData.product_code, market: formData.market ?? "" }
+                            : null
+                        }
+                        onChange={(v) =>
+                          setFormData({
+                            ...formData,
+                            product_code: v?.code ?? "",
+                            market: v?.market ?? "",
+                          })
+                        }
                       />
                     </div>
                   </div>
