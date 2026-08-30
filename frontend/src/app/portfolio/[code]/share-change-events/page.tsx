@@ -33,8 +33,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatSharesUnit, toDateOnly, parseDateOnly, getStatusBadgeVariant } from "@/lib/utils";
-import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react";
+import { formatCurrency, formatSharesUnit, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
+import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle, Undo } from "lucide-react";
 import Link from "next/link";
 import { ShareChangeEventCreate, ApiException } from "@/lib/api";
 import { platformApi } from "@/lib/api";
@@ -45,8 +45,16 @@ import {
   useShareChangeEventList,
   useCreateShareChangeEvent,
   useConfirmShareChangeEvent,
+  useUnconfirmShareChangeEvent,
   useCancelShareChangeEvent,
 } from "@/hooks/useShareChangeEvent";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
+import type { DateRange } from "react-day-picker";
+import { isSameDay, subYears } from "date-fns";
+import PaginationBar from "@/components/shared/PaginationBar";
+import ProductFilterSelect from "@/components/shared/ProductFilterSelect";
+import { ProductSelection } from "@/components/shared/ProductFilterDialog";
+import EmptyState from "@/components/shared/EmptyState";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,6 +78,17 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "已取消",
 };
 
+/** 默认除息日区间 = 快捷项「近1年」（#274，同 #126 决策⑤口径） */
+function defaultEventRange(): DateRange {
+  return { from: subYears(new Date(), 1), to: new Date() };
+}
+
+function isDefaultEventRange(range: DateRange | undefined): boolean {
+  if (!range?.from || !range.to) return false;
+  const d = defaultEventRange();
+  return !!d.from && !!d.to && isSameDay(range.from, d.from) && isSameDay(range.to, d.to);
+}
+
 export default function ShareChangeEventsPage() {
   const params = useParams();
   const code = params.code as string;
@@ -92,8 +111,48 @@ export default function ShareChangeEventsPage() {
     notes: "",
   });
 
-  // 查询份额变动事件列表
-  const { data: eventsData, isLoading } = useShareChangeEventList(code);
+  // 筛选状态（#274 服务端筛选）：除息日区间默认最近 1 年（同 #126 决策⑤）
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [eventTypeFilter, setEventTypeFilter] = useState<string | undefined>(undefined);
+  const [productFilters, setProductFilters] = useState<ProductSelection[] | undefined>(undefined);
+  const [platformFilter, setPlatformFilter] = useState<string | undefined>(undefined);
+  const [exRange, setExRange] = useState<DateRange | undefined>(() => defaultEventRange());
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // 查询份额变动事件列表（服务端筛选 + 分页，#274）
+  const listParams = {
+    portfolio_code: code,
+    page,
+    page_size: pageSize,
+    status: statusFilter,
+    event_type: eventTypeFilter,
+    products: productFilters?.length
+      ? productFilters.map((p) => `${p.code}|${p.market}`).join(",")
+      : undefined,
+    platform_code: platformFilter,
+    ex_date_start: exRange?.from ? toDateOnly(exRange.from) : undefined,
+    ex_date_end: exRange?.to ? toDateOnly(exRange.to) : undefined,
+  };
+  const { data: eventsData, isLoading, isFetching } = useShareChangeEventList(code, listParams);
+
+  // 非默认筛选判定（默认集 = 仅除息日区间为最近 1 年）：驱动「重置」按钮显隐与空态文案
+  const hasNonDefaultFilter =
+    statusFilter !== undefined ||
+    eventTypeFilter !== undefined ||
+    productFilters !== undefined ||
+    platformFilter !== undefined ||
+    exRange === undefined ||
+    !isDefaultEventRange(exRange);
+
+  const resetFilters = () => {
+    setStatusFilter(undefined);
+    setEventTypeFilter(undefined);
+    setProductFilters(undefined);
+    setPlatformFilter(undefined);
+    setExRange(defaultEventRange());
+    setPage(1);
+  };
 
   // 查询平台列表
   const { data: platformsData } = useQuery({
@@ -104,6 +163,7 @@ export default function ShareChangeEventsPage() {
   const platforms = platformsData?.items || [];
 
   const events = eventsData?.items || [];
+  const total = eventsData?.total ?? 0;
 
   // #248 确认信息核对弹窗：确认按钮先开弹窗，弹窗内二次点击才发起确认
   const [confirmEventId, setConfirmEventId] = useState<number | null>(null);
@@ -120,10 +180,13 @@ export default function ShareChangeEventsPage() {
     [platformsData?.items]
   );
 
-  // 创建/确认/取消走统一 hooks
+  // 创建/确认/取消确认/取消走统一 hooks
   const createEvent = useCreateShareChangeEvent(code);
   const confirmEvent = useConfirmShareChangeEvent(code);
+  const unconfirmEvent = useUnconfirmShareChangeEvent(code);
   const cancelEvent = useCancelShareChangeEvent(code);
+  // 取消确认二次确认弹窗（#274；后端保护：SNAPSHOT_DEPENDENCY / CANNOT_UNCONFIRM_CHILD）
+  const [unconfirmEventId, setUnconfirmEventId] = useState<number | null>(null);
   // 命中 PLATFORM_NOT_COVERED 时暂存待强制提交的数据，由确认框引导 force_cover 重试
   const [forceCoverData, setForceCoverData] = useState<ShareChangeEventCreate | null>(null);
   const [forceCoverMessage, setForceCoverMessage] = useState("");
@@ -396,6 +459,78 @@ export default function ShareChangeEventsPage() {
             <CardDescription>查看和管理份额变动事件</CardDescription>
           </CardHeader>
           <CardContent>
+            {/* 筛选栏（#274，规范 §9：表格卡片内顶部；桌面平铺，控件统一 h-9） */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <DateRangePicker
+                value={exRange}
+                onChange={(r) => {
+                  setExRange(r);
+                  setPage(1);
+                }}
+                placeholder="除息日"
+                numberOfMonths={2}
+                className="h-9 w-[240px]"
+              />
+              <Select
+                value={statusFilter ?? "all"}
+                onValueChange={(v) => {
+                  setStatusFilter(v === "all" ? undefined : v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-9 w-[150px]">
+                  <SelectValue placeholder="全部状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部状态</SelectItem>
+                  <SelectItem value="pending">待确认</SelectItem>
+                  <SelectItem value="confirmed">已确认</SelectItem>
+                  <SelectItem value="cancelled">已取消</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={eventTypeFilter ?? "all"}
+                onValueChange={(v) => {
+                  setEventTypeFilter(v === "all" ? undefined : v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-9 w-[150px]">
+                  <SelectValue placeholder="全部类型" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部类型</SelectItem>
+                  {Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <ProductFilterSelect
+                value={productFilters ?? []}
+                onChange={(selection) => {
+                  setProductFilters(selection.length ? selection : undefined);
+                  setPage(1);
+                }}
+                className="h-9 w-[220px]"
+              />
+              <SearchablePlatformSelect
+                platforms={platforms}
+                value={platformFilter ?? null}
+                onChange={(v) => {
+                  setPlatformFilter(v ?? undefined);
+                  setPage(1);
+                }}
+                specialOptionLabel="全部平台"
+                className="h-9 w-[150px]"
+              />
+              {hasNonDefaultFilter && (
+                <Button variant="ghost" size="sm" className="h-9" onClick={resetFilters}>
+                  重置
+                </Button>
+              )}
+            </div>
             {isLoading ? (
               <div className="flex items-center justify-center py-8 text-muted-foreground">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -403,7 +538,12 @@ export default function ShareChangeEventsPage() {
               </div>
             ) : (
               <>
-                <Table>
+                {/* 规范 §14：筛选/翻页局部刷新保留旧数据，表格半透明 + 右上角小 spinner */}
+                <div className="relative">
+                  {isFetching && (
+                    <Loader2 className="absolute right-2 top-2 z-10 h-4 w-4 animate-spin text-muted-foreground" />
+                  )}
+                  <Table className={cn(isFetching && "opacity-50")}>
                   <TableHeader>
                     <TableRow>
                       <TableHead>事件类型</TableHead>
@@ -457,17 +597,49 @@ export default function ShareChangeEventsPage() {
                                 </Button>
                               </>
                             )}
+                            {/* 取消确认（#274）：子记录（基金级确认时拆出）不展示入口 */}
+                            {event.status === "confirmed" && !event.parent_event_id && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="取消确认"
+                                onClick={() => setUnconfirmEventId(event.id)}
+                              >
+                                <Undo className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
-                {events.length === 0 && (
-                  <div className="text-center text-muted-foreground py-8">
-                    暂无份额变动事件
-                  </div>
-                )}
+                </div>
+                {/* 空态：默认筛选集下为空 = 暂无记录；非默认筛选下为空 = 引导重置（规范 §8 变体②） */}
+                {events.length === 0 &&
+                  (hasNonDefaultFilter ? (
+                    <EmptyState
+                      message="无符合筛选条件的记录"
+                      action={
+                        <Button variant="ghost" size="sm" onClick={resetFilters}>
+                          重置筛选
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <EmptyState message="暂无份额变动事件" />
+                  ))}
+                <PaginationBar
+                  page={page}
+                  pageSize={pageSize}
+                  total={total}
+                  variant="desktop"
+                  onPageChange={setPage}
+                  onPageSizeChange={(size) => {
+                    setPageSize(size);
+                    setPage(1);
+                  }}
+                />
               </>
             )}
           </CardContent>
@@ -508,6 +680,35 @@ export default function ShareChangeEventsPage() {
               }}
             >
               强制提交
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 取消确认二次确认（#274，语义对齐调仓页；后端保护经 getErrorMessage 透传） */}
+      <AlertDialog
+        open={unconfirmEventId !== null}
+        onOpenChange={(open) => !open && setUnconfirmEventId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>取消确认</AlertDialogTitle>
+            <AlertDialogDescription>
+              取消确认后事件回退为待确认状态，可重新修改或删除。是否继续？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (unconfirmEventId !== null) {
+                  unconfirmEvent.mutate(unconfirmEventId, {
+                    onSuccess: () => setUnconfirmEventId(null),
+                  });
+                }
+              }}
+            >
+              确认
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

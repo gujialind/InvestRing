@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, and_
+from datetime import date
 from typing import Optional
 import logging
 from app.database import get_db
@@ -10,6 +12,7 @@ from app.schemas.share_change_event import (
     ShareChangeEventResponse,
 )
 from app.dependencies import get_current_user, get_current_admin
+from app.services.exceptions import BusinessError
 from app.services.share_change_event_service import (
     create_share_change_event as create_event_service,
     update_share_change_event as update_event_service,
@@ -26,14 +29,62 @@ router = APIRouter()
 @router.get("")
 def get_share_change_events(
     portfolio_code: Optional[str] = None,
+    status: Optional[str] = None,
+    event_type: Optional[str] = None,
+    product_code: Optional[str] = None,
+    products: Optional[str] = None,
+    platform_code: Optional[str] = None,
+    ex_date_start: Optional[date] = None,
+    ex_date_end: Optional[date] = None,
     page: Optional[int] = 1,
     page_size: Optional[int] = 20,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    # 筛选形态对齐调仓列表（#126/#155/#274）：日期闭区间；
+    # products 为逗号分隔 `code|market` 复合多选，与 product_code 互斥
+    if ex_date_start and ex_date_end and ex_date_start > ex_date_end:
+        raise BusinessError(
+            "INVALID_DATE_RANGE",
+            f"ex_date_start ({ex_date_start}) 不能晚于 ex_date_end ({ex_date_end})",
+            http_status=422,
+        )
+    product_pairs: list[tuple[str, str]] = []
+    if products:
+        for part in products.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            code, _, mkt = part.partition("|")
+            if code:
+                product_pairs.append((code, mkt))
+    if product_pairs and product_code:
+        raise BusinessError(
+            "PRODUCTS_PARAM_CONFLICT",
+            "products 与 product_code 互斥，不能同时传参",
+            http_status=422,
+        )
+
     query = db.query(ShareChangeEvent)
     if portfolio_code:
         query = query.filter(ShareChangeEvent.portfolio_code == portfolio_code)
+    if status:
+        query = query.filter(ShareChangeEvent.status == status)
+    if event_type:
+        query = query.filter(ShareChangeEvent.event_type == event_type)
+    if product_pairs:
+        query = query.filter(or_(*(
+            and_(ShareChangeEvent.product_code == code, ShareChangeEvent.market == mkt)
+            for code, mkt in product_pairs
+        )))
+    if product_code:
+        query = query.filter(ShareChangeEvent.product_code == product_code)
+    if platform_code:
+        query = query.filter(ShareChangeEvent.platform_code == platform_code)
+    if ex_date_start:
+        query = query.filter(ShareChangeEvent.ex_date >= ex_date_start)
+    if ex_date_end:
+        query = query.filter(ShareChangeEvent.ex_date <= ex_date_end)
     total = query.count()
     items = query.order_by(ShareChangeEvent.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return {
