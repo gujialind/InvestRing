@@ -872,3 +872,113 @@ class TestShareEventMarketResolve:
         detail = resp.json()["detail"]
         assert detail["error"] == "NOT_FOUND"
         assert detail["details"]["available_markets"] == ["CN_OTC"]
+
+
+class TestShareChangeEventListFilter:
+    """列表服务端筛选 + 分页（#274，形态对齐调仓列表 #126/#155）"""
+
+    PORT = "SCE_FLT"
+
+    def _seed(self, test_db):
+        create_portfolio(test_db, code=self.PORT, status="active")
+        create_product(test_db, code="FUND_FLTA", market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        create_product(test_db, code="FUND_FLTB", market="CN_EXCHANGE",
+                       product_type="ETF", asset_class_code="ASSET_STOCK")
+        create_platform(test_db, code="FLT_PA")
+        create_platform(test_db, code="FLT_PB")
+        # e1：平台级现金分红，pending
+        create_share_change_event(
+            test_db, self.PORT, "FUND_FLTA", "CN_OTC", event_type="cash_dividend",
+            ex_date=date(2025, 11, 3), entitlement_date=date(2025, 10, 31),
+            status="pending", platform_code="FLT_PA", div_cash=Decimal("0.1"))
+        # e2：基金级拆分，confirmed，platform 为空
+        create_share_change_event(
+            test_db, self.PORT, "FUND_FLTA", "CN_OTC", event_type="share_split",
+            ex_date=date(2025, 11, 10), entitlement_date=date(2025, 11, 7),
+            status="confirmed")
+        # e3：平台级强制调整，pending，另一产品/平台
+        create_share_change_event(
+            test_db, self.PORT, "FUND_FLTB", "CN_EXCHANGE", event_type="forced_adjustment",
+            ex_date=date(2025, 12, 1), entitlement_date=date(2025, 11, 28),
+            status="pending", platform_code="FLT_PB", shares_change=Decimal("10"))
+        # e4：平台级现金分红，cancelled
+        create_share_change_event(
+            test_db, self.PORT, "FUND_FLTB", "CN_EXCHANGE", event_type="cash_dividend",
+            ex_date=date(2025, 12, 5), entitlement_date=date(2025, 12, 4),
+            status="cancelled", platform_code="FLT_PA", div_cash=Decimal("0.2"))
+
+    def _list(self, client, admin_headers, query=""):
+        resp = client.get(
+            f"/api/share-change-events?portfolio_code={self.PORT}{query}",
+            headers=admin_headers)
+        assert resp.status_code == 200
+        return resp.json()
+
+    def test_filter_by_status(self, client, admin_headers, test_db):
+        self._seed(test_db)
+        data = self._list(client, admin_headers, "&status=pending")
+        assert data["total"] == 2
+        assert all(i["status"] == "pending" for i in data["items"])
+
+    def test_filter_by_event_type(self, client, admin_headers, test_db):
+        self._seed(test_db)
+        data = self._list(client, admin_headers, "&event_type=cash_dividend")
+        assert data["total"] == 2
+
+    def test_filter_by_product_code(self, client, admin_headers, test_db):
+        self._seed(test_db)
+        data = self._list(client, admin_headers, "&product_code=FUND_FLTA")
+        assert data["total"] == 2
+
+    def test_filter_products_multi_pairs(self, client, admin_headers, test_db):
+        """products 复合多选命中 (code, market) 精确对；串市场不命中"""
+        self._seed(test_db)
+        data = self._list(
+            client, admin_headers,
+            "&products=FUND_FLTA|CN_OTC,FUND_FLTB|CN_EXCHANGE")
+        assert data["total"] == 4
+        assert self._list(client, admin_headers, "&products=FUND_FLTA|CN_EXCHANGE")["total"] == 0
+
+    def test_filter_products_conflict_with_product_code(self, client, admin_headers, test_db):
+        self._seed(test_db)
+        resp = client.get(
+            "/api/share-change-events?products=FUND_FLTA|CN_OTC&product_code=FUND_FLTA",
+            headers=admin_headers)
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "PRODUCTS_PARAM_CONFLICT"
+
+    def test_filter_by_platform_excludes_fund_level(self, client, admin_headers, test_db):
+        """平台筛选只命中平台级记录，基金级父记录（platform 空）不在结果内"""
+        self._seed(test_db)
+        data = self._list(client, admin_headers, "&platform_code=FLT_PA")
+        assert data["total"] == 2
+        assert all(i["platform_code"] == "FLT_PA" for i in data["items"])
+
+    def test_filter_ex_date_range_closed(self, client, admin_headers, test_db):
+        self._seed(test_db)
+        data = self._list(client, admin_headers, "&ex_date_start=2025-12-01&ex_date_end=2025-12-31")
+        assert data["total"] == 2
+        assert {i["event_type"] for i in data["items"]} == {"forced_adjustment", "cash_dividend"}
+
+    def test_filter_ex_date_range_invalid(self, client, admin_headers, test_db):
+        self._seed(test_db)
+        resp = client.get(
+            "/api/share-change-events?ex_date_start=2025-12-31&ex_date_end=2025-12-01",
+            headers=admin_headers)
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "INVALID_DATE_RANGE"
+
+    def test_combined_filters(self, client, admin_headers, test_db):
+        self._seed(test_db)
+        data = self._list(client, admin_headers, "&status=pending&product_code=FUND_FLTA")
+        assert data["total"] == 1
+        assert data["items"][0]["event_type"] == "cash_dividend"
+
+    def test_pagination_total_is_filtered(self, client, admin_headers, test_db):
+        self._seed(test_db)
+        page1 = self._list(client, admin_headers, "&status=pending&page_size=1")
+        assert page1["total"] == 2 and len(page1["items"]) == 1
+        page2 = self._list(client, admin_headers, "&status=pending&page_size=1&page=2")
+        assert len(page2["items"]) == 1
+        assert page1["items"][0]["id"] != page2["items"][0]["id"]

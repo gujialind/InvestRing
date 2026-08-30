@@ -6,8 +6,22 @@ import {
 } from "@/types/share-change-event";
 import { PaginatedResponse } from "@/types/common";
 
+export interface ShareChangeEventListParams {
+  page?: number;
+  page_size?: number;
+  portfolio_code?: string;
+  status?: string;
+  event_type?: string;
+  product_code?: string;
+  /** 逗号分隔 `code|market` 复合多选（#155 契约），与 product_code 互斥 */
+  products?: string;
+  platform_code?: string;
+  ex_date_start?: string;
+  ex_date_end?: string;
+}
+
 export const shareChangeEventApi = {
-  list: (params?: { page?: number; page_size?: number; portfolio_code?: string }) =>
+  list: (params?: ShareChangeEventListParams) =>
     request<PaginatedResponse<ShareChangeEvent>>({
       method: "GET",
       url: "/share-change-events",
@@ -34,6 +48,12 @@ export const shareChangeEventApi = {
     request<{ message: string; event: ShareChangeEvent }>({
       method: "POST",
       url: `/share-change-events/${id}/confirm`,
+    }),
+
+  unconfirm: (id: number) =>
+    request<{ message: string }>({
+      method: "POST",
+      url: `/share-change-events/${id}/unconfirm`,
     }),
 
   cancel: (id: number) =>

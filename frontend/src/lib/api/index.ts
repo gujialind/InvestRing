@@ -18,6 +18,7 @@ export { systemApi } from "./system";
 export { snapshotApi } from "./snapshot";
 export { syncJobApi } from "./syncJob";
 export { shareChangeEventApi } from "./share-change-event";
+export type { ShareChangeEventListParams } from "./share-change-event";
 export { logApi } from "./log";
 export { taskApi } from "./task";
 export { notificationApi } from "./notification";
