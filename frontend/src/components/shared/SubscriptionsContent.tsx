@@ -43,7 +43,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatCurrency, formatShares, formatSharesUnit, formatNav, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, formatNav, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
 import { validatePlatformCode, parsePositiveNumber } from "@/lib/validation";
 import { Badge } from "@/components/ui/badge";
 import { TRADE_DIRECTION_COLORS } from "@/lib/colors";
@@ -601,7 +601,9 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                   <TableHead>投资人</TableHead>
                   <TableHead>平台</TableHead>
                   <TableHead>类型</TableHead>
-                  <TableHead className="number-cell">金额/份额</TableHead>
+                  {/* 金额/份额拆独立列（#247，对齐调仓列表 #173 列语义），勿合并回单列 */}
+                  <TableHead className="number-cell">金额</TableHead>
+                  <TableHead className="number-cell">份额</TableHead>
                   <TableHead className="number-cell">净值</TableHead>
                   <TableHead>申请日期</TableHead>
                   <TableHead>确认日期</TableHead>
@@ -628,9 +630,8 @@ export default function SubscriptionsContent({ basePath, variant = "desktop" }: 
                         {sub.sub_type === "subscribe" ? "申购" : "赎回"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="number-cell">
-                      {sub.amount ? formatCurrency(sub.amount) : formatShares(sub.shares || 0)}
-                    </TableCell>
+                    <TableCell className="number-cell">{formatCurrency(sub.amount)}</TableCell>
+                    <TableCell className="number-cell">{formatSharesUnit(sub.shares)}</TableCell>
                     <TableCell className="number-cell">{formatNav(sub.unit_price)}</TableCell>
                     <TableCell>{sub.apply_date}</TableCell>
                     <TableCell>
