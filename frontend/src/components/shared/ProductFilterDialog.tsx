@@ -32,6 +32,7 @@ import {
   getDimensionOptions,
 } from "@/lib/dimensions";
 import type { DimensionFilterKey, DimensionFilters } from "@/lib/dimensions";
+import { MARKET_OPTIONS } from "@/lib/market";
 import { cn, formatMarketName } from "@/lib/utils";
 
 /** 产品筛选选中项：code + market（market 为空串对应现金类等无市场产品） */
@@ -42,18 +43,13 @@ export interface ProductSelection {
 
 const selectionKey = (s: ProductSelection) => `${s.code}|${s.market}`;
 
-// 产品类型/市场过滤选项（label 与产品表单下拉保持一致）
+// 产品类型过滤选项（label 与产品表单下拉保持一致）；市场选项走 @/lib/market 共享（#324）
 const PRODUCT_TYPE_OPTIONS = [
   { value: "ETF", label: "ETF" },
   { value: "OEF", label: "开放式基金" },
   { value: "LOF", label: "LOF" },
   { value: "CASH", label: "现金" },
 ] as const;
-
-const MARKET_OPTIONS = ["CN_EXCHANGE", "CN_OTC", "HK_MUTUAL"].map((v) => ({
-  value: v,
-  label: formatMarketName(v),
-}));
 
 const productTypeLabel = (type: string) =>
   PRODUCT_TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type;

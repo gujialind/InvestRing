@@ -31,7 +31,7 @@ import Link from "next/link";
 import { Plus, Pencil, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, TrendingUp, Eye, Tags, Filter } from "lucide-react";
 import { Product } from "@/types/product";
 import { useUIStore } from "@/stores/uiStore";
-import { cn, formatMarketName, formatNav } from "@/lib/utils";
+import { cn, formatNav } from "@/lib/utils";
 import ConfirmDialog from "@/components/shared/dialogs/ConfirmDialog";
 import ProductFormDialog from "@/components/shared/ProductFormDialog";
 import EmptyState from "@/components/shared/EmptyState";
@@ -44,6 +44,7 @@ import {
   getDimensionOptions,
 } from "@/lib/dimensions";
 import type { DimensionFilters } from "@/lib/dimensions";
+import { MARKET_OPTIONS } from "@/lib/market";
 import type { ProductListParams } from "@/lib/api";
 import {
   useProductList,
@@ -57,12 +58,7 @@ interface ProductsContentProps {
   variant?: "desktop" | "mobile";
 }
 
-// 筛选选项（label 与产品筛选弹窗/产品表单下拉保持一致）
-const MARKET_OPTIONS = ["CN_EXCHANGE", "CN_OTC", "HK_MUTUAL"].map((v) => ({
-  value: v,
-  label: formatMarketName(v),
-}));
-
+// 筛选选项（label 与产品筛选弹窗/产品表单下拉保持一致）；市场选项走 @/lib/market 共享（#324）
 const PRODUCT_TYPE_OPTIONS = [
   { value: "ETF", label: "ETF" },
   { value: "OEF", label: "开放式基金" },
