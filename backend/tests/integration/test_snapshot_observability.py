@@ -4,7 +4,8 @@
 # issue #305：快照生成/重算链路的失败与告警在 API 边界静默丢失。
 # 覆盖验收断言：
 # 1. 重算响应含逐日 auto_confirmed（含 auto_confirm_failed 条目与 code）
-# 2. catch_up / 调度路径响应含 warnings（至少 event_zeroed_position）
+# 2. catch_up 响应含 warnings（至少 event_zeroed_position）；调度路径负现金
+#    硬阻断（#203，原 negative_cash warning 已升级为 NEGATIVE_CASH 失败）
 # 3. 逐日错误条目携带 code 与 details（POSITION_NOT_FOUND）
 # 4. auto_confirm 循环单条 DB 级失败不毒化 session、不级联误导记录
 # 5. calculate_available_shares market=None 基线跨市场/跨平台汇总
@@ -14,10 +15,10 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from app.models import Portfolio
+from app.models import Portfolio, PortfolioValueSnapshot
 from app.services import snapshot_service
 from app.services import subscription_service
 from app.services.position_service import calculate_available_shares
@@ -224,12 +225,14 @@ class TestCatchUpObservability:
 
 
 class TestSchedulerObservability:
-    """验收 2：调度路径（run_snapshot_generate）结果含 warnings 与失败条目"""
+    """验收 2：调度路径（run_snapshot_generate）失败语义（#203：负现金硬阻断）"""
 
-    def test_task_result_contains_warnings(self, test_db):
-        """负现金告警随调度任务结果可见（带 date 键）。
+    def test_negative_cash_blocks_scheduler_task(self, test_db):
+        """负现金阻断调度回补（#203）：首个回补日即失败，
+        snapshots_generated == 0、无 negative_cash warning（已从告警升级为硬阻断），
+        基线日快照不受影响。
 
-        用现金型告警而非清零告警：清零后基金行不入快照，后续回补日不缺净值，
+        用现金型数据而非清零告警：清零后基金行不入快照，后续回补日不缺净值，
         会逐日生成到任务目标日（约 300 日）；保留基金持仓则次日缺净值中断。
         """
         _setup(test_db, "OBS_TASK1")
@@ -242,19 +245,22 @@ class TestSchedulerObservability:
             test_db, portfolio_code="OBS_TASK1", event_type="forced_adjustment",
             product_code=FUND, market="CN_OTC", platform_code="MYCF",
             ex_date=EX_DAY, entitlement_date=D0,
-            cash_change=Decimal("-2000.00"),  # 现金 1000 − 2000 → 负现金告警
+            cash_change=Decimal("-2000.00"),  # 现金 1000 − 2000 → 负现金阻断
         )
         test_db.flush()
         confirm_share_change_event(test_db, event)
         test_db.commit()
 
         result = run_snapshot_generate(test_db)
-        assert result["snapshots_generated"] >= 1
-        assert "warnings" in result and "auto_confirm_failed" in result
+        assert result["snapshots_generated"] == 0
+        assert result["warnings"] == []
         assert result["auto_confirm_failed"] == []
-        neg = [w for w in result["warnings"] if w["type"] == "negative_cash"]
-        assert neg, "调度任务结果应含负现金告警"
-        assert neg[0]["date"] == EX_DAY.isoformat()
+
+        # 阻断日无快照落库：最新快照日仍为基线 D0
+        latest = test_db.query(func.max(PortfolioValueSnapshot.snapshot_date)).filter(
+            PortfolioValueSnapshot.portfolio_code == "OBS_TASK1"
+        ).scalar()
+        assert latest == D0
 
 
 class TestAutoConfirmSavepointIsolation:
@@ -278,7 +284,7 @@ class TestAutoConfirmSavepointIsolation:
 
         calls = []
 
-        def fake_confirm(db_, sub, *, auto_flush=False):
+        def fake_confirm(db_, sub, *, auto_flush=False, skip_cash_check=False):
             calls.append(sub.id)
             if len(calls) == 1:
                 raise IntegrityError("INSERT ...", {}, RuntimeError("fake dup"))
@@ -305,7 +311,7 @@ class TestAutoConfirmSavepointIsolation:
         后续条目不再产生误导性记录"""
         subs = self._portfolio_with_pending_subs(test_db, "OBS_SP2", count=2)
 
-        def fake_confirm(db_, sub, *, auto_flush=False):
+        def fake_confirm(db_, sub, *, auto_flush=False, skip_cash_check=False):
             raise DBAPIError(
                 "SELECT ...", {}, RuntimeError("connection gone"),
                 connection_invalidated=True,

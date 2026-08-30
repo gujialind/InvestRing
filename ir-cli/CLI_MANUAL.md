@@ -546,7 +546,7 @@ ir sub unconfirm <ID>
 ```
 
 > - 确认日及之后已有快照时报 `SNAPSHOT_DEPENDENCY`，需先删除对应快照
-> - **负现金防护**（issue #180）：申购入金已被后续交易消耗时报 `UNCONFIRM_WOULD_NEGATIVE_CASH`，需先取消依赖该现金的交易
+> - **负现金防护**（issue #203）：unconfirm 不再因平台现金已被消耗而拦截（原 #180 守卫已移除）；负现金改在消费点拦截——赎回确认时平台可用现金不足报 `INSUFFICIENT_CASH`，快照生成时现金为负报 `NEGATIVE_CASH`
 > - **状态回退**（issue #180）：回退后组合 `started_at` 重算为现存最小确认日；无任何确认申购时组合回退 `draft`（`closed` 组合保持 `closed`）
 
 #### `ir sub update`

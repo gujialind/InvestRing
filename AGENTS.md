@@ -142,7 +142,7 @@ draft ──首次申购确认──▶ active ──close──▶ closed ─�
 
 * **确认（confirm）**：申赎确认时计算份额/金额并生成配对 CASH trade；trade 确认时按 `product.confirm_days` 计算 `confirm_date`（可传参覆盖，用于补录），并取 T 日净值/收盘价；事件确认时从 `entitlement_date` 快照回写 `entitlement_shares` 并计算变动值。
 
-* **取消确认（unconfirm）**：回退至 pending。**快照保护**——若 `confirm_date`（trade/subscription）或 `ex_date`（event）及之后已有快照，拒绝并返回 `SNAPSHOT_DEPENDENCY`。申赎 unconfirm 会物理删除配对 CASH trade（`transfer_group="sub_{id}"`）。**负现金防护**（#180）：申购 unconfirm 前校验删除配对 CASH 腿后平台现金不为负（入金可能已被后续交易消耗），否则拒绝 `UNCONFIRM_WOULD_NEGATIVE_CASH`（拒绝而非级联回滚下游交易）。
+* **取消确认（unconfirm）**：回退至 pending。**快照保护**——若 `confirm_date`（trade/subscription）或 `ex_date`（event）及之后已有快照，拒绝并返回 `SNAPSHOT_DEPENDENCY`。申赎 unconfirm 会物理删除配对 CASH trade（`transfer_group="sub_{id}"`）。**负现金防护**（#203 重构）：#180 在申购 unconfirm 前的现金守卫已移除（该守卫曾阻断快照删除级联、异常被吞后产生孤儿记录），unconfirm 本身放行；负现金改由两处消费点防线——①赎回确认（生成配对 CASH sell 腿）校验平台可用现金，不足拒绝 `INSUFFICIENT_CASH`；②快照生成对 CASH `cash_amount < 0` 硬阻断 `NEGATIVE_CASH`（原 #71 warning 语义移除）；存量负现金脏数据经快照 status 端点 `negative_cash_platforms` 暴露（运维处置）。
 
 * **取消（cancel）**：仅 pending 可取消，置 `cancelled`。场内 trade 不可 cancel（`CANNOT_CANCEL_EXCHANGE`）。已 confirmed 的 trade/subscription 不可直接 PUT/DELETE（`CANNOT_MODIFY_CONFIRMED` / `CANNOT_DELETE_CONFIRMED`），须先 unconfirm。
 
@@ -160,7 +160,7 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 ### 3.4 快照删除与重算
 
-* **删除快照**（`_delete_existing_snapshots`）自动级联回退：`confirm_date==D` 的申购退回 pending 并删除关联 CASH trade；`ex_date==D` 或 `entitlement_date==D` 的 confirmed 事件退回 pending；基金级父事件的子记录（`parent_event_id`）被物理删除。批量删除从最新日倒序、逐日 commit。
+* **删除快照**（`_delete_existing_snapshots`）自动级联回退：`apply_date==D` 的 confirmed 申购/赎回（以该日快照净值确认）退回 pending 并删除关联 CASH trade；`ex_date==D` 或 `entitlement_date==D` 的 confirmed 事件退回 pending；基金级父事件的子记录（`parent_event_id`）被物理删除。**级联任一笔回退失败即整体中止、不删除任何快照**（#203，错误显式返回调用方，对齐重算「要么完整成功、要么无变化」口径）。批量删除从最新日倒序、逐日 commit。
 
 * 遵循**快照连续原则**，不能仅删除中间的快照，删除某日的快照其后的快照也一并删除。
 

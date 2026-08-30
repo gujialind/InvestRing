@@ -9,7 +9,7 @@ from decimal import Decimal
 from tests.factories import (
     create_portfolio, create_investor, create_subscription,
     create_investor_holding, create_value_snapshot, ensure_trading_day,
-    create_trade, create_platform,
+    create_trade, create_platform, create_position_snapshot,
 )
 from app.models.subscription import Subscription
 from app.models.trade import Trade
@@ -832,10 +832,14 @@ class TestStartedAtInvariant:
         assert _started_date(p) == date(2025, 9, 2)
 
 
-class TestUnconfirmNegativeCashGuard:
-    """回滚链防护：入金已被消耗时拒绝 unconfirm"""
+class TestUnconfirmConsumedCashAllowed:
+    """#203：入金已被消耗时 unconfirm 不再拦截（原 #180 守卫移除）。
 
-    def test_unconfirm_blocked_when_cash_consumed(self, client, admin_headers, test_db):
+    负现金防护改由①赎回确认消费点校验（INSUFFICIENT_CASH）②快照生成阻断
+    （NEGATIVE_CASH）承担；unconfirm 放行，避免阻断快照删除级联回退。
+    """
+
+    def test_unconfirm_allowed_when_cash_consumed(self, client, admin_headers, test_db):
         create_portfolio(test_db, code="RC_P1")
         create_investor(test_db, code="RC_I1")
         ensure_trading_day(test_db, date(2025, 9, 1), is_open=True)
@@ -863,10 +867,75 @@ class TestUnconfirmNegativeCashGuard:
         )
 
         resp = client.post(f"/api/subscriptions/{s1_id}/unconfirm", headers=admin_headers)
-        assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "UNCONFIRM_WOULD_NEGATIVE_CASH"
+        assert resp.status_code == 200, f"Response: {resp.status_code} {resp.json()}"
         still = test_db.query(Subscription).filter(Subscription.id == s1_id).first()
-        assert still.status == "confirmed"
+        assert still.status == "pending"
+
+
+class TestRedeemConfirmCashCheck:
+    """#203 消费点校验：赎回确认前校验平台可用现金足以支付赎回金额"""
+
+    def _seed(self, test_db, port: str, investor: str):
+        create_portfolio(test_db, code=port, status="active")
+        create_investor(test_db, code=investor)
+        for d in (1, 2, 3):
+            ensure_trading_day(test_db, date(2025, 9, d), is_open=True)
+        # 份额基线：价值快照 + 投资人持仓（申请日快照与现金基线由 _create_redeem 补）
+        create_value_snapshot(test_db, port, date(2025, 8, 29),
+                              total_value=10000, total_shares=10000, unit_price=1.0)
+        create_investor_holding(test_db, port, investor, date(2025, 8, 29), shares=10000)
+
+    def _create_redeem(self, test_db, client, admin_headers, port: str, investor: str,
+                       cash: float):
+        resp = client.post(
+            "/api/subscriptions",
+            json={
+                "portfolio_code": port, "investor_code": investor,
+                "sub_type": "redeem", "shares": 4000.0,
+                "apply_date": "2025-09-01", "platform_code": "MYCF",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), f"Response: {resp.status_code} {resp.json()}"
+        sub_id = resp.json()["id"]
+        # 申请日快照：净值 1.25 → 赎回金额 = 4000 × 1.25 = 5000；
+        # CASH 行同时作为可用现金基线（最新快照日即 calculate_available_cash 基线日）
+        create_value_snapshot(test_db, port, date(2025, 9, 1),
+                              total_value=12500, total_shares=10000, unit_price=1.25)
+        create_position_snapshot(
+            test_db, port, "CASH", "", snapshot_date=date(2025, 9, 1),
+            cash_amount=cash, unit_price=None, cost_price=None,
+            market_value=cash, platform_code="MYCF",
+        )
+        return sub_id
+
+    def test_confirm_rejected_when_cash_insufficient(self, client, admin_headers, test_db):
+        """可用 2000 < 赎回金额 5000 → INSUFFICIENT_CASH，记录保持 pending"""
+        self._seed(test_db, "RCC_P1", "RCC_I1")
+        sub_id = self._create_redeem(test_db, client, admin_headers, "RCC_P1", "RCC_I1",
+                                     cash=2000.0)
+
+        conf = client.post(f"/api/subscriptions/{sub_id}/confirm", headers=admin_headers)
+        assert conf.status_code == 422
+        detail = conf.json()["detail"]
+        assert detail["error"] == "INSUFFICIENT_CASH"
+        assert detail["details"]["required"] == "5000.00"
+        assert float(detail["details"]["available"]) == 2000.0
+        assert float(detail["details"]["deficit"]) == 3000.0
+        still = test_db.query(Subscription).filter(Subscription.id == sub_id).first()
+        assert still.status == "pending"
+
+    def test_confirm_allowed_when_cash_sufficient(self, client, admin_headers, test_db):
+        """可用 8000 ≥ 赎回金额 5000 → 确认成功并生成配对 CASH sell 腿"""
+        self._seed(test_db, "RCC_P2", "RCC_I2")
+        sub_id = self._create_redeem(test_db, client, admin_headers, "RCC_P2", "RCC_I2",
+                                     cash=8000.0)
+
+        conf = client.post(f"/api/subscriptions/{sub_id}/confirm", headers=admin_headers)
+        assert conf.status_code == 200, f"Response: {conf.status_code} {conf.json()}"
+        confirmed = conf.json()
+        assert confirmed["status"] == "confirmed"
+        assert float(confirmed["amount"]) == 5000.0
 
 
 # ============================================================================
@@ -1265,6 +1334,14 @@ class TestSubscriptionPreview:
         assert float(preview["shares"]) == 4000.0
         assert float(preview["amount"]) == 5000.0
         assert preview["confirm_date"] == "2025-09-02"
+
+        # #203 消费点校验：赎回确认需平台可用现金 ≥ 赎回金额；
+        # 最新快照日（申请日）的 CASH 行即可用现金基线，预置恰好 5000（精确比较边界，无容差）
+        create_position_snapshot(
+            test_db, "SPV_P2", "CASH", "", snapshot_date=date(2025, 9, 1),
+            cash_amount=5000.0, unit_price=None, cost_price=None,
+            market_value=5000.0, platform_code="MYCF",
+        )
 
         conf = client.post(f"/api/subscriptions/{sub_id}/confirm", headers=admin_headers)
         assert conf.status_code == 200, f"Response: {conf.status_code} {conf.json()}"

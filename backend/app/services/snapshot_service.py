@@ -556,7 +556,7 @@ def catch_up_snapshots(
     while current and current <= to_date:
         try:
             gen_result = generate_daily_snapshots(db, portfolio_code, current)
-            # #305：逐日告警补 date 键后透传（如 event_zeroed_position/negative_cash）
+            # #305：逐日告警补 date 键后透传（如 event_zeroed_position）
             for w in gen_result.get("warnings") or []:
                 result["warnings"].append({**w, "date": current.isoformat()})
             auto_results = auto_confirm_after_snapshot(db, portfolio_code, current)
@@ -818,6 +818,11 @@ def _cascade_unconfirm_subscriptions(
     因为它们使用了该快照的 NAV 进行确认，快照被删后必须回退。
     同时删除关联的 CASH trade（transfer_group = "sub_{id}"）。
 
+    任一笔回退失败即向上抛出、整体中止（#203）：级联先于快照删除执行，
+    失败时不删任何快照，对齐重算「要么完整成功、要么无变化」口径。
+    旧实现以 except Exception 吞错继续，曾致「快照已删但申购仍 confirmed」
+    孤儿记录（issue #203）。
+
     Returns:
         被回退的记录信息列表
     """
@@ -833,24 +838,17 @@ def _cascade_unconfirm_subscriptions(
 
     unconfirmed_list = []
     for sub in confirmed_subs:
-        sub_id = sub.id
-        sub_type = sub.sub_type
-        try:
-            unconfirm_single_subscription(db, sub, check_snapshot=False, auto_flush=False)
-            unconfirmed_list.append({
-                "id": sub_id,
-                "sub_type": sub_type,
-                "confirm_date": snapshot_date.isoformat(),
-                "action": "unconfirmed",
-            })
-            logger.info(
-                f"级联取消确认: subscription_id={sub_id}, "
-                f"portfolio={portfolio_code}, snapshot_date={snapshot_date}"
-            )
-        except Exception as e:
-            logger.warning(
-                f"级联取消确认失败: subscription_id={sub_id}, error={str(e)}"
-            )
+        unconfirm_single_subscription(db, sub, check_snapshot=False, auto_flush=False)
+        unconfirmed_list.append({
+            "id": sub.id,
+            "sub_type": sub.sub_type,
+            "confirm_date": snapshot_date.isoformat(),
+            "action": "unconfirmed",
+        })
+        logger.info(
+            f"级联取消确认: subscription_id={sub.id}, "
+            f"portfolio={portfolio_code}, snapshot_date={snapshot_date}"
+        )
 
     return unconfirmed_list
 
@@ -969,10 +967,11 @@ def _generate_portfolio_position(
 
     Returns:
         (positions, warnings) 元组。warnings 为非阻断告警列表：
-        - negative_cash（issue #71）：CASH 条目 cash_amount < 0；
         - event_zeroed_position（issue #278）：份额变动事件应用后持仓份额 ≤ 0。
 
     Raises:
+        BusinessError: NEGATIVE_CASH（issue #203，原 #71 告警升级）——CASH 条目
+        cash_amount < 0 时阻断生成，快照不得落库负现金。
         BusinessError: POSITION_NOT_FOUND（issue #278），两种情形均不得静默、
         须先修正事件再生成——
         ① 份额变动事件指向不存在的持仓行；
@@ -1277,23 +1276,40 @@ def _generate_portfolio_position(
             },
         )
 
-    # issue #71：检测负现金 CASH 条目，产出 warning（不阻断生成）
-    for pos in result_positions:
-        if (
-            pos.product_code == "CASH"
-            and pos.cash_amount is not None
-            and Decimal(str(pos.cash_amount)) < 0
-        ):
-            warnings.append({
-                "type": "negative_cash",
-                "platform_code": pos.platform_code,
-                "cash_amount": float(pos.cash_amount),
-                "snapshot_date": target_date.isoformat(),
-            })
-            logger.warning(
-                f"负现金告警: portfolio={portfolio_code}, platform={pos.platform_code}, "
-                f"date={target_date}, cash_amount={pos.cash_amount}"
-            )
+    # issue #203（原 #71）：负现金从告警升级为阻断——快照不得落库负现金。
+    # 现金充足性由消费点保证（赎回确认 INSUFFICIENT_CASH 等），生成期命中即数据
+    # 异常，拒绝生成交由调用方修正；raise 点在 db.add_all 之前，调用方整体回滚。
+    # 存量负现金脏数据经 status 端点 negative_cash_platforms 暴露（运维处置）。
+    negative_cash_rows = [
+        pos for pos in result_positions
+        if pos.product_code == "CASH"
+        and pos.cash_amount is not None
+        and Decimal(str(pos.cash_amount)) < 0
+    ]
+    if negative_cash_rows:
+        negative_detail = [
+            {"platform_code": pos.platform_code, "cash_amount": float(pos.cash_amount)}
+            for pos in negative_cash_rows
+        ]
+        logger.error(
+            f"负现金阻断快照生成: portfolio={portfolio_code}, date={target_date}, "
+            f"platforms={[(d['platform_code'], d['cash_amount']) for d in negative_detail]}"
+        )
+        raise BusinessError(
+            code="NEGATIVE_CASH",
+            message=(
+                f"快照生成失败：{target_date} 平台现金为负"
+                + "".join(
+                    f"（{d['platform_code']}：{d['cash_amount']}）" for d in negative_detail
+                )
+                + "，请先修正现金流水（取消消耗该现金的下游交易/赎回）后重试"
+            ),
+            details={
+                "portfolio_code": portfolio_code,
+                "target_date": target_date.isoformat(),
+                "negative_cash": negative_detail,
+            },
+        )
 
     return result_positions, warnings
 
@@ -1599,8 +1615,12 @@ def auto_confirm_after_snapshot(
             "sub_type": sub_type,
             "apply_date": snapshot_date.isoformat(),
         }
+        # skip_cash_check：重算按日序重放，当日现金流入交易可能尚未重确认，
+        # 赎回现金实时校验会误杀（对齐调仓 auto_confirm skip_available_check，#203）
         if not _auto_confirm_guarded(
-            db, entry, lambda s=sub: confirm_single_subscription(db, s, auto_flush=True)
+            db, entry, lambda s=sub: confirm_single_subscription(
+                db, s, auto_flush=True, skip_cash_check=True
+            )
         ):
             results.append(entry)
             logger.error(
