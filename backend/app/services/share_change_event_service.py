@@ -21,6 +21,7 @@ from app.models.portfolio_position import PortfolioPosition
 from app.models.portfolio_value_snapshot import PortfolioValueSnapshot
 from app.services.trading_utils import is_trading_day, get_latest_snapshot_date
 from app.services.exceptions import BusinessError, NotFoundError
+from app.services.product_service import resolve_product_market
 from app.utils.quantize import quantize_amount, quantize_shares
 
 logger = logging.getLogger(__name__)
@@ -267,6 +268,27 @@ def create_share_change_event(
     portfolio = db.query(Portfolio).filter(Portfolio.code == portfolio_code).first()
     if not portfolio:
         raise NotFoundError("NOT_FOUND", "组合不存在")
+
+    # issue #258（口径同 #83 调仓创建）：market 省略/空串时按产品唯一市场补全；
+    # 一码多市场（LOF）报 MARKET_AMBIGUOUS；产品不存在报 PRODUCT_NOT_FOUND；
+    # 显式 (code, market) 组合不存在报 NOT_FOUND——杜绝复合外键违约 500
+    if product_code:
+        product_code, market = resolve_product_market(db, product_code, market)
+        if not db.query(Product).filter(
+            Product.code == product_code, Product.market == market
+        ).first():
+            details = {"product_code": product_code, "market": market}
+            other_markets = sorted(
+                row[0] or ""
+                for row in db.query(Product.market)
+                .filter(Product.code == product_code)
+                .all()
+            )
+            if other_markets:
+                details["available_markets"] = other_markets
+            raise NotFoundError(
+                "NOT_FOUND", f"产品 {product_code}({market}) 不存在", details=details
+            )
 
     # issue #279：双空强制调整与现金型产品份额变动在创建期拦截（REST/CLI 共用）
     _validate_adjustment_not_empty(event_type, shares_change, cash_change)
