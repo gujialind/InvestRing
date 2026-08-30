@@ -682,7 +682,9 @@ class TestClassificationUpdate:
         detail = resp.json()["detail"]
         assert detail["error"] == "DIMENSION_VALUE_IN_USE"
         assert detail["details"]["asset_class_code"] == "ASSET_STOCK"
-        assert detail["details"]["products"] == ["000300.OF", "510300.SH"]
+        assert sorted(detail["details"]["products"]) == [
+            "000300.OF", "161017.OF", "161017.SZ", "510300.SH",
+        ]
         # 关联未被改动
         data = client.get(f"{_API}/REGION_CN", headers=admin_headers).json()
         assert data["applicable_asset_classes"] == ["ASSET_STOCK", "ASSET_BOND"]

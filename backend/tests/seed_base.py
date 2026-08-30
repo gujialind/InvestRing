@@ -97,6 +97,15 @@ def seed_base_data(db: Session) -> None:
          "confirm_days": 1, "is_qdii": False, "nav_lag_days": 0,
          "asset_class_code": "ASSET_STOCK", "region_code": "REGION_CN",
          "style_code": "STYLE_BALANCED", "size_code": "SIZE_LARGE", "segment_code": "SEG_COMPOSITE"},
+        # #259: LOF 一码双市场（产品选择器市场标识 E2E 种子；长名稳定触发截断）
+        {"code": "161017.SZ", "market": "CN_EXCHANGE", "name": "富国中证500指数增强(LOF)A", "product_type": "LOF",
+         "confirm_days": 0, "is_qdii": False, "nav_lag_days": 0,
+         "asset_class_code": "ASSET_STOCK", "region_code": "REGION_CN",
+         "style_code": "STYLE_BALANCED", "size_code": "SIZE_LARGE", "segment_code": "SEG_COMPOSITE"},
+        {"code": "161017.OF", "market": "CN_OTC", "name": "富国中证500指数增强(LOF)A", "product_type": "LOF",
+         "confirm_days": 1, "is_qdii": False, "nav_lag_days": 0,
+         "asset_class_code": "ASSET_STOCK", "region_code": "REGION_CN",
+         "style_code": "STYLE_BALANCED", "size_code": "SIZE_LARGE", "segment_code": "SEG_COMPOSITE"},
         # 场外 QDII：快照估值取 T-1 交易日净值（issue #228 nav_lag_days=1）
         {"code": "270042.OF", "market": "CN_OTC", "name": "广发纳指100(QDII)A", "product_type": "OEF",
          "confirm_days": 2, "is_qdii": True, "nav_lag_days": 1, **_dims("270042.OF")},
