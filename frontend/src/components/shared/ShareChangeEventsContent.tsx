@@ -267,7 +267,9 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
       return;
     }
 
-    submitCreate(formData);
+    // #343 双保险：基金级事件不渲染平台选择器，空串归一为 undefined 再提交
+    //（后端 service 同口径归一，此处仅避免无效载荷）
+    submitCreate({ ...formData, platform_code: formData.platform_code || undefined });
   };
 
   // 筛选栏控件（visual-spec §9）：顺序 = 除息日区间 → 状态 → 事件类型 → 产品 → 平台；
