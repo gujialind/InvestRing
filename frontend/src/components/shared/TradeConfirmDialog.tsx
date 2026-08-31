@@ -6,7 +6,7 @@ import { getErrorMessage } from "@/lib/api";
 import type { Trade } from "@/types/trade";
 import {
   formatCurrency,
-  formatShares,
+  formatSharesUnit,
   formatNav,
   formatDate,
   formatMarketName,
@@ -73,7 +73,7 @@ export function TradeConfirmDialog({
             value={cashPlatformCode ? platformNameMap.get(cashPlatformCode) ?? cashPlatformCode : "--"}
           />
           <InfoRow label="金额" value={formatCurrency(preview.amount)} />
-          <InfoRow label="份额" value={formatShares(preview.shares)} />
+          <InfoRow label="份额" value={formatSharesUnit(preview.shares)} />
           <InfoRow label="价格" value={formatNav(preview.price)} />
           <InfoRow label="手续费" value={formatCurrency(preview.fee)} />
           <InfoRow label="交易日期" value={formatDate(trade.trade_date)} />
