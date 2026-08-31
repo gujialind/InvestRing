@@ -90,6 +90,8 @@
 1. **调色板类名**：禁止 `(text|bg|border)-(red|green|yellow|blue|amber|emerald|orange|purple|indigo|pink|teal|cyan)-<数字>`。新增颜色需求一律先加语义 token。
 2. **任意值类名**（2026-08-29 起）：禁止 `text-[…]`（§5 四档之外）、`p/px/py/pt/pb/pl/pr-[…]`、`gap/gap-x/gap-y-[…]`、`rounded-[…]`（§7 派生档之外）。m 系 / space 系 / w·h 系任意值**暂不拦截**（多为视口比例或一次性尺寸，如 `h-[60vh]`、`sm:max-w-[500px]`，是否纳入待后续评估）。
 
+另有 `no-restricted-imports`（error，2026-09-01 #349 起）：业务代码禁止从 `@/lib/utils` import 裸 `formatShares`——份额上屏一律 `formatSharesUnit`（§3/§12），`formatShares` 仅供其内部实现。成因：#249 全站清零手工扫描仍漏掉三个确认弹窗，证明纯约定不可持续，升级为编译期门禁。
+
 **豁免清单**（overrides 登记，临时项只减不增、收敛后移出；豁免文件仍受调色板拦截）：
 
 | 范围 | 类型 | 理由 |
@@ -98,6 +100,7 @@
 | `src/app/portfolio/[code]/page.tsx` | 临时（ratchet） | 存量 `text-[15px]`×2、`text-[13px]`×1，改动该页时顺手收敛后移出 |
 | `src/components/shared/PositionSections.tsx` | 临时（ratchet） | 存量 `text-[11/13/15/17px]` 共 9 处，同上 |
 | `src/components/layout/NotificationBell.tsx` | 临时（ratchet） | 存量 `text-[10px]` 1 处，同上 |
+| `src/lib/utils.test.ts` | 永久 | 单测需直测 `formatShares` 基础函数（`formatSharesUnit` 的内部实现），仅豁免 `no-restricted-imports` 门禁 |
 
 确需新增豁免时在代码处加 `eslint-disable-next-line` 并在本节逐条登记（位置 + 理由）。
 

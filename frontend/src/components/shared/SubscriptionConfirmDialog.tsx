@@ -3,7 +3,7 @@
 import { ConfirmInfoDialog, InfoRow } from "./ConfirmInfoDialog";
 import { useSubscriptionPreview } from "@/hooks/useTrade";
 import { getErrorMessage } from "@/lib/api";
-import { formatCurrency, formatShares, formatNav, formatDate } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, formatNav, formatDate } from "@/lib/utils";
 
 /**
  * 申购赎回确认信息核对弹窗（#248）：
@@ -67,7 +67,7 @@ export function SubscriptionConfirmDialog({
           />
           <InfoRow
             label="份额"
-            value={formatShares(isSubscribe ? preview.shares : record.shares)}
+            value={formatSharesUnit(isSubscribe ? preview.shares : record.shares)}
           />
           <InfoRow label="净值" value={formatNav(preview.nav)} />
           <InfoRow label="申请日期" value={formatDate(record.apply_date)} />

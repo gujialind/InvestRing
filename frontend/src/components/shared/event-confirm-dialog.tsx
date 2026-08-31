@@ -3,7 +3,7 @@
 import { ConfirmInfoDialog, InfoRow } from "@/components/shared/ConfirmInfoDialog";
 import type { ShareChangeEvent } from "@/types/share-change-event";
 import type { EventType } from "@/types/common";
-import { formatCurrency, formatShares, formatDate, formatProductName } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, formatDate, formatProductName } from "@/lib/utils";
 
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   cash_dividend: "现金分红",
@@ -61,7 +61,7 @@ export function EventConfirmDialog({
                 : "--"
             }
           />
-          <InfoRow label="份额变化" value={formatShares(event.shares_change)} />
+          <InfoRow label="份额变化" value={formatSharesUnit(event.shares_change)} />
           <InfoRow label="现金变化" value={formatCurrency(event.cash_change)} />
           <InfoRow label="权益登记日" value={formatDate(event.entitlement_date)} />
           <InfoRow label="除息日" value={formatDate(event.ex_date)} />

@@ -108,6 +108,28 @@ const eslintConfig = [
         ...arbitraryValueSelectors,
         ...numberDisplaySelectors,
       ],
+      // 2026-09-01（issue #349）：份额上屏一律 formatSharesUnit（visual-spec §3/§12）。
+      // 业务代码禁止 import 裸 formatShares；豁免文件见下方豁免块。
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@/lib/utils",
+              importNames: ["formatShares"],
+              message:
+                "份额展示一律用 formatSharesUnit（visual-spec §3/§12，issue #349）；formatShares 仅供 formatSharesUnit 内部实现。",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // formatShares import 门禁豁免（visual-spec §1.5 登记）：单测需直测基础函数。
+  {
+    files: ["src/lib/utils.test.ts"],
+    rules: {
+      "no-restricted-imports": "off",
     },
   },
   // 任意值护栏豁免（visual-spec §1.5 登记；豁免文件仍受调色板拦截）。
