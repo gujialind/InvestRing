@@ -41,6 +41,7 @@ COMMAND_SCHEMA_MAP = [
     ("snapshot", "status", "SnapshotStatusResponse", "object", None),
     ("trade", "list", "TradeResponse", "list", "trade"),
     ("sub", "list", "SubscriptionResponse", "list", "subscription"),
+    ("share-event", "list", "ShareChangeEventResponse", "list", None),
     ("asset-classification", "list", "AssetClassificationItem", "list", "asset_classification"),
     ("asset-classification", "get", "AssetClassificationDetail", "object", None),
 ]
@@ -65,6 +66,7 @@ NOTES_OVERRIDES = {
     "asset-classification.list.applicable_asset_classes": "值级适用大类（asset_class 维度值恒为空 list），按大类色板序位排序",
     "asset-classification.list.sort_order": "asset_class 维度的序位即前端饼图/分区色板序位，变更即改色",
     "asset-classification.get.dimension_rules": "仅 asset_class 维度值有值：{dimension: rule}，rule ∈ required/optional，未出现的维度 = forbidden",
+    "share-event.list.product_name": "读侧派生：仅 list 端点 join 产品表填充，产品缺失为null；get/单对象端点恒为null",
 }
 
 # openapi 类型 → 缩写
