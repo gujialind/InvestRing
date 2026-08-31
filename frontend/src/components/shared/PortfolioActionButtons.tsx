@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Power, Plus, ArrowRightLeft, RefreshCw } from "lucide-react";
+import { Power, Plus, ArrowRightLeft, RefreshCw, Camera } from "lucide-react";
 import Link from "next/link";
 
 interface PortfolioActionButtonsProps {
@@ -30,6 +30,16 @@ export default function PortfolioActionButtons({
   isActivatePending,
 }: PortfolioActionButtonsProps) {
   const cls = variant === "mobile" ? "w-full" : "";
+
+  // 快照管理入口仅 desktop 渲染（移动端在页尾「管理」列表，#351）
+  const snapshotEntry = variant === "desktop" ? (
+    <Link href={`${basePath}/${portfolioCode}/snapshots`}>
+      <Button variant="outline">
+        <Camera className="mr-2 h-4 w-4" />
+        快照管理
+      </Button>
+    </Link>
+  ) : null;
 
   if (status === "draft") {
     return (
@@ -67,20 +77,24 @@ export default function PortfolioActionButtons({
             </Button>
           </Link>
         )}
+        {snapshotEntry}
       </div>
     );
   }
 
   // closed
   return (
-    <Button
-      variant="outline"
-      onClick={onActivateClick}
-      disabled={isActivatePending}
-      className={variant === "mobile" ? "col-span-2 w-full" : ""}
-    >
-      <Power className="mr-2 h-4 w-4 text-success" />
-      重新激活
-    </Button>
+    <>
+      <Button
+        variant="outline"
+        onClick={onActivateClick}
+        disabled={isActivatePending}
+        className={variant === "mobile" ? "col-span-2 w-full" : ""}
+      >
+        <Power className="mr-2 h-4 w-4 text-success" />
+        重新激活
+      </Button>
+      {snapshotEntry}
+    </>
   );
 }
