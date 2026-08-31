@@ -403,3 +403,14 @@ export function formatMarketName(market: string | undefined | null): string {
   if (!market) return "--";
   return MARKET_NAME_MAP[market] || market;
 }
+
+/**
+ * 格式化产品展示名（#342）：`名称（代码）` 双信息；名称缺失回退裸代码，代码缺失 "--"
+ */
+export function formatProductName(
+  productName: string | undefined | null,
+  productCode: string | undefined | null
+): string {
+  if (!productCode) return "--";
+  return productName ? `${productName}（${productCode}）` : productCode;
+}

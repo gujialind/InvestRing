@@ -199,6 +199,21 @@ def resolve_product_market(
     return product_code, markets[0]
 
 
+def build_product_name_map(db: Session, pairs: set) -> dict:
+    """读侧派生公共助手（#175/#342 单一实现）：批量建 (code, market) -> name 映射（防 N+1）。
+    pairs 为 {(product_code, market)}；LOF 一码多市场查出的冗余行按 pairs 过滤。"""
+    if not pairs:
+        return {}
+    codes = {c for c, _ in pairs if c}
+    return {
+        (p.code, p.market): p.name
+        for p in db.query(Product.code, Product.market, Product.name)
+        .filter(Product.code.in_(codes))
+        .all()
+        if (p.code, p.market) in pairs
+    }
+
+
 def validate_product_type(product_type: str) -> None:
     """issue #232：product_type 枚举校验（create/update 共用）。非法值抛 INVALID_PRODUCT_TYPE（422）。"""
     if product_type not in VALID_PRODUCT_TYPES:

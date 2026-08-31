@@ -3,7 +3,7 @@
 import { ConfirmInfoDialog, InfoRow } from "@/components/shared/ConfirmInfoDialog";
 import type { ShareChangeEvent } from "@/types/share-change-event";
 import type { EventType } from "@/types/common";
-import { formatCurrency, formatShares, formatDate } from "@/lib/utils";
+import { formatCurrency, formatShares, formatDate, formatProductName } from "@/lib/utils";
 
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   cash_dividend: "现金分红",
@@ -37,10 +37,7 @@ export function EventConfirmDialog({
 }: EventConfirmDialogProps) {
   // 产品名直接取列表行自带的 product_name（#342 后端读侧派生）：
   // 替代原按单条事件懒加载 useProduct 的权宜（#257）；缺失时回退裸代码
-  const getProductName = () => {
-    if (!event?.product_code) return "--";
-    return event.product_name ? `${event.product_name}（${event.product_code}）` : event.product_code;
-  };
+  const getProductName = () => formatProductName(event?.product_name, event?.product_code);
 
   return (
     <ConfirmInfoDialog

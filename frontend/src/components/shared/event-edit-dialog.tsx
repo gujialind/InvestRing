@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Loader2 } from "lucide-react";
-import { toDateOnly, parseDateOnly, formatMarketName } from "@/lib/utils";
+import { toDateOnly, parseDateOnly, formatMarketName, formatProductName } from "@/lib/utils";
 import type { ShareChangeEvent, ShareChangeEventUpdate } from "@/types/share-change-event";
 import { EVENT_TYPE_LABELS } from "@/components/shared/event-confirm-dialog";
 
@@ -107,9 +107,7 @@ export function EventEditDialog({
     onSubmit(payload);
   };
 
-  const productName = event.product_name
-    ? `${event.product_name}（${event.product_code}）`
-    : event.product_code ?? "--";
+  const productName = formatProductName(event.product_name, event.product_code);
   const platformName = event.platform_code
     ? platformNameMap.get(event.platform_code) ?? event.platform_code
     : "全部";
