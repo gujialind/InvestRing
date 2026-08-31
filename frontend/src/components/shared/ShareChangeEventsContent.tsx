@@ -49,7 +49,6 @@ import {
 } from "@/hooks/useShareChangeEvent";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import type { DateRange } from "react-day-picker";
-import { isSameDay, subYears } from "date-fns";
 import PaginationBar from "@/components/shared/PaginationBar";
 import ProductFilterSelect from "@/components/shared/ProductFilterSelect";
 import { ProductSelection } from "@/components/shared/ProductFilterDialog";
@@ -83,17 +82,6 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "已取消",
 };
 
-/** 默认除息日区间 = 快捷项「近1年」（#274，同 #126 决策⑤口径） */
-function defaultEventRange(): DateRange {
-  return { from: subYears(new Date(), 1), to: new Date() };
-}
-
-function isDefaultEventRange(range: DateRange | undefined): boolean {
-  if (!range?.from || !range.to) return false;
-  const d = defaultEventRange();
-  return !!d.from && !!d.to && isSameDay(range.from, d.from) && isSameDay(range.to, d.to);
-}
-
 /**
  * 份额变动事件页内容（桌面/移动共用，#276）。
  * 抽离自原 app/portfolio/[code]/share-change-events/page.tsx；
@@ -121,12 +109,12 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
     notes: "",
   });
 
-  // 筛选状态（#274 服务端筛选）：除息日区间默认最近 1 年（同 #126 决策⑤）
+  // 筛选状态（#274 服务端筛选）：除息日区间默认不带条件、展示全部事件（#346）
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [eventTypeFilter, setEventTypeFilter] = useState<string | undefined>(undefined);
   const [productFilters, setProductFilters] = useState<ProductSelection[] | undefined>(undefined);
   const [platformFilter, setPlatformFilter] = useState<string | undefined>(undefined);
-  const [exRange, setExRange] = useState<DateRange | undefined>(() => defaultEventRange());
+  const [exRange, setExRange] = useState<DateRange | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -147,27 +135,26 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
   };
   const { data: eventsData, isLoading, isFetching } = useShareChangeEventList(code, listParams);
 
-  // 非默认筛选判定（默认集 = 仅除息日区间为最近 1 年）：驱动「重置」按钮显隐与空态文案
+  // 非默认筛选判定（默认集 = 无任何筛选）：驱动「重置」按钮显隐与空态文案
   const hasNonDefaultFilter =
     statusFilter !== undefined ||
     eventTypeFilter !== undefined ||
     productFilters !== undefined ||
     platformFilter !== undefined ||
-    exRange === undefined ||
-    !isDefaultEventRange(exRange);
+    exRange !== undefined;
   const activeFilterCount =
     (statusFilter ? 1 : 0) +
     (eventTypeFilter ? 1 : 0) +
     (productFilters?.length ? 1 : 0) +
     (platformFilter ? 1 : 0) +
-    (exRange === undefined || !isDefaultEventRange(exRange) ? 1 : 0);
+    (exRange !== undefined ? 1 : 0);
 
   const resetFilters = () => {
     setStatusFilter(undefined);
     setEventTypeFilter(undefined);
     setProductFilters(undefined);
     setPlatformFilter(undefined);
-    setExRange(defaultEventRange());
+    setExRange(undefined);
     setPage(1);
   };
 
@@ -285,7 +272,7 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
           setExRange(r);
           setPage(1);
         }}
-        placeholder="除息日"
+        placeholder="全部时间"
         numberOfMonths={variant === "mobile" ? 1 : 2}
         className={rangeWidth}
       />
