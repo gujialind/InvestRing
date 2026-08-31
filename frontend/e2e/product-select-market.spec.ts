@@ -420,7 +420,7 @@ test.describe('产品选择器市场筛选（#324）', () => {
       test.skip(true, '环境中没有平台数据');
     }
     await platPopover.getByTestId('platform-option').first().click();
-    await dlg.getByLabel('金额（元）').fill('1000');
+    await dlg.getByLabel('实际支付金额（含费，元）').fill('1000');
 
     // 拦截创建请求并 abort：只取 body 做断言，不落任何数据
     let postBody: string | null = null;

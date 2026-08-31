@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DatePicker } from "@/components/ui/date-picker";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import {
@@ -53,6 +54,7 @@ import { ApiException } from "@/lib/api";
 import type { TradeListParams } from "@/lib/api";
 import type { Trade, TradeCreate, TradeUpdate } from "@/types/trade";
 import { cashOrphanLabel, cashSubMeta, groupTradeRows } from "@/lib/tradePairs";
+import { applyBuyAmountLinkage, netFromActual, sellDerivedAmounts } from "@/lib/tradeAmounts";
 import {
   useTradeList,
   useCreateTrade,
@@ -203,10 +205,13 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
     cash_platform_code: "",
     shares: "",
     amount: "",
+    net_amount: "",
     price: "",
     fee: "",
     trade_date: toDateOnly(new Date()),
   });
+  // 买入金额联动锚点（#193）：记录最后手改的字段，fee 变化时按锚点重算另一字段
+  const [amountAnchor, setAmountAnchor] = useState<"actual" | "net">("actual");
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   // 编辑提示（confirmed 行原 alert 改为内部状态展示）
   const [editHint, setEditHint] = useState(false);
@@ -214,12 +219,14 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [editFormData, setEditFormData] = useState({
     amount: "",
+    net_amount: "",
     shares: "",
     price: "",
     fee: "",
     trade_date: toDateOnly(new Date()),
     notes: "",
   });
+  const [editAmountAnchor, setEditAmountAnchor] = useState<"actual" | "net">("actual");
   // 顶层无条件调用（hooks 规则）；id=0 时 mutate 不会被触发（Dialog 打开时 editingTrade 必有 id）
   const updateTrade = useUpdateTrade(editingTrade?.id ?? 0);
   // 命中 DUPLICATE_TRADE 时暂存待重试的交易，由确认框引导 allow_duplicate 重试
@@ -228,8 +235,69 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
 
   const resetTradeForm = () => {
     setIsDialogOpen(false);
-    setFormData({ product_code: "", market: "", platform_code: "", cash_platform_code: "", shares: "", amount: "", price: "", fee: "", trade_date: toDateOnly(new Date()) });
+    setFormData({ product_code: "", market: "", platform_code: "", cash_platform_code: "", shares: "", amount: "", net_amount: "", price: "", fee: "", trade_date: toDateOnly(new Date()) });
+    setAmountAnchor("actual");
   };
+
+  // 买入金额双字段联动（#193）：手改字段保留原始输入并记锚点，另一字段回填埋入量化派生值；
+  // fee 变更按锚点重算。创建与编辑表单同构，仅状态载体不同
+  const onBuyFieldChange = (changed: "actual" | "net", value: string) => {
+    setAmountAnchor(changed);
+    const fields = changed === "actual"
+      ? { actual: value, net: formData.net_amount, fee: formData.fee }
+      : { actual: formData.amount, net: value, fee: formData.fee };
+    const r = applyBuyAmountLinkage(changed, changed, fields);
+    setFormData({ ...formData, amount: r.actual, net_amount: r.net });
+  };
+
+  const onBuyFeeChange = (value: string) => {
+    const r = applyBuyAmountLinkage("fee", amountAnchor, {
+      actual: formData.amount,
+      net: formData.net_amount,
+      fee: value,
+    });
+    setFormData({ ...formData, fee: value, amount: r.actual, net_amount: r.net });
+  };
+
+  const onEditBuyFieldChange = (changed: "actual" | "net", value: string) => {
+    setEditAmountAnchor(changed);
+    const fields = changed === "actual"
+      ? { actual: value, net: editFormData.net_amount, fee: editFormData.fee }
+      : { actual: editFormData.amount, net: value, fee: editFormData.fee };
+    const r = applyBuyAmountLinkage(changed, changed, fields);
+    setEditFormData({ ...editFormData, amount: r.actual, net_amount: r.net });
+  };
+
+  const onEditBuyFeeChange = (value: string) => {
+    const r = applyBuyAmountLinkage("fee", editAmountAnchor, {
+      actual: editFormData.amount,
+      net: editFormData.net_amount,
+      fee: value,
+    });
+    setEditFormData({ ...editFormData, fee: value, amount: r.actual, net_amount: r.net });
+  };
+
+  // 派生量与阻断校验（#193）：买入净额 ≤ 0 阻断提交；卖出有价时展示毛额/到手、到手 ≤ 0 阻断
+  //（镜像后端 trade_service 口径：买入净额=实付−手续费，卖出到手=quantize(份额×价格)−手续费）
+  const createBuyNet = netFromActual(formData.amount, formData.fee);
+  const createBuyNetInvalid = tradeType === "buy" && createBuyNet !== null && createBuyNet <= 0;
+  const createSellDerived =
+    tradeType === "sell"
+      ? sellDerivedAmounts(formData.shares, formData.price, formData.fee)
+      : null;
+  const createSellNetInvalid =
+    tradeType === "sell" && createSellDerived !== null && createSellDerived.actualReceived <= 0;
+  const editBuyNet = netFromActual(editFormData.amount, editFormData.fee);
+  const editBuyNetInvalid =
+    editingTrade?.trade_type === "buy" && editBuyNet !== null && editBuyNet <= 0;
+  const editSellDerived =
+    editingTrade?.trade_type === "sell"
+      ? sellDerivedAmounts(editFormData.shares, editFormData.price, editFormData.fee)
+      : null;
+  const editSellNetInvalid =
+    editingTrade?.trade_type === "sell" &&
+    editSellDerived !== null &&
+    editSellDerived.actualReceived <= 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,12 +332,16 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
   };
 
   // 打开编辑 Dialog 并按方向预填（#174）：买入预填金额、卖出预填份额
-  // 买入预填 actual_amount（#182 D1：提交与后端均为含费现金支出口径，预填净额会造成编辑即变值）
+  // 买入预填双维度（#193）：实际=actual_amount（#182 D1 含费口径）、净投入=amount，
+  // 两持久化值差恒为 fee（后端不变量），锚点默认实际字段
   const openEditDialog = (trade: Trade) => {
     setEditingTrade(trade);
+    setEditAmountAnchor("actual");
     setEditFormData({
       amount:
         trade.trade_type === "buy" ? String(trade.actual_amount ?? trade.amount ?? "") : "",
+      net_amount:
+        trade.trade_type === "buy" && trade.amount != null ? String(trade.amount) : "",
       shares: trade.trade_type === "sell" ? String(trade.shares ?? "") : "",
       price: trade.price != null ? String(trade.price) : "",
       fee: trade.fee ? String(trade.fee) : "",
@@ -685,29 +757,74 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                   />
                 </div>
                 {tradeType === "buy" ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="amount">金额（元）</Label>
-                    <Input
-                      id="amount"
-                      type="number"
-                      step="0.01"
-                      value={formData.amount}
-                      onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                      required
-                    />
-                  </div>
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="amount">实际支付金额（含费，元）</Label>
+                      <Input
+                        id="amount"
+                        type="number"
+                        step="0.01"
+                        value={formData.amount}
+                        onChange={(e) => onBuyFieldChange("actual", e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="net_amount">净投入金额（扣费后，元）</Label>
+                      <Input
+                        id="net_amount"
+                        type="number"
+                        step="0.01"
+                        value={formData.net_amount}
+                        onChange={(e) => onBuyFieldChange("net", e.target.value)}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        净投入 = 实付 − 手续费，双向自动联动；提交以实付（含费）为准
+                      </p>
+                    </div>
+                    {createBuyNetInvalid && (
+                      <Alert variant="destructive">
+                        <AlertDescription>
+                          净投入金额需大于 0：手续费不能不小于实际支付金额
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
                 ) : (
-                  <div className="space-y-2">
-                    <Label htmlFor="shares">份额</Label>
-                    <Input
-                      id="shares"
-                      type="number"
-                      step="0.01"
-                      value={formData.shares}
-                      onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
-                      required
-                    />
-                  </div>
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="shares">份额</Label>
+                      <Input
+                        id="shares"
+                        type="number"
+                        step="0.01"
+                        value={formData.shares}
+                        onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
+                        required
+                      />
+                    </div>
+                    {/* 卖出金额为纯派生量（#190）：只读展示毛额/到手，与后端落库口径一致；场外未填价不展示 */}
+                    {createSellDerived && (
+                      <div className="space-y-1 rounded-md bg-muted p-3 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">毛额（份额×价格）</span>
+                          <span>{formatCurrency(createSellDerived.gross)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">实际到账（毛额−手续费）</span>
+                          <span>{formatCurrency(createSellDerived.actualReceived)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {createSellNetInvalid && (
+                      <Alert variant="destructive">
+                        <AlertDescription>
+                          实际到账需大于 0：手续费不能不小于卖出毛额
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
                 )}
                 <div className="space-y-2">
                   <Label htmlFor="price">价格</Label>
@@ -727,7 +844,11 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                     type="number"
                     step="0.01"
                     value={formData.fee}
-                    onChange={(e) => setFormData({ ...formData, fee: e.target.value })}
+                    onChange={(e) =>
+                      tradeType === "buy"
+                        ? onBuyFeeChange(e.target.value)
+                        : setFormData({ ...formData, fee: e.target.value })
+                    }
                     placeholder="默认 0"
                   />
                 </div>
@@ -744,7 +865,12 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
               <DialogFooter>
                 <Button
                   type="submit"
-                  disabled={createTrade.isPending || !formData.product_code}
+                  disabled={
+                    createTrade.isPending ||
+                    !formData.product_code ||
+                    createBuyNetInvalid ||
+                    createSellNetInvalid
+                  }
                 >
                   {createTrade.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   提交交易
@@ -879,27 +1005,70 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                   </div>
                 </div>
                 {editingTrade.trade_type === "buy" ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="edit_amount">金额（元）</Label>
-                    <Input
-                      id="edit_amount"
-                      type="number"
-                      step="0.01"
-                      value={editFormData.amount}
-                      onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
-                    />
-                  </div>
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit_amount">实际支付金额（含费，元）</Label>
+                      <Input
+                        id="edit_amount"
+                        type="number"
+                        step="0.01"
+                        value={editFormData.amount}
+                        onChange={(e) => onEditBuyFieldChange("actual", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit_net_amount">净投入金额（扣费后，元）</Label>
+                      <Input
+                        id="edit_net_amount"
+                        type="number"
+                        step="0.01"
+                        value={editFormData.net_amount}
+                        onChange={(e) => onEditBuyFieldChange("net", e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        净投入 = 实付 − 手续费，双向自动联动；保存以实付（含费）为准
+                      </p>
+                    </div>
+                    {editBuyNetInvalid && (
+                      <Alert variant="destructive">
+                        <AlertDescription>
+                          净投入金额需大于 0：手续费不能不小于实际支付金额
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
                 ) : (
-                  <div className="space-y-2">
-                    <Label htmlFor="edit_shares">份额</Label>
-                    <Input
-                      id="edit_shares"
-                      type="number"
-                      step="0.01"
-                      value={editFormData.shares}
-                      onChange={(e) => setEditFormData({ ...editFormData, shares: e.target.value })}
-                    />
-                  </div>
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit_shares">份额</Label>
+                      <Input
+                        id="edit_shares"
+                        type="number"
+                        step="0.01"
+                        value={editFormData.shares}
+                        onChange={(e) => setEditFormData({ ...editFormData, shares: e.target.value })}
+                      />
+                    </div>
+                    {editSellDerived && (
+                      <div className="space-y-1 rounded-md bg-muted p-3 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">毛额（份额×价格）</span>
+                          <span>{formatCurrency(editSellDerived.gross)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">实际到账（毛额−手续费）</span>
+                          <span>{formatCurrency(editSellDerived.actualReceived)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {editSellNetInvalid && (
+                      <Alert variant="destructive">
+                        <AlertDescription>
+                          实际到账需大于 0：手续费不能不小于卖出毛额
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
                 )}
                 <div className="space-y-2">
                   <Label htmlFor="edit_price">价格</Label>
@@ -919,7 +1088,11 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                     type="number"
                     step="0.01"
                     value={editFormData.fee}
-                    onChange={(e) => setEditFormData({ ...editFormData, fee: e.target.value })}
+                    onChange={(e) =>
+                      editingTrade.trade_type === "buy"
+                        ? onEditBuyFeeChange(e.target.value)
+                        : setEditFormData({ ...editFormData, fee: e.target.value })
+                    }
                     placeholder="默认 0"
                   />
                 </div>
@@ -942,7 +1115,10 @@ export default function TradesContent({ basePath, variant = "desktop" }: TradesC
                 </div>
               </div>
               <DialogFooter>
-                <Button type="submit" disabled={updateTrade.isPending}>
+                <Button
+                  type="submit"
+                  disabled={updateTrade.isPending || editBuyNetInvalid || editSellNetInvalid}
+                >
                   {updateTrade.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   保存修改
                 </Button>

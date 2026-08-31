@@ -318,7 +318,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
       test.skip(true, '环境中没有产品数据');
     }
     await productRows.first().click();
-    await dlg.getByLabel('金额（元）').fill('1000');
+    await dlg.getByLabel('实际支付金额（含费，元）').fill('1000');
 
     // 提交 → 前端拦截：校验 toast 出现、Dialog 保持打开、未发出创建请求
     let createRequested = false;
@@ -539,7 +539,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     test.skip(options.length === 0, '环境中没有平台数据');
     await pickOption(popover, options[0].code);
 
-    await dlg.getByLabel('金额（元）').fill('1000');
+    await dlg.getByLabel('实际支付金额（含费，元）').fill('1000');
 
     // 拦截创建请求并 abort：只取 body 做断言，不落任何数据
     let postBody: string | null = null;
