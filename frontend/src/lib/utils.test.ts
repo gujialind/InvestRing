@@ -17,6 +17,7 @@ import {
   parseDateOnly,
   formatDate,
   formatMarketName,
+  formatProductName,
   truncateText,
 } from "@/lib/utils";
 
@@ -172,6 +173,13 @@ describe("其他工具", () => {
     expect(formatMarketName("CN_EXCHANGE")).toBe("A股场内");
     expect(formatMarketName("UNKNOWN")).toBe("UNKNOWN");
     expect(formatMarketName(null)).toBe("--");
+  });
+
+  it("formatProductName 双信息与回退", () => {
+    expect(formatProductName("某基金", "000001")).toBe("某基金（000001）");
+    expect(formatProductName(null, "000001")).toBe("000001");
+    expect(formatProductName("某基金", "")).toBe("--");
+    expect(formatProductName(null, null)).toBe("--");
   });
 
   it("truncateText", () => {

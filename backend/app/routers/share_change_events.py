@@ -6,7 +6,6 @@ from typing import Optional
 import logging
 from app.database import get_db
 from app.models.share_change_event import ShareChangeEvent
-from app.models.product import Product
 from app.schemas.share_change_event import (
     ShareChangeEventCreate,
     ShareChangeEventUpdate,
@@ -15,6 +14,7 @@ from app.schemas.share_change_event import (
 )
 from app.dependencies import get_current_user, get_current_admin
 from app.services.exceptions import BusinessError
+from app.services.product_service import build_product_name_map
 from app.services.share_change_event_service import (
     create_share_change_event as create_event_service,
     update_share_change_event as update_event_service,
@@ -89,18 +89,9 @@ def get_share_change_events(
         query = query.filter(ShareChangeEvent.ex_date <= ex_date_end)
     total = query.count()
     items = query.order_by(ShareChangeEvent.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
-    # 读侧派生 product_name（#342，同 trades #175 模式）：批量查当页产品建
-    # name_map（防 N+1）；(code, market) 双键天然覆盖 LOF
+    # 读侧派生 product_name（#342，同 trades #175 模式）
     pairs = {(e.product_code, e.market) for e in items}
-    name_map = {}
-    if pairs:
-        codes = {c for c, _ in pairs if c}
-        name_map = {
-            (p.code, p.market): p.name
-            for p in db.query(Product.code, Product.market, Product.name)
-            .filter(Product.code.in_(codes)).all()
-            if (p.code, p.market) in pairs
-        }
+    name_map = build_product_name_map(db, pairs)
     enriched = [
         ShareChangeEventResponse.model_validate(e).model_copy(
             update={"product_name": name_map.get((e.product_code, e.market))}

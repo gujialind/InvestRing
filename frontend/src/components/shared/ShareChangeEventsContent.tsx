@@ -32,7 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatSharesUnit, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
+import { formatCurrency, formatSharesUnit, formatMarketName, formatProductName, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
 import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle, Undo, Filter, Pencil } from "lucide-react";
 import Link from "next/link";
 import { ShareChangeEventCreate, ApiException } from "@/lib/api";
@@ -605,9 +605,7 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
                       <TableRow key={event.id}>
                         <TableCell>{EVENT_TYPE_LABELS[event.event_type] || event.event_type}</TableCell>
                         <TableCell>
-                          {event.product_name
-                            ? `${event.product_name}（${event.product_code}）`
-                            : event.product_code || "--"}
+                          {formatProductName(event.product_name, event.product_code)}
                         </TableCell>
                         <TableCell>{formatMarketName(event.market)}</TableCell>
                         <TableCell>
