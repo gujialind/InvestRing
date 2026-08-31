@@ -26,7 +26,7 @@ export function useCreateShareChangeEvent(portfolioCode: string) {
     mutationFn: ({ data, forceCover }: { data: ShareChangeEventCreate; forceCover?: boolean }) =>
       shareChangeEventApi.create(data, { forceCover }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.list(portfolioCode) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
       addToast({
         type: "success",
         title: "创建成功",
@@ -55,7 +55,7 @@ export function useConfirmShareChangeEvent(portfolioCode: string) {
   return useMutation({
     mutationFn: (id: number) => shareChangeEventApi.confirm(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.list(portfolioCode) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
       addToast({
         type: "success",
         title: "确认成功",
@@ -80,7 +80,7 @@ export function useUnconfirmShareChangeEvent(portfolioCode: string) {
   return useMutation({
     mutationFn: (id: number) => shareChangeEventApi.unconfirm(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.list(portfolioCode) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
       addToast({
         type: "success",
         title: "取消确认成功",
@@ -105,7 +105,7 @@ export function useCancelShareChangeEvent(portfolioCode: string) {
   return useMutation({
     mutationFn: (id: number) => shareChangeEventApi.cancel(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.list(portfolioCode) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
       addToast({
         type: "success",
         title: "取消成功",
