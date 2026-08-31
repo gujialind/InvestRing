@@ -163,11 +163,6 @@ function PortfolioDetailInner() {
                 onActivateClick={() => activatePortfolio.mutate(code)}
                 isActivatePending={activatePortfolio.isPending}
               />
-              {!isDraft && (
-                <Link href={`/portfolio/${code}/snapshots`}>
-                  <Button variant="outline">快照管理</Button>
-                </Link>
-              )}
             </div>
           )}
         </div>
