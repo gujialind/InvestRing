@@ -11,6 +11,8 @@ export interface ShareChangeEvent {
   parent_event_id?: number;
   product_code?: string;
   market?: string;
+  /** 读侧派生（非 DB 列）：仅 list 端点填充，单对象端点恒为 undefined（#342） */
+  product_name?: string;
   event_source?: string; // manual / tushare
   entitlement_shares?: number;
   shares_before?: number;

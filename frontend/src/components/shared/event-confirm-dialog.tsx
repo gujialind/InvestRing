@@ -1,7 +1,6 @@
 "use client";
 
 import { ConfirmInfoDialog, InfoRow } from "@/components/shared/ConfirmInfoDialog";
-import { useProduct } from "@/hooks/useProduct";
 import type { ShareChangeEvent } from "@/types/share-change-event";
 import type { EventType } from "@/types/common";
 import { formatCurrency, formatShares, formatDate } from "@/lib/utils";
@@ -36,14 +35,11 @@ export function EventConfirmDialog({
   onConfirm,
   isConfirming = false,
 }: EventConfirmDialogProps) {
-  // 产品名按单条事件懒加载（enabled 由 code 门控）：整页 productNameMap 方案受
-  // page_size=100 截断，产品超限时弹窗只剩裸代码（#257 评审）；market 用于 LOF 消歧，
-  // 查询失败/无产品时回退展示裸代码
-  const { data: product } = useProduct(event?.product_code ?? "", event?.market || undefined);
-  // product_code 类型上可选：缺失时展示 "--"（InfoRow 不做空值兜底）
+  // 产品名直接取列表行自带的 product_name（#342 后端读侧派生）：
+  // 替代原按单条事件懒加载 useProduct 的权宜（#257）；缺失时回退裸代码
   const getProductName = () => {
     if (!event?.product_code) return "--";
-    return product ? `${product.name}（${event.product_code}）` : event.product_code;
+    return event.product_name ? `${event.product_name}（${event.product_code}）` : event.product_code;
   };
 
   return (

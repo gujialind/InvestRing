@@ -32,17 +32,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatSharesUnit, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
-import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle, Undo, Filter } from "lucide-react";
+import { formatCurrency, formatSharesUnit, formatMarketName, toDateOnly, parseDateOnly, getStatusBadgeVariant, cn } from "@/lib/utils";
+import { Plus, ArrowLeft, Loader2, CheckCircle, XCircle, Undo, Filter, Pencil } from "lucide-react";
 import Link from "next/link";
 import { ShareChangeEventCreate, ApiException } from "@/lib/api";
 import { platformApi } from "@/lib/api";
 import { EventType } from "@/types/common";
+import type { ShareChangeEvent } from "@/types/share-change-event";
 import { useUIStore } from "@/stores/uiStore";
 import { useQuery } from "@tanstack/react-query";
 import {
   useShareChangeEventList,
   useCreateShareChangeEvent,
+  useUpdateShareChangeEvent,
   useConfirmShareChangeEvent,
   useUnconfirmShareChangeEvent,
   useCancelShareChangeEvent,
@@ -66,6 +68,8 @@ import {
 import SearchablePlatformSelect from "@/components/shared/SearchablePlatformSelect";
 import SearchableProductSelect from "@/components/shared/SearchableProductSelect";
 import { EVENT_TYPE_LABELS, EventConfirmDialog } from "@/components/shared/event-confirm-dialog";
+import { EventEditDialog } from "@/components/shared/event-edit-dialog";
+import NameCodeCell from "@/components/shared/NameCodeCell";
 
 interface ShareChangeEventsContentProps {
   /** 链接前缀：桌面 "/portfolio"，移动 "/m/portfolio" */
@@ -184,11 +188,14 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
     [platformsData?.items]
   );
 
-  // 创建/确认/取消确认/取消走统一 hooks
+  // 创建/更新/确认/取消确认/取消走统一 hooks
   const createEvent = useCreateShareChangeEvent(code);
   const confirmEvent = useConfirmShareChangeEvent(code);
   const unconfirmEvent = useUnconfirmShareChangeEvent(code);
   const cancelEvent = useCancelShareChangeEvent(code);
+  // 编辑入口（#342）：仅 pending 父记录可编辑；顶层持 hook（弹窗关闭时 id=0 不触发）
+  const [editingEvent, setEditingEvent] = useState<ShareChangeEvent | null>(null);
+  const updateEvent = useUpdateShareChangeEvent(code, editingEvent?.id ?? 0);
   // 取消确认二次确认弹窗（#274；后端保护：SNAPSHOT_DEPENDENCY / CANNOT_UNCONFIRM_CHILD）
   const [unconfirmEventId, setUnconfirmEventId] = useState<number | null>(null);
   // 命中 PLATFORM_NOT_COVERED 时暂存待强制提交的数据，由确认框引导 force_cover 重试
@@ -582,7 +589,8 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
                   <TableHeader>
                     <TableRow>
                       <TableHead>事件类型</TableHead>
-                      <TableHead>产品代码</TableHead>
+                      <TableHead>产品</TableHead>
+                      <TableHead>市场</TableHead>
                       <TableHead>平台</TableHead>
                       <TableHead>除息日</TableHead>
                       <TableHead>权益登记日</TableHead>
@@ -596,8 +604,19 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
                     {events.map((event) => (
                       <TableRow key={event.id}>
                         <TableCell>{EVENT_TYPE_LABELS[event.event_type] || event.event_type}</TableCell>
-                        <TableCell>{event.product_code || "--"}</TableCell>
-                        <TableCell>{event.platform_code || "全部"}</TableCell>
+                        <TableCell>
+                          {event.product_name
+                            ? `${event.product_name}（${event.product_code}）`
+                            : event.product_code || "--"}
+                        </TableCell>
+                        <TableCell>{formatMarketName(event.market)}</TableCell>
+                        <TableCell>
+                          {event.platform_code ? (
+                            <NameCodeCell code={event.platform_code} nameMap={platformNameMap} />
+                          ) : (
+                            "全部"
+                          )}
+                        </TableCell>
                         <TableCell>{event.ex_date}</TableCell>
                         <TableCell>{event.entitlement_date}</TableCell>
                         <TableCell className="number-cell">
@@ -615,9 +634,21 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
                           <div className="flex gap-2">
                             {event.status === "pending" && (
                               <>
+                                {/* 编辑（#342）：仅 pending 父记录；子记录恒为 confirmed，parent 守卫为防御性 */}
+                                {!event.parent_event_id && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    title="编辑"
+                                    onClick={() => setEditingEvent(event)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   variant="outline"
+                                  title="确认"
                                   onClick={() => setConfirmEventId(event.id)}
                                 >
                                   <CheckCircle className="h-4 w-4 text-success" />
@@ -625,6 +656,7 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
                                 <Button
                                   size="sm"
                                   variant="outline"
+                                  title="取消"
                                   onClick={() => cancelEvent.mutate(event.id)}
                                   disabled={cancelEvent.isPending}
                                 >
@@ -691,6 +723,18 @@ export default function ShareChangeEventsContent({ basePath, variant = "desktop"
           if (confirmEventId === null) return;
           confirmEvent.mutate(confirmEventId, { onSuccess: () => setConfirmEventId(null) });
         }}
+      />
+
+      {/* #342：pending 事件编辑弹窗（PUT 直改，字段以 ShareChangeEventUpdate 为准） */}
+      <EventEditDialog
+        open={editingEvent !== null}
+        onOpenChange={(open) => !open && setEditingEvent(null)}
+        event={editingEvent}
+        platformNameMap={platformNameMap}
+        isSaving={updateEvent.isPending}
+        onSubmit={(payload) =>
+          updateEvent.mutate(payload, { onSuccess: () => setEditingEvent(null) })
+        }
       />
 
       {/* PLATFORM_NOT_COVERED 强制提交确认 */}
