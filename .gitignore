@@ -52,6 +52,7 @@ yarn.lock
 .apifox/
 .qoderignore
 .workbuddy
+.mimosa/
 
 # Hermes skills (project-level)
 skills/
@@ -101,6 +102,7 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/playwright/.cache/
 frontend/e2e/.auth/
+.playwright-cli/
 
 # Turborepo
 .turbo/
