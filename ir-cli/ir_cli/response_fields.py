@@ -77,6 +77,15 @@ RESPONSE_FIELDS: dict = {
             "fields": "*portfolio_code:str,*investor_code:str,*platform_code:str,*sub_type:str,*amount:num?,*shares:num?,*unit_price:num?,*apply_date:date,*confirm_date:date?,*status:str,notes:str?,*id:int,created_at:datetime?,updated_at:datetime?"
         }
     },
+    "share-event": {
+        "list": {
+            "shape": "list",
+            "fields": "portfolio_code:str,event_type:str,ex_date:date,entitlement_date:date,platform_code:str?,parent_event_id:int?,product_code:str?,market:str?,event_source:str,entitlement_shares:num?,shares_before:num?,shares_change:num?,shares_after:num?,cash_change:num?,cash_product_code:str?,div_cash:num?,reinvest_nav:num?,ratio:num?,status:str,tushare_event_id:str?,notes:str?,id:int,created_at:datetime?,updated_at:datetime?,product_name:str?",
+            "notes": {
+                "product_name": "读侧派生：仅 list 端点 join 产品表填充，产品缺失为null；get/单对象端点恒为null"
+            }
+        }
+    },
     "asset-classification": {
         "list": {
             "shape": "list",

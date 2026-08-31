@@ -55,6 +55,7 @@ export const queryKeys = {
   },
   shareChangeEvents: {
     root: ["share-change-events"] as const,
+    byPortfolio: (portfolioCode: string) => ["share-change-events", portfolioCode] as const,
     list: (portfolioCode: string, params?: unknown) =>
       ["share-change-events", portfolioCode, params] as const,
   },

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from datetime import date, datetime
 
 
@@ -49,6 +49,18 @@ class ShareChangeEventResponse(ShareChangeEventBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # product_name 读侧派生（非 DB 列）：仅 list 端点批量 join 产品表填充，
+    # create/get/update/confirm/unconfirm 响应恒为 None；同 positions 模式（#175/#342）
+    product_name: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class PaginatedShareEventResponse(BaseModel):
+    """份额变动事件列表分页响应（#342）。items 元素复用 ShareChangeEventResponse：
+    product_name 仅 list 端点填充，单对象端点恒为 None（见 ShareChangeEventResponse 注释）。"""
+    items: List[ShareChangeEventResponse]
+    total: int
+    page: int
+    page_size: int

@@ -78,4 +78,66 @@ test.describe('移动端份额变动事件页（#276）', () => {
     await expect(dlg.getByText('每份分红金额（元）')).toBeVisible();
     await page.keyboard.press('Escape');
   });
+
+  test('待确认事件编辑入口：列表名称展示与就地修改（#342，联动 #344 刷新）', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile', '仅移动端项目');
+    const code = await gotoMobilePortfolioDetail(page);
+
+    // API 造数：种子不保证有事件数据，经 REST 造一条 pending 现金分红事件；
+    // 双日期取种子日历内固定交易日（2025-2026 工作日，见 seed_base）
+    const token = await page.evaluate(() => localStorage.getItem('token'));
+    if (!token) test.skip(true, '无法获取登录 token');
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const products = await (await page.request.get('/api/products?page_size=1', { headers })).json();
+    const platforms = await (await page.request.get('/api/platforms?page_size=1', { headers })).json();
+    const product = products.items?.[0];
+    const platform = platforms.items?.[0];
+    if (!product || !platform) test.skip(true, '环境中没有产品/平台数据');
+
+    const createResp = await page.request.post('/api/share-change-events', {
+      headers,
+      data: {
+        portfolio_code: code,
+        product_code: product.code,
+        market: product.market,
+        event_type: 'cash_dividend',
+        ex_date: '2026-09-02',
+        entitlement_date: '2026-09-01',
+        platform_code: platform.code,
+        div_cash: 0.5,
+      },
+    });
+    if (!createResp.ok()) test.skip(true, `造数失败: ${createResp.status()} ${await createResp.text()}`);
+    const created = await createResp.json();
+
+    try {
+      await page.getByRole('link', { name: '份额变动事件' }).click();
+
+      // 列表展示（#342）：默认无日期筛选可见新事件；产品列「名称（代码）」
+      const row = page.locator('table tbody tr').filter({ hasText: created.product_code }).first();
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      if (product.name) {
+        await expect(row.getByText(`${product.name}（${created.product_code}）`)).toBeVisible();
+      }
+
+      // pending 父记录有编辑入口
+      await row.locator('button[title="编辑"]').click();
+      const dlg = page.locator('[role="dialog"]').filter({ hasText: '编辑份额变动事件' }).first();
+      await expect(dlg).toBeVisible();
+      // 只读摘要含事件类型
+      await expect(dlg.getByText('现金分红').first()).toBeVisible();
+
+      // 修改每份分红金额并保存
+      await dlg.locator('#edit_div_cash').fill('0.8');
+      await dlg.getByRole('button', { name: '保存' }).click();
+      await expect(dlg).toBeHidden();
+
+      // 保存成功提示 + 行仍在（列表经 byPortfolio 失效即时刷新，无需手动刷新页面）
+      await expect(page.getByText('更新成功')).toBeVisible();
+      await expect(row).toBeVisible();
+    } finally {
+      await page.request.delete(`/api/share-change-events/${created.id}`, { headers });
+    }
+  });
 });

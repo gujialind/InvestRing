@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { shareChangeEventApi, getErrorMessage, ApiException, ShareChangeEventListParams } from "@/lib/api";
-import { ShareChangeEventCreate } from "@/types/share-change-event";
+import { ShareChangeEventCreate, ShareChangeEventUpdate } from "@/types/share-change-event";
 import { queryKeys } from "@/lib/queryKeys";
 import { useUIStore } from "@/stores/uiStore";
 
@@ -26,7 +26,7 @@ export function useCreateShareChangeEvent(portfolioCode: string) {
     mutationFn: ({ data, forceCover }: { data: ShareChangeEventCreate; forceCover?: boolean }) =>
       shareChangeEventApi.create(data, { forceCover }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.list(portfolioCode) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
       addToast({
         type: "success",
         title: "创建成功",
@@ -47,6 +47,32 @@ export function useCreateShareChangeEvent(portfolioCode: string) {
   });
 }
 
+// 更新份额变动事件 Hook（#342：pending 事件 PUT 直改，同调仓 #182 / 申赎 #202 口径）
+// 注：pending 事件不影响持仓/可用现金，无需失效 positions（区别于 useUpdateTrade）
+export function useUpdateShareChangeEvent(portfolioCode: string, id: number) {
+  const queryClient = useQueryClient();
+  const addToast = useUIStore((state) => state.addToast);
+
+  return useMutation({
+    mutationFn: (data: ShareChangeEventUpdate) => shareChangeEventApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
+      addToast({
+        type: "success",
+        title: "更新成功",
+        message: "份额变动事件已更新",
+      });
+    },
+    onError: (error: unknown) => {
+      addToast({
+        type: "error",
+        title: "更新失败",
+        message: getErrorMessage(error, "请检查输入数据后重试"),
+      });
+    },
+  });
+}
+
 // 确认份额变动事件 Hook
 export function useConfirmShareChangeEvent(portfolioCode: string) {
   const queryClient = useQueryClient();
@@ -55,7 +81,7 @@ export function useConfirmShareChangeEvent(portfolioCode: string) {
   return useMutation({
     mutationFn: (id: number) => shareChangeEventApi.confirm(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.list(portfolioCode) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
       addToast({
         type: "success",
         title: "确认成功",
@@ -80,7 +106,7 @@ export function useUnconfirmShareChangeEvent(portfolioCode: string) {
   return useMutation({
     mutationFn: (id: number) => shareChangeEventApi.unconfirm(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.list(portfolioCode) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
       addToast({
         type: "success",
         title: "取消确认成功",
@@ -105,7 +131,7 @@ export function useCancelShareChangeEvent(portfolioCode: string) {
   return useMutation({
     mutationFn: (id: number) => shareChangeEventApi.cancel(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.list(portfolioCode) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shareChangeEvents.byPortfolio(portfolioCode) });
       addToast({
         type: "success",
         title: "取消成功",

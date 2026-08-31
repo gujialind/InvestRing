@@ -40,6 +40,7 @@ ERROR_HINTS: dict = {
     "AUTH_REQUIRED": "执行 ir auth login 登录后重试",
     "NOT_FOUND": "检查资源标识拼写；产品类先用 ir product list 查询可用产品代码与市场",
     "PRODUCT_NOT_FOUND": "检查产品代码与市场，如 --product-code 022959.OF --market CN_OTC，用 ir product list 查询可用产品",
+    "PRODUCT_REQUIRED": "该操作必须指定产品: 加 --product-code <产品代码>，用 ir product list 查询可用产品",
     "MARKET_AMBIGUOUS": "产品存在多个市场，请指定 --market；用 ir product list 查询产品可用市场",
     "INVALID_NAV_LAG_DAYS": "nav_lag_days 必须 >=0；场内（market=CN_EXCHANGE）必须为 0；显式传 null 拒绝；修正后重试: ir product update <code> <market> --nav-lag-days <N>",
     "INVALID_CONFIRM_DAYS": "confirm_days 必须 >=0；场内（market=CN_EXCHANGE）必须为 0；显式传 null 拒绝；修正后重试: ir product update <code> <market> --confirm-days <N>",

@@ -12,6 +12,7 @@ from tests.factories import (
     create_value_snapshot, ensure_trading_day,
 )
 from app.models.share_change_event import ShareChangeEvent
+from app.schemas.share_change_event import ShareChangeEventResponse
 
 
 class TestShareChangeEventCreate:
@@ -874,6 +875,105 @@ class TestShareEventMarketResolve:
         assert detail["details"]["available_markets"] == ["CN_OTC"]
 
 
+class TestShareEventInputNormalize:
+    """issue #343：platform_code 空串归一为 NULL（基金级）；product_code 必填"""
+
+    ENT = date(2025, 11, 5)
+    EX = date(2025, 11, 6)
+
+    def _setup(self, test_db, portfolio_code, product_code):
+        create_portfolio(test_db, code=portfolio_code, status="active")
+        create_product(test_db, code=product_code, market="CN_OTC",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        ensure_trading_day(test_db, self.ENT, is_open=True)
+        ensure_trading_day(test_db, self.EX, is_open=True)
+
+    def test_fund_level_empty_platform_code_normalized(self, client, admin_headers, test_db):
+        """前端实际场景：基金级事件传空串 platform_code → 归一为 NULL，创建成功（原 500 复现路径）"""
+        self._setup(test_db, "SCN_P1", "SCN_F1")
+
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "SCN_P1",
+                "product_code": "SCN_F1",
+                "market": "CN_OTC",
+                "event_type": "share_split",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "ratio": 2.0,
+                "platform_code": "",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201)
+        assert resp.json()["platform_code"] is None
+        event = (
+            test_db.query(ShareChangeEvent)
+            .filter(ShareChangeEvent.portfolio_code == "SCN_P1")
+            .first()
+        )
+        assert event is not None and event.platform_code is None
+
+    def test_platform_level_empty_platform_code_required(self, client, admin_headers, test_db):
+        """平台级事件传空串 platform_code：仍报 422 PLATFORM_REQUIRED 而非 500"""
+        self._setup(test_db, "SCN_P2", "SCN_F2")
+
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "SCN_P2",
+                "product_code": "SCN_F2",
+                "market": "CN_OTC",
+                "event_type": "cash_dividend",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "div_cash": 0.5,
+                "platform_code": "",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "PLATFORM_REQUIRED"
+
+    def test_missing_product_code_required(self, client, admin_headers, test_db):
+        """省略 product_code：422 PRODUCT_REQUIRED（原 NOT NULL 外键违约 500）"""
+        self._setup(test_db, "SCN_P3", "SCN_F3")
+
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "SCN_P3",
+                "event_type": "share_split",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "ratio": 2.0,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "PRODUCT_REQUIRED"
+
+    def test_empty_product_code_required(self, client, admin_headers, test_db):
+        """空串 product_code 同样报 PRODUCT_REQUIRED"""
+        self._setup(test_db, "SCN_P4", "SCN_F4")
+
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": "SCN_P4",
+                "product_code": "",
+                "event_type": "share_split",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "ratio": 2.0,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "PRODUCT_REQUIRED"
+
+
 class TestShareChangeEventListFilter:
     """列表服务端筛选 + 分页（#274，形态对齐调仓列表 #126/#155）"""
 
@@ -982,3 +1082,76 @@ class TestShareChangeEventListFilter:
         page2 = self._list(client, admin_headers, "&status=pending&page_size=1&page=2")
         assert len(page2["items"]) == 1
         assert page1["items"][0]["id"] != page2["items"][0]["id"]
+
+
+class TestShareEventListProductName:
+    """list 响应读侧派生 product_name（#342，同调仓 #175 口径）"""
+
+    ENT = date(2025, 11, 10)
+    EX = date(2025, 11, 11)
+
+    def _create_split(self, client, admin_headers, portfolio_code, product_code):
+        resp = client.post(
+            "/api/share-change-events",
+            json={
+                "portfolio_code": portfolio_code,
+                "product_code": product_code,
+                "market": "CN_OTC",
+                "event_type": "share_split",
+                "ex_date": self.EX.isoformat(),
+                "entitlement_date": self.ENT.isoformat(),
+                "ratio": 2.0,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), f"Response: {resp.status_code} {resp.json()}"
+
+    def test_list_events_includes_product_name(self, client, admin_headers, test_db):
+        """两个不同产品的基金级事件，list 每条 item 均应带各自 product_name"""
+        create_portfolio(test_db, code="EPN_P1", status="active")
+        create_product(test_db, code="EPN_F1", market="CN_OTC", name="测试基金一",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        create_product(test_db, code="EPN_F2", market="CN_OTC", name="测试基金二",
+                       product_type="OEF", asset_class_code="ASSET_STOCK")
+        ensure_trading_day(test_db, self.ENT, is_open=True)
+        ensure_trading_day(test_db, self.EX, is_open=True)
+        self._create_split(client, admin_headers, "EPN_P1", "EPN_F1")
+        self._create_split(client, admin_headers, "EPN_P1", "EPN_F2")
+
+        resp = client.get("/api/share-change-events?portfolio_code=EPN_P1", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        name_by_product = {item["product_code"]: item["product_name"] for item in data["items"]}
+        assert name_by_product == {"EPN_F1": "测试基金一", "EPN_F2": "测试基金二"}
+        # 字段完整性（#183 口径）：挂 response_model 后响应键与 schema 声明一一对应
+        assert set(data["items"][0].keys()) == set(ShareChangeEventResponse.model_fields.keys())
+
+
+class TestShareEventOpenApiContract:
+    """openapi 契约守护（#342，同 #183 口径）：事件列表分页响应结构化"""
+
+    def test_share_events_list_openapi_references_paginated_schema(self, client):
+        """openapi.json 中 /api/share-change-events GET 200 应引用
+        PaginatedShareEventResponse，且 items 元素指向 ShareChangeEventResponse
+        （含 product_name），而非裸 ORM 空 schema。"""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        spec = resp.json()
+
+        get_op = spec["paths"]["/api/share-change-events"]["get"]
+        schema_ref = get_op["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema_ref == {"$ref": "#/components/schemas/PaginatedShareEventResponse"}
+
+        schemas = spec["components"]["schemas"]
+        paginated = schemas["PaginatedShareEventResponse"]
+        assert set(paginated["required"]) == {"items", "total", "page", "page_size"}
+        assert set(paginated["properties"].keys()) == {
+            "items", "total", "page", "page_size",
+        }
+        assert paginated["properties"]["items"]["items"] == {
+            "$ref": "#/components/schemas/ShareChangeEventResponse"
+        }
+
+        event_props = schemas["ShareChangeEventResponse"]["properties"]
+        assert "product_name" in event_props  # 防止误删读侧派生字段声明
