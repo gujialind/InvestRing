@@ -16,8 +16,9 @@
  * skip。种子零现金而买入创建按扣款平台校验可用现金，落库用例先经 API
  * 「申购+确认」向所选平台注入现金（申购确认日 T+1，申请日取交易日前一工作日，
  * 种子日历工作日即交易日；首购按净值 1.0 确认，残留申购不清理、重复注入无害）。
- * 落库用例真实创建一笔买入并在用例内删除清理，防止双 project（chromium
- * 与 mobile 同跑）撞 DUPLICATE_TRADE。提交契约用例经 page.route 拦截 + abort，
+ * 落库用例真实创建一笔买入并在用例内删除清理；创建前另经 API 清除同自然键
+ * 残留（上轮中途失败或 CI 重试的遗留），防双 project 时间交叠/重试撞
+ * DUPLICATE_TRADE。提交契约用例经 page.route 拦截 + abort，
  * 不落任何数据。双端复跑：TradesContent 为共享组件（「提交交易」Dialog 双端
  * 同构），mobile project 自动覆盖，无需单独用例。
  */
@@ -70,8 +71,8 @@ async function openTradeDialog(page: Page): Promise<{ dlg: Locator; portfolioCod
   return { dlg, portfolioCode };
 }
 
-/** 选中首个产品（可搜索下拉，无产品数据优雅 skip） */
-async function pickFirstProduct(page: Page, dlg: Locator): Promise<void> {
+/** 选中首个产品（可搜索下拉，无产品数据优雅 skip），返回所选 code/market */
+async function pickFirstProduct(page: Page, dlg: Locator): Promise<{ code: string; market: string }> {
   await dlg.locator('button[aria-haspopup="dialog"]', { hasText: '请选择产品' }).first().click();
   const popover = page
     .getByPlaceholder('搜索产品代码/名称')
@@ -82,7 +83,10 @@ async function pickFirstProduct(page: Page, dlg: Locator): Promise<void> {
   } catch {
     test.skip(true, '环境中没有产品数据');
   }
+  const code = (await firstOption.getAttribute('data-code')) ?? '';
+  const market = (await firstOption.getAttribute('data-market')) ?? '';
   await firstOption.click();
+  return { code, market };
 }
 
 /** 选中首个交易平台（无平台数据优雅 skip），返回所选平台 code。
@@ -117,6 +121,50 @@ function toISODate(d: Date): string {
 }
 
 /**
+ * 后端仅认 Authorization: Bearer 头（token 存 localStorage，无 cookie 回退），
+ * page.request 不会自动附带，须从页面 localStorage 显式读取后传递
+ */
+async function authHeaders(page: Page): Promise<{ Authorization: string }> {
+  const token = await page.evaluate(() => window.localStorage.getItem('token'));
+  expect(token, '页面 localStorage 中缺少登录 token，无法调用后端 API').toBeTruthy();
+  return { Authorization: `Bearer ${token}` };
+}
+
+/**
+ * 清除同自然键的残留 pending 买入（组合/产品/市场/平台/方向/交易日）。
+ * 用例中途失败或 CI 重试（retries: 2）会残留上一轮创建的交易，不清除则本轮
+ * 创建撞 DUPLICATE_TRADE（fullyParallel 双 project 时间交叠同样命中）。
+ */
+async function purgePendingSameBuys(
+  page: Page,
+  headers: { Authorization: string },
+  portfolioCode: string,
+  productCode: string,
+  market: string,
+  platformCode: string,
+  tradeDateISO: string,
+): Promise<void> {
+  const qs = new URLSearchParams({
+    portfolio_code: portfolioCode,
+    status: 'pending',
+    trade_type: 'buy',
+    product_code: productCode,
+    market,
+    platform_code: platformCode,
+    trade_date_start: tradeDateISO,
+    trade_date_end: tradeDateISO,
+    page_size: '50',
+  });
+  const listResp = await page.request.get(`/api/trades?${qs.toString()}`, { headers });
+  expect(listResp.ok(), `残留清理：查询失败 ${listResp.status()}`).toBeTruthy();
+  const { items } = (await listResp.json()) as { items: { id: number }[] };
+  for (const t of items) {
+    const delResp = await page.request.delete(`/api/trades/${t.id}`, { headers });
+    expect(delResp.ok(), `残留清理：删除 #${t.id} 失败 ${delResp.status()}`).toBeTruthy();
+  }
+}
+
+/**
  * 经 API「申购+确认」给指定平台注入可用现金（种子零现金，买入创建按扣款平台
  * 校验可用现金）。申购确认日为申请日下一交易日（T+1），故申请日取交易日前一
  * 工作日，使 CASH 腿 confirm_date 恰落交易日当天计入可用现金；种子日历工作日
@@ -125,16 +173,11 @@ function toISODate(d: Date): string {
  */
 async function injectCashViaSubscription(
   page: Page,
+  headers: { Authorization: string },
   portfolioCode: string,
   platformCode: string,
   tradeDateISO: string,
 ): Promise<void> {
-  // 后端仅认 Authorization: Bearer 头（token 存 localStorage，无 cookie 回退），
-  // page.request 不会自动附带，须显式传递
-  const token = await page.evaluate(() => window.localStorage.getItem('token'));
-  expect(token, '页面 localStorage 中缺少登录 token，无法注入现金').toBeTruthy();
-  const headers = { Authorization: `Bearer ${token}` };
-
   const apply = new Date(`${tradeDateISO}T00:00:00`);
   do {
     apply.setDate(apply.getDate() - 1);
@@ -286,9 +329,11 @@ test.describe('买入金额双字段联动（#193）', () => {
     }
     const tradeDate = toISODate(now);
     const { dlg, portfolioCode } = await openTradeDialog(page);
-    await pickFirstProduct(page, dlg);
+    const product = await pickFirstProduct(page, dlg);
     const platformCode = await pickFirstPlatform(page, dlg);
-    await injectCashViaSubscription(page, portfolioCode, platformCode, tradeDate);
+    const headers = await authHeaders(page);
+    await purgePendingSameBuys(page, headers, portfolioCode, product.code, product.market, platformCode, tradeDate);
+    await injectCashViaSubscription(page, headers, portfolioCode, platformCode, tradeDate);
 
     await actualInput(dlg).fill('1234.56');
     await feeInput(dlg).fill('5');
