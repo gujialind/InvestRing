@@ -13,13 +13,13 @@
 | 目录                                        | 内容                                                           |
 | ----------------------------------------- | ------------------------------------------------------------ |
 | `backend/`                                | FastAPI + SQLAlchemy 后端；含 `app/`（应用）、`alembic/`（迁移）、`tests/` |
-| `frontend/`                               | Next.js 前端（App Router，双端路由，技术栈见 §5）                          |
+| `frontend/`                               | Next.js 前端（App Router，双端路由，技术栈见 `frontend/AGENTS.md`）                |
 | `ir-cli/`                                 | 独立轻量 HTTP 客户端 CLI（typer + httpx）                             |
 | `nginx/`、`scripts/`、`docker-compose*.yml` | 部署与运维                                                        |
 
-**运行入口**：后端 `backend/app/main.py`（启动初始化行为读源码）；前端 `npm run dev`；`ir` CLI 的说明见 §6。
+**运行入口**：后端 `backend/app/main.py`（启动初始化行为读源码）；前端 `npm run dev`；`ir` CLI 的说明见 `ir-cli/AGENTS.md`。
 
-**模块指南分层**（issue #224）：各模块操作级细节（怎么跑测试/E2E、种子来源、契约流程、易踩坑）在 `backend/AGENTS.md`、`frontend/AGENTS.md`、`ir-cli/AGENTS.md`；本文件只保留全局业务约束与组织约定，两边不重复。
+**模块指南分层**（issue #224）：各模块的架构约定与操作级细节（怎么跑测试/E2E、种子来源、契约流程、易踩坑）在 `backend/AGENTS.md`、`frontend/AGENTS.md`、`ir-cli/AGENTS.md`；业务约束速查见 `docs/design/business-constraints.md`（改后端业务代码时经 Rule 自动提醒）。本文件只保留全局业务不变量与组织约定，不重复。
 
 ***
 
@@ -47,7 +47,7 @@
 | ------------ | ---------------------- | ------------------------------------------------------------------------- |
 | 交易（申赎/调仓/转移） | `trade`（CASH buy/sell） | `transfer_group` 关联同组记录                                                   |
 | 事件（现金分红等）    | `share_change_event`   | `cash_change` 字段，按 `ex_date` 生效                                           |
-| 手动重估         | `manual_market_value`  | 按日期绝对替换，不进 trade/event；优先级高于当日交易/事件，且作为后续快照增量基线；可删除，删除后需重算快照回退自然计算值（§7.5） |
+| 手动重估         | `manual_market_value`  | 按日期绝对替换，不进 trade/event；优先级高于当日交易/事件，且作为后续快照增量基线；可删除，删除后需重算快照回退自然计算值（易错陷阱见 `docs/design/business-constraints.md`） |
 
 各业务操作生成的 CASH trade：
 
@@ -83,7 +83,7 @@ calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_
 
 * **平台维度**：现金按平台分别追踪，`portfolio_position` 的 CASH 记录唯一约束为 `(portfolio_code, product_code, market, platform_code, snapshot_date)`；申购/赎回必须指定 `platform_code`（现金归属平台）。跨平台转移的状态机见 §3.3。
 
-* **在途资金虚拟产品**（#93）：`portfolio_position` 除 CASH 行外还有 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL` 两类现金行，每日独立计算、不继承前日（实现见 §4.3）。`IN_TRANSIT_BUY`（买入在途）= 已扣款但基金份额未确认（CASH sell 已确认、基金 buy 待确认）；`IN_TRANSIT_SELL`（卖出在途）= 已卖出但到账未确认（基金 sell 已确认、CASH buy 待确认）。两者 `market=""`、`shares=NULL`、`cash_amount` 恒正，种子产品定义见 §4.4。快照表无分类列（#128），**现金行一律以 `cash_amount IS NOT NULL` 判定**（CHECK 约束保证与 shares 恰有其一），CASH 与在途行由此自然落入现金口径。
+* **在途资金虚拟产品**（#93）：`portfolio_position` 除 CASH 行外还有 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL` 两类现金行，每日独立计算、不继承前日（实现见 `backend/AGENTS.md` 核心服务节）。`IN_TRANSIT_BUY`（买入在途）= 已扣款但基金份额未确认（CASH sell 已确认、基金 buy 待确认）；`IN_TRANSIT_SELL`（卖出在途）= 已卖出但到账未确认（基金 sell 已确认、CASH buy 待确认）。两者 `market=""`、`shares=NULL`、`cash_amount` 恒正，种子产品定义见 `backend/AGENTS.md` 数据模型节。快照表无分类列（#128），**现金行一律以 `cash_amount IS NOT NULL` 判定**（CHECK 约束保证与 shares 恰有其一），CASH 与在途行由此自然落入现金口径。
 
 ### 2.3 实时可用量计算
 
@@ -170,160 +170,11 @@ confirm / unconfirm / cancel 基金腿时，配对 CASH 腿通过 `trade_service
 
 ***
 
-## 4. 后端架构
-
-### 4.1 分层目录与职责
-
-| 目录                                                  | 职责                                                                                          |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `app/routers/`                                      | HTTP 薄适配层：解析参数、鉴权（`Depends`）、调 service、`db.commit()`、序列化；业务错误交全局 handler，不写 try/except 业务分支 |
-| `app/services/`                                     | 全部业务规则/不变量/计算/状态机/ORM 读写；**只抛领域异常、不 import fastapi、不 commit（可 flush）**                      |
-| `app/models/`                                       | SQLAlchemy 表模型                                                                              |
-| `app/schemas/`                                      | Pydantic 请求/响应模型                                                                            |
-| `app/utils/`                                        | 安全（密码/Token/登录锁）等工具                                                                         |
-| `app/config.py` / `database.py` / `dependencies.py` | 配置、DB 会话、鉴权依赖                                                                               |
-
-**分层约定（router 为 service 薄适配器）**：业务逻辑单一实现于 service，REST 共用，杜绝并行实现漂移。
-
-* **事务边界属于 session 拥有者**：service 收到调用方注入的 session，不 `commit`/`rollback`（可 `flush`）；REST 在 router `db.commit()`（部分失败语义的端点如 recalculate 按 errors 决定 rollback/commit）。**合理例外**：自持 `SessionLocal` 的后台执行体（sync job 线程、scheduler 触发体）与 `task_runner` 的 checkpoint 提交（逐日快照回补、逐产品远程同步，需保留部分成功）可自行 commit。
-
-* **领域异常统一**：service 抛 `app/services/exceptions.py::BusinessError`（携 `code`/`message`/`http_status`/`details`）；`main.py` 全局 handler 映射为 `JSONResponse{"detail": {"error": code, "message": message}}`（保持前端契约；默认 422、重复创建类 400、NOT\_FOUND 404）。service 内**禁止** import/抛 `HTTPException`。
-
-### 4.2 路由与 API 前缀
-
-端点以 `backend/app/main.py` 注册为准；CLI 机读契约见 §6 `ir schema`。
-
-> 前缀约定：所有资源挂 `/api/<资源名>`（如 `/api/snapshots/...`）；`cash_transfers` 作为 `portfolios` 子资源挂 `/api/portfolios/{code}/cash-transfer`；日志/任务/通知/数据源在 `/api/system/*` 二级命名空间。
-
-### 4.3 核心服务
-
-业务核心集中在四个服务模块（函数级细节读源码）：
-
-* **`snapshot_service.py`**：快照生成/重算/校验；三表固定生成顺序（§2.1）；持仓增量累加与在途计算（§2.2）；级联回退与自动重确认（§3.4）。
-
-* **`position_service.py`**：可用现金/份额实时计算（§2.2/§2.3）；现金重估走 `manual_market_value` 覆盖层，绝不直写 `portfolio_position`（§7.5）。
-
-* **`trade_service.py`**：调仓创建/确认/取消；配对 CASH 腿与 transfer\_group 同步（§2.2/§3.3）。
-
-* **`subscription_service.py`**：申赎创建/确认；首次申购净值 1.0000 并激活组合（§2.4/§3.1）。
-
-其余模块中需记住的设计点：`snapshot_recalc_job.py`（#89 异步重算：复用 sync\_job 表 + 线程池，同类型单 active 锁，终态经 `GET /api/sync-jobs/{id}` 轮询）；`product_service.py::calculate_confirm_days` 为确认天数单一实现。其他服务职责读各文件 docstring。
-
-### 4.4 数据模型与关键约束
-
-表结构与全部唯一约束以 `app/models/` 为准。需记住的设计决策：
-
-* `trade.transfer_group` **NOT NULL**（每笔 trade 必属一个业务组），唯一约束 `(transfer_group, product_code, trade_type)`：基金腿与 CASH 腿按 `product_code` 区分、现金转移两腿按 `trade_type` 区分、申赎为单腿 `sub_{id}`，故 NOT NULL 下仍无碰撞。
-
-* `portfolio_position` 有 CHECK 约束：`shares` 与 `cash_amount` 二者恰有其一（净值型 vs 非净值型）。
-
-* `share_change_event` 双日期分级：`ex_date`（除息日，应用日）+ `entitlement_date`（权益登记日，基数日），要求 `ex_date > entitlement_date` 且均为交易日；`parent_event_id` 为基金级拆分子记录自引用。
-
-* 外键删除行为均为 **RESTRICT**，通过业务流程（关闭/停用）管理生命周期，保留历史数据。
-
-* **虚拟产品**（#93）：除 `CASH`（生产为部署期种子落库）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向。维度标签（#128）：CASH 产品 `asset_class_code=ASSET_CASH`、其余四维 NULL；IN\_TRANSIT 五维全 NULL。
-
-* **资产分类五维度字典**（#128）：`asset_classification` 是正交维度值字典，五个维度 asset\_class（股票/债券/商品/现金，维持 4 类，REITs/另类按需再加）/region/style/size/segment（股票行业·债券期限·商品品种共用一维），产品以 5 个 FK 列挂维度值；字典种子单一事实来源为 `app/constants/asset_dimensions.py`（迁移与 `backend/tests/seed_base.py` 种子共用）。**维度值按需扩展（YAGNI），不为假想需求预留空值**；**asset\_class 的 `sort_order` 即前端饼图/分区色板序位，变更即改色**。分类信息仅读侧派生、快照表无分类列（§7.5）；前端二级分组默认股票→region、债券/商品→segment、现金平铺，可经组合级 `portfolio.display_config`（#144）按大类覆盖：JSON 列仅存显式覆盖项（NULL=默认），校验以 `asset_class_dimension_rule` 规则矩阵为准（无规则行的大类如现金不可配），大类一级分区不可变；PUT 显式传 null 或空对象 {} 清空（{} 归一为 NULL 入库）、不传不修改（哨兵区分，service 公开常量 UNSET）。
-
-* **适用关系双层落库**（#135 矩阵落库）：运行期事实来源为 DB（常量为种子源），`validate_dimension_tags` 四层校验叠加、只收紧不放松——①存在性+dimension 匹配；②`is_active` 软失效（无物理删除；update 仅校验实际变化字段的新值，存量引用停用值不阻断其他编辑）；③维度级规则表 `asset_class_dimension_rule`（required/optional，**无行=forbidden，无规则行的大类=现金型全 forbidden**——新建大类配规则后运行期即可用，无需发版）；④值级关联表 `asset_dimension_applicability`（多对多，产品所选值必须关联其 asset\_class）。产品五维标签的「必填/禁止」语义由此两表驱动，不再硬编码。
-
-### 4.5 配置与运行
-
-* 配置项以 `app/config.py` + `.env` 覆盖为准；迁移在 `alembic/`，启动时自动 `upgrade head`。**注意迁移 0006（#93）与 0008（#128）均不可逆**（含 DROP 列等破坏性操作，回滚只能靠备份）。迁移依赖 `create_all` 先建表，alembic 不单独从零建库（与生产启动顺序一致，见 ci.yml 注释）；CI 对最新一条迁移做 downgrade/upgrade 往返验证可逆性（不可逆迁移 PR 经 `SKIP_DOWNGRADE` 豁免，合入后移除）。
-
-* 调度：`scheduler_enabled`；两条独立每日 job——`daily_nav_sync`（净值同步+分红检测）与 `daily_snapshot_generate`（快照生成，#156），各持 MySQL `GET_LOCK` 互斥锁，cron 分别取 `scheduler_cron_daily` / `scheduler_cron_snapshot`；自动快照仅处理 `auto_snapshot_enabled=True` 的活跃组合（组合级开关默认 False，opt-in，只约束自动任务，手动生成/重算端点不受影响）。`init_tasks.py` 确保任务记录存在并同步文案，但不覆盖已有 cron\_expr。
-
-* 数据源：Tushare / AkShare，`data_sources` 路由读写 `.env`；安全：登录失败锁定、Token 过期/黑名单、改密后强制重登（参数明细见 `config.py`）。
-
-***
-
-## 5. 前端架构
-
-技术栈版本以 `frontend/package.json` 为准（Next.js + React + Tailwind + shadcn/ui + Zustand + react-query；E2E 用 Playwright）。
-
-> **前端视觉规范**（语义色/涨跌色/图表色/数字格式/字号，issue #127）见 `docs/design/visual-spec.md`——写 frontend/ 代码前必读。
-
-### 5.1 双端路由与 Proxy（约定）
-
-* 移动端 `/m/` 前缀、PC 端根路径；`src/proxy.ts`（Next 16 起由 `middleware.ts` 更名）按 User-Agent 自动重定向；未登录（无 `token` cookie）重定向到对应登录页。页面清单直接看 `frontend/src/app/**/page.tsx`；移动端多为薄壳页，套 `MobileLayout` 后渲染共享内容组件。
-
-### 5.2 组件复用与质量门禁（约定）
-
-* 复用三层：完全共享（`hooks/`、`stores/`、`components/ui/`、`types/`）→ 共享业务组件（`components/shared/`，以 `variant: "desktop" | "mobile"` + `basePath` 适配双端）→ 端侧独立（`components/mobile/`、`desktop/`、`layout/`、`charts/`）。
-
-* API 层 `src/lib/api/` 按域拆分、经 `index.ts` barrel 统一导出（`@/lib/api`）；`next.config.js` 将 `/api/:path*` rewrite 到后端。
-
-* **质量门禁**：构建期强制 ESLint + tsc，0 error 才能通过 `next build`。
-
-***
-
-## 6. CLI 工具
-
-`ir-cli` 是独立轻量 HTTP 客户端（typer + httpx），入口 `ir_cli.main:app`（`ir`），通过 HTTP 调用运行中的后端。命令清单以 `ir --help` / `ir schema` 为准，完整使用手册见 `ir-cli/CLI_MANUAL.md`。
-
-ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output.fields`，`*`前缀=默认摘要字段、`?`后缀=可空）与 `--index` 索引模式（极简命令索引，再按 `ir schema <group>` 按需加载）；契约由 `ir-cli/scripts/gen_response_fields.py` 从 `backend/openapi.json` 生成，CI 做一致性校验。
-
-***
-
-## 7. 约束与边界速查
-
-> 规则本体见第 2、3 章；错误码定义见 `app/services/exceptions.py`（机读契约 `ir schema`）。本章只列**读代码不易拼出**的规则语义与易踩坑。
-
-### 7.1 申购赎回
-
-* 申购输入**金额**（份额 = 金额 / 申请日净值）；赎回输入**份额**（金额 = 份额 × 申请日净值）。
-
-* 申请日必须晚于最新快照日（`DATE_BEFORE_SNAPSHOT`）。
-
-* 申赎必填 `platform_code`（现金归属平台）；非首次申购要求申请日存在组合快照（`NAV_NOT_AVAILABLE`）。
-
-### 7.2 调仓交易
-
-* 金额：买入 `amount = actual_amount − fee`、`shares = amount/price`；卖出 `amount = actual_amount + fee`。**卖出金额为纯派生量**（#190）：有价格时 `amount = quantize(shares × price)`、`actual_amount = amount − fee`；创建时显式传入的 amount/actual\_amount（两参同义、`actual_amount` 优先）仅作一致性校验（差值超 0.01 报 `AMOUNT_MISMATCH`），落库恒用推导值——金额即 shares/price/fee 的「校验和」，用于对账；无价格（场外未传价）时创建期占位，确认按 T 日净值重算。
-
-* **PUT 直改与创建同口径**（#182）：编辑 pending 交易时 buy 的 amount/actual\_amount 视为含费现金支出（`actual_amount` 优先），service 层联动重算净额列并镜像 CASH 腿；sell 有价格时与创建同口径（#190）：按新 shares/price/fee 重推导、显式金额仅作对账（场内超差拒绝、场外静默），无价格占位单仍输入为准；改金额/份额/日期实时校验可用量（加回自身 pending 旧值）、非交易日直接拒绝不静默滚交易日、自然键防重排除自身（无 `allow_duplicate`）；CASH 腿仅 notes 放行；校验全部通过前零写入。
-
-* **可用现金时点口径**：pending 卖出不增加可用现金；买入按扣款平台校验可用现金（§2.2），确认时不足同样拒绝（卖出确认对称校验份额；`skip_available_check` 仅限 auto\_confirm 路径）。
-
-* **确认取价**：`confirm_date` 创建时即按 `product.confirm_days` 设定（`confirm` 可传参覆盖，补录用）；场内用成交价（录入时必填）、场外严格用 T 日净值（含 QDII；未同步则拒绝，禁止向前查找；可传 `sync_nav`/`--sync-nav` 在 MISSING\_NAV 时自动回填净值并重试一次，#90）。场外确认可选传入价格，仅与 T 日净值做一致性校验（不一致 `PRICE_NAV_MISMATCH`），不覆盖净值。快照估值侧与此正交：按产品 `nav_lag_days` 取价（`0`=当日、`N`=前第 N 个交易日；场外 QDII / 互认基金置 1），详见 §2.4。
-
-* 防重：同组合/产品/市场/平台/方向/交易日且金额（买）或份额（卖）相同的 pending/confirmed 交易，未传 `allow_duplicate` 报 `DUPLICATE_TRADE`（cancelled 不算）。
-
-* 仅给 product\_code 且一码多市场（LOF）须显式指定 market（`MARKET_AMBIGUOUS`，`details.available_markets` 列可选项）；场内 trade 不可 cancel。
-
-### 7.3 份额变动事件
-
-* **分级**：基金级（`share_split`/`share_merge`/`bonus_share`，`platform_code` 空，确认时按平台自动拆子记录）；平台级（`cash_dividend`/`reinvest_dividend`/`forced_adjustment`，每个有持仓平台各录 1 条）。
-
-* 日期约束：`ex_date > entitlement_date` 且均为交易日；`ex_date` 须晚于最新快照日。平台级未全覆盖有持仓平台默认阻断（`PLATFORM_NOT_COVERED`），`force_cover=true` 降为 warning。
-
-* 输入校验（#279，创建/更新/确认三路径同口径）：`forced_adjustment` 必须至少一项（`shares_change`/`cash_change`）非空，否则 `EMPTY_ADJUSTMENT`；现金型产品（`product_type` 为 CASH/IN_TRANSIT）不接受份额变动（结构型事件无条件拒、其余类型显式 `shares_change` 拒，`SHARES_CHANGE_ON_CASH_PRODUCT`）。
-
-* **market 补全口径**（#258，与调仓 #83 同口径）：创建时 `market` 省略/空串按产品唯一市场自动补全；一码多市场（LOF）报 `MARKET_AMBIGUOUS`；产品不存在报 `PRODUCT_NOT_FOUND`——杜绝 `(product_code, market)` 复合外键违约 500。
-
-* 持仓存在性防线（#278）：`forced_adjustment` 确认时精查权益登记日 `(产品, market, 平台)` 持仓行，无行拒绝 `POSITION_NOT_FOUND`（LOF market 误填提前快失败）；快照生成对份额事件硬拒绝 `POSITION_NOT_FOUND`：①指向不存在的持仓行（不静默新建 0 份额行）、②作用于现金行（`cash_amount IS NOT NULL` 的行存在但不得承载份额变动），负向调整打空持仓行产出 `event_zeroed_position` 告警（不阻断）。
-
-### 7.4 组合管理
-
-* 关闭/重开/删除投资人的生命周期保护见 §3.1（pending 交易阻断关闭、份额为零才能删投资人等）；持仓表禁止手动 CRUD（`POSITION_TABLE_PROTECTED`），现金修正走 `cash-position` 覆盖层（§7.5）。
-
-### 7.5 易错陷阱（补充）
-
-1. 现金市值修正走 `POST /positions/portfolio/{code}/cash-position` 写 `manual_market_value`（绝对替换），**不直接改 `portfolio_position`**；写入后需重新生成快照。
-2. LOF 拆分为两条记录（场内/场外分别处理）。
-3. 组合份额仅因申购赎回变化；分红再投资只影响成分基金份额。
-4. 投资人不支持强制物理删除——份额需为 0 才能删。
-5. 幂等性缓存（`idempotency_cache`）24 小时过期，批量调仓用 `Idempotency-Key`。
-6. 分类信息只从 positions API 读侧派生（#128）：快照表无分类列，不要在写侧/快照链路重新引入 asset\_type 冗余；判断现金行用 `cash_amount IS NOT NULL`，不用产品类型字符串。产品维度标签改动走 product create/update（service 层矩阵校验），不直改 DB。
-7. 传递依赖不写进 `backend/requirements.txt` 就等于没钉（#314，fastapi 的 starlette 曾长期浮动）；且 fastapi ≥0.141 改了 `app.routes` 结构，会让遍历路由的鉴权门禁（#256）静默空通过（#306）——升 fastapi/starlette 必须连带复核这道门禁是否还在真扫描。
-
-***
-
-## 8. 开发流程约定
+## 4. 开发流程约定
 
 > 单人 + AI 编程协作的工作流约定。**代码是唯一事实来源**；本约定只约束动作边界，不做过度流程。
 
-### 8.1 分支模型（GitHub Flow，单长期分支，issue #211）
+### 4.1 分支模型（GitHub Flow，单长期分支，issue #211）
 
 | 分支     | 角色            | 规则                                                                              |
 | ------ | ------------- | ------------------------------------------------------------------------------- |
@@ -333,7 +184,7 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 
 * 手动部署（`deploy.yml` `workflow_dispatch`）只接受已有镜像 tag（回滚/重部署）。
 
-### 8.2 Issue 约定
+### 4.2 Issue 约定
 
 * **新功能 / 大改 / 涉及业务规则或 DB 迁移**：必须先提 issue 再动手；修 bug 若影响面大或需留痕，同样先提 issue。
 
@@ -342,15 +193,15 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 * **标题前缀与 Conventional Commits 对齐**：`[bug]` / `[feat]` / `[chore]`（含文档/运维类）。
 
 
-### 8.3 PR 约定
+### 4.3 PR 约定
 
 * 使用 PR 模板 `.github/PULL_REQUEST_TEMPLATE.md`。
 
-### 8.4 commit 信息
+### 4.4 commit 信息
 
 * Conventional Commits 风格：`fix:` / `feat:` / `docs:` / `refactor:` / `chore:`，附简短说明并尽量带 issue 号（如 `fix(snapshot): 快照净值严格匹配 (#96)`）。
 
-### 8.5 AI AGENT铁律
+### 4.5 AI AGENT铁律
 
 1. **改完必须验证**：本地跑**改动影响面**的测试且绿即可，不要求全量（全量回归由 CI 的 `CI OK` 在合入前兜底；影响面圈定宁宽勿窄，如动 `snapshot_service` 应连带快照/申赎/调仓相关测试；影响面圈定程序见 `backend/AGENTS.md`「跑测试」节）+ 能说明改动影响；验证不了的改动不提交。
 2. **排查/审查中发现的问题只提 issue，不直接改代码**，由任务所有者决定修复方式。
@@ -358,8 +209,12 @@ ir-cli 的 `ir schema` 已含响应字段契约（`commands.<group>.<sub>.output
 4. **仓库文档（README/AGENTS/runbook）随代码同一次提交更新**；设计决策与方案记录进 issue 讨论。
 5. 当你执行一项任务发现有任何执行细节不明确时，你必须向我提问，而不是自做主张，在我回答之后仍有不明确的行细节时，你需要向我追问，直到了解了所有细节。
 
-### 8.6 安全扫描响应（issue #252）
+### 4.6 任务后的 Harness 能力观察
 
-* **Security Scan 红灯（定时或手动触发的 `security-scan.yml` 失败）必须在下一个工作日内评估处置**——修复漏洞或在 issue 中记录豁免理由，不允许悬空。
-* 漏洞修复与依赖升级一律走 `feature/` 分支 + PR，CI 全绿方可合入；扫描豁免（如 `--ignore-vuln`）必须在 `security-scan.yml` 内注释记录理由与移除条件。
-* Dependabot（`.github/dependabot.yml`）每周自动提依赖升级 PR，与 weekly 扫描互补；Dependabot 漏洞告警（仓库设置项）开启后同样按本条时限响应。
+完成开发、排查、配置、联调或文档任务后，基于本次任务实际发生的过程，做一次轻量的 Harness 能力观察。
+
+1. 仅在本次会话实际完成了开发、排查、配置、联调或文档任务后执行。
+2. 只在出现明确信号时输出一项：重复劳动、反复纠正、反复找同一上下文、可复用命令、可迁移判断、反复打外部系统、现有 Rule/Skill/MCP/文档缺口。
+3. 无信号则不输出、不扩建。
+4. 有信号时只选证据最充分的一项，说明事实、为何会重复、建议载体（文档 / Runbook / Skill / Script / MCP / Gate）、最小内容和验证方式。
+5. 只建议，不自动改 Rule、Skill 或文档；写入前必须用户确认。

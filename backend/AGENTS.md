@@ -1,8 +1,75 @@
-# backend/AGENTS.md — 后端模块操作指南
+# backend/AGENTS.md — 后端模块指南
 
-> 业务不变量/领域模型/分层约定见根 `AGENTS.md`（§2-§4），本文件只写**怎么跑、易踩坑**。
+> 业务不变量/领域模型见根 `AGENTS.md`（§2-§3）；分层约定与架构见本文件 §1；**怎么跑、易踩坑**见 §2-§7。
 
-## 跑测试
+## 1. 架构
+
+### 1.1 分层目录与职责
+
+| 目录                                                  | 职责                                                                                          |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `app/routers/`                                      | HTTP 薄适配层：解析参数、鉴权（`Depends`）、调 service、`db.commit()`、序列化；业务错误交全局 handler，不写 try/except 业务分支 |
+| `app/services/`                                     | 全部业务规则/不变量/计算/状态机/ORM 读写；**只抛领域异常、不 import fastapi、不 commit（可 flush）**                      |
+| `app/models/`                                       | SQLAlchemy 表模型                                                                              |
+| `app/schemas/`                                      | Pydantic 请求/响应模型                                                                            |
+| `app/utils/`                                        | 安全（密码/Token/登录锁）等工具                                                                         |
+| `app/config.py` / `database.py` / `dependencies.py` | 配置、DB 会话、鉴权依赖                                                                               |
+
+**分层约定（router 为 service 薄适配器）**：业务逻辑单一实现于 service，REST 共用，杜绝并行实现漂移。
+
+* **事务边界属于 session 拥有者**：service 收到调用方注入的 session，不 `commit`/`rollback`（可 `flush`）；REST 在 router `db.commit()`（部分失败语义的端点如 recalculate 按 errors 决定 rollback/commit）。**合理例外**：自持 `SessionLocal` 的后台执行体（sync job 线程、scheduler 触发体）与 `task_runner` 的 checkpoint 提交（逐日快照回补、逐产品远程同步，需保留部分成功）可自行 commit。
+
+* **领域异常统一**：service 抛 `app/services/exceptions.py::BusinessError`（携 `code`/`message`/`http_status`/`details`）；`main.py` 全局 handler 映射为 `JSONResponse{"detail": {"error": code, "message": message}}`（保持前端契约；默认 422、重复创建类 400、NOT\_FOUND 404）。service 内**禁止** import/抛 `HTTPException`。
+
+### 1.2 路由与 API 前缀
+
+端点以 `app/main.py` 注册为准；CLI 机读契约见 `ir schema`。
+
+> 前缀约定：所有资源挂 `/api/<资源名>`（如 `/api/snapshots/...`）；`cash_transfers` 作为 `portfolios` 子资源挂 `/api/portfolios/{code}/cash-transfer`；日志/任务/通知/数据源在 `/api/system/*` 二级命名空间。
+
+### 1.3 核心服务
+
+业务核心集中在四个服务模块（函数级细节读源码）：
+
+* **`snapshot_service.py`**：快照生成/重算/校验；三表固定生成顺序（根 §2.1）；持仓增量累加与在途计算（根 §2.2）；级联回退与自动重确认（根 §3.4）。
+
+* **`position_service.py`**：可用现金/份额实时计算（根 §2.2/§2.3）；现金重估走 `manual_market_value` 覆盖层，绝不直写 `portfolio_position`。
+
+* **`trade_service.py`**：调仓创建/确认/取消；配对 CASH 腿与 transfer\_group 同步（根 §2.2/§3.3）。
+
+* **`subscription_service.py`**：申赎创建/确认；首次申购净值 1.0000 并激活组合（根 §2.4/§3.1）。
+
+其余模块中需记住的设计点：`snapshot_recalc_job.py`（#89 异步重算：复用 sync\_job 表 + 线程池，同类型单 active 锁，终态经 `GET /api/sync-jobs/{id}` 轮询）；`product_service.py::calculate_confirm_days` 为确认天数单一实现。其他服务职责读各文件 docstring。
+
+### 1.4 数据模型与关键约束
+
+表结构与全部唯一约束以 `app/models/` 为准。需记住的设计决策：
+
+* `trade.transfer_group` **NOT NULL**（每笔 trade 必属一个业务组），唯一约束 `(transfer_group, product_code, trade_type)`：基金腿与 CASH 腿按 `product_code` 区分、现金转移两腿按 `trade_type` 区分、申赎为单腿 `sub_{id}`，故 NOT NULL 下仍无碰撞。
+
+* `portfolio_position` 有 CHECK 约束：`shares` 与 `cash_amount` 二者恰有其一（净值型 vs 非净值型）。
+
+* `share_change_event` 双日期分级：`ex_date`（除息日，应用日）+ `entitlement_date`（权益登记日，基数日），要求 `ex_date > entitlement_date` 且均为交易日；`parent_event_id` 为基金级拆分子记录自引用。
+
+* 外键删除行为均为 **RESTRICT**，通过业务流程（关闭/停用）管理生命周期，保留历史数据。
+
+* **虚拟产品**（#93）：除 `CASH`（生产为部署期种子落库）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向。维度标签（#128）：CASH 产品 `asset_class_code=ASSET_CASH`、其余四维 NULL；IN\_TRANSIT 五维全 NULL。
+
+* **资产分类五维度字典**（#128）：`asset_classification` 是正交维度值字典，五个维度 asset\_class（股票/债券/商品/现金，维持 4 类，REITs/另类按需再加）/region/style/size/segment（股票行业·债券期限·商品品种共用一维），产品以 5 个 FK 列挂维度值；字典种子单一事实来源为 `app/constants/asset_dimensions.py`（迁移与 `backend/tests/seed_base.py` 种子共用）。**维度值按需扩展（YAGNI），不为假想需求预留空值**；**asset\_class 的 `sort_order` 即前端饼图/分区色板序位，变更即改色**。分类信息仅读侧派生、快照表无分类列；前端二级分组默认股票→region、债券/商品→segment、现金平铺，可经组合级 `portfolio.display_config`（#144）按大类覆盖：JSON 列仅存显式覆盖项（NULL=默认），校验以 `asset_class_dimension_rule` 规则矩阵为准（无规则行的大类如现金不可配），大类一级分区不可变；PUT 显式传 null 或空对象 {} 清空（{} 归一为 NULL 入库）、不传不修改（哨兵区分，service 公开常量 UNSET）。
+
+* **适用关系双层落库**（#135 矩阵落库）：运行期事实来源为 DB（常量为种子源），`validate_dimension_tags` 四层校验叠加、只收紧不放松——①存在性+dimension 匹配；②`is_active` 软失效（无物理删除；update 仅校验实际变化字段的新值，存量引用停用值不阻断其他编辑）；③维度级规则表 `asset_class_dimension_rule`（required/optional，**无行=forbidden，无规则行的大类=现金型全 forbidden**——新建大类配规则后运行期即可用，无需发版）；④值级关联表 `asset_dimension_applicability`（多对多，产品所选值必须关联其 asset\_class）。产品五维标签的「必填/禁止」语义由此两表驱动，不再硬编码。
+
+### 1.5 配置与运行
+
+* 配置项以 `app/config.py` + `.env` 覆盖为准。
+
+* 调度：`scheduler_enabled`；两条独立每日 job——`daily_nav_sync`（净值同步+分红检测）与 `daily_snapshot_generate`（快照生成，#156），各持 MySQL `GET_LOCK` 互斥锁，cron 分别取 `scheduler_cron_daily` / `scheduler_cron_snapshot`；自动快照仅处理 `auto_snapshot_enabled=True` 的活跃组合（组合级开关默认 False，opt-in，只约束自动任务，手动生成/重算端点不受影响）。`init_tasks.py` 确保任务记录存在并同步文案，但不覆盖已有 cron\_expr。
+
+* 数据源：Tushare / AkShare，`data_sources` 路由读写 `.env`；安全：登录失败锁定、Token 过期/黑名单、改密后强制重登（参数明细见 `config.py`）。
+
+***
+
+## 2. 跑测试
 
 ```bash
 cd backend && pytest tests -q
@@ -30,11 +97,11 @@ cd backend && pytest tests -q
   - **棘轮规则**：`fail_under` 只升不降；任何 PR 全量实测总覆盖率超当前阈值 ≥1pp 时，顺手把阈值上调到实测值下取整（随该 PR 提交）；分支覆盖不单设独立阈值（branch=true 下 fail_under 已是分支含口径）。
   - 注意 fail_under 作用于 `--cov` 收集的那次运行：本地跑**子集**加 `--cov` 必然跌破阈值（子集覆盖不了全量代码），属预期，阈值只对全量运行有语义。
 
-## 种子数据（单一事实来源）
+## 3. 种子数据（单一事实来源）
 
 `tests/seed_base.py::seed_base_data(db)`：维度字典、适用关系、4 平台、7 产品、2025-2026 工作日日历、draft 组合 `E2E_PORT`、ADMIN/admin@2026、VIEWER/viewer123。三处消费：pytest（conftest）、CI E2E（`scripts/seed_e2e.py`）、本地 E2E（`scripts/run_e2e_backend.py`）。改种子只改这一处。**前端 E2E 业务冒烟依赖 `E2E_PORT` 存在（无组合时 spec 静默 skip），勿删。**
 
-## 本地启动
+## 4. 本地启动
 
 ```bash
 cd backend && uvicorn app.main:app --reload   # 配置见 .env.example
@@ -42,24 +109,20 @@ cd backend && uvicorn app.main:app --reload   # 配置见 .env.example
 
 启动时序：import 期 `create_all` → lifespan 内 `alembic upgrade head`。**alembic 不能单独从零建库**（迁移依赖 create_all 先建表，如 0007 直接 UPDATE product）。
 
-## 迁移（alembic）
+## 5. 迁移（alembic）
 
 - 新迁移必须提供可逆 downgrade；CI（backend-test-mysql）对最新一条迁移做 downgrade/upgrade 往返验证；确不可逆时 PR 设 `SKIP_DOWNGRADE` 豁免、合入后移除。
 - 现有不可逆迁移：**0006、0008**（含 DROP 列），回滚只能靠备份。
 - 种子类 DML 写迁移时双方言（SQLite/MySQL）都要过——迁移文件头注释写清幂等设计。
 
-## 依赖
+## 6. 依赖
 
 - `requirements.txt` 是镜像与 CI 的**唯一安装来源**（`Dockerfile:30-32` + `ci.yml` 四个 job 均裸 `pip install -r requirements.txt`）；`pyproject.toml` 的 `dependencies` 全是 `>=` 下界，**不参与构建**，改它不改变任何安装结果。加依赖须更新 requirements.txt。
 - **传递依赖不显式钉版就等于没钉**：未出现在 requirements.txt 的包，版本由构建时解析决定、仓库零记录。已钉：`click`（uvicorn 传递）、`starlette`（fastapi 传递，#314）。干净环境实测解析 79 个包、requirements.txt 仅声明 30 个，**其余 50 个传递依赖仍浮动**（清单见 issue #314；含 `anyio`、`typing_extensions`、`pydantic_core`、`cryptography`、`greenlet`、`h11`/`httptools`/`websockets` 等可能跨大版本者）。
 - **本地 ≠ CI**：pip 不升级已满足下界的已装包 → 同一份 requirements.txt 在本地可能是旧版、干净环境解析成新版；排查版本相关现象先 `pip show <pkg>` 对齐。
 - `pip-audit`（`security-scan.yml`）按**声明**解析，抓不到未声明的传递依赖，别当锁文件用。
 
-## E2E 相关脚本
+## 7. E2E 相关脚本
 
 - `scripts/run_e2e_backend.py`：本地 E2E 后端（SQLite 临时库，每次启动重建 + 自动种子，空 lifespan 跳迁移）。
 - `scripts/seed_e2e.py`：CI E2E 种子入口，**未设 `DATABASE_URL` 直接拒绝**（防误连）。
-
-## 分层红线（摘要，详见根 §4.1）
-
-service 只抛 `BusinessError` 不 import fastapi、不 commit（可 flush）；router 负责 `db.commit()`；事务例外仅限自持 session 的后台执行体。
