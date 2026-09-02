@@ -484,7 +484,7 @@ class TestPositionDividendRouteC:
 
 
 class TestPositionCashCumulativeProfit:
-    """CASH 行 profit_loss：sub_/rebal_/转移/事件四类流水（§3.3）"""
+    """CASH 行 profit_loss：sub_/rebal_/转移/事件四类流水"""
 
     def test_cash_profit_with_all_flow_types(self, client, admin_headers, test_db):
         create_portfolio(test_db, code="PD_CF", status="active")

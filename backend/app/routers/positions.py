@@ -124,7 +124,7 @@ def get_positions(
             row["profit_loss"] = round(profit_loss, 4)
             row["profit_loss_percent"] = round(profit_loss / cost * 100, 4) if cost else None
         elif p.product_code == "CASH" and p.shares is None:
-            # CASH 行：现金累计收益（§3.3 现金基数口径，≈0）
+            # CASH 行：现金累计收益口径，≈0
             row["profit_loss"] = cash_profits.get(key)
         enriched.append(row)
 

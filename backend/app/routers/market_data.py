@@ -72,7 +72,7 @@ def sync_price_data_endpoint(
             start_date=request.start_date if request else None,
             end_date=request.end_date if request else None,
         )
-        # service 不 commit（AGENTS.md §4.1）；在 success 判断前提交，
+        # service 不 commit（backend/AGENTS.md §1.1）；在 success 判断前提交，
         # 保证 success=False 时 _mark_failed 写入的失败状态仍持久化
         db.commit()
         if result["success"]:

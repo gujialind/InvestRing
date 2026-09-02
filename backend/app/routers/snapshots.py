@@ -53,7 +53,7 @@ def generate_snapshot(
             portfolio_code=request.portfolio_code,
             target_date=request.target_date,
         )
-        # service 不 commit（AGENTS.md §4.1），事务边界在 router
+        # service 不 commit（backend/AGENTS.md §1.1），事务边界在 router
         db.commit()
         return SnapshotGenerationResult(**result)
     except BusinessError:
