@@ -1,6 +1,6 @@
 # backend/AGENTS.md — 后端模块指南
 
-> 业务不变量/领域模型见根 `AGENTS.md` §2；错误码触发条件与字段级清单见 `docs/design/business-constraints.md`（**改 services/routers 前必读**）；分层约定与架构见本文件 §1；**怎么跑、易踩坑**见 §2-§7。
+> 业务不变量/领域模型见根 `AGENTS.md` §2；错误码触发条件与字段级清单见 `docs/reference/business-constraints.md`（**改 services/routers 前必读**）；分层约定与架构见本文件 §1；**怎么跑、易踩坑**见 §2-§7。
 
 ## 1. 架构
 
@@ -35,7 +35,6 @@
   - 单日生成的连续性校验（`SNAPSHOT_NOT_CONTINUOUS`）在**重算路径逐日重建时内部 bypass**；批量删除从最新日**倒序、逐日 commit**。
   - 快照预校验（生成前提检查）对存在 `ex_date <= target_date` 的 pending 事件返回 **`failed`**（根 §2.6 只陈述「不存在会影响该日的 pending 记录」这一语义结论）。
   - 取价实现为生成与预校验**共用同一函数**；`MISSING_NAV` 错误信息按 `[T=…]` / `[T-N=…]` 规则分组。
-  - 在途资金两类现金行**每日独立计算、不继承前日**。
   - **可观测性**（#305）：重算 / catch-up / generate-next / 调度路径的响应（调度为任务日志）携带逐日 `auto_confirmed` 与 `warnings`，逐日错误条目含 `code`/`details`；auto_confirm 循环单条 DB 级失败经**连接级 savepoint** 隔离，不毒化 session、不产生级联误导性记录（连接级失效记 `SESSION_ABORTED` 后终止本段）。
 
 * **`position_service.py`**：可用现金/份额实时计算（根 §2.5/§2.3）；现金重估走 `manual_market_value` 覆盖层，绝不直写 `portfolio_position`。两条现金口径的函数级表达式：
@@ -76,7 +75,7 @@
 
 * **虚拟产品**（#93）：除 `CASH`（生产为部署期种子落库）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向。维度标签（#128）：CASH 产品 `asset_class_code=ASSET_CASH`、其余四维 NULL；IN\_TRANSIT 五维全 NULL。
 
-* `is_qdii` 已降级为**纯展示标签**（除创建时推导 `confirm_days` 默认值外不参与任何业务分支）；滞后估值一律由 `nav_lag_days` 驱动。迁移 `0012` 仅回填场外 QDII，**港互认基金需由界面/CLI 手工设为 1**。
+* `is_qdii` 已降级为**纯展示标签**、`nav_lag_days` 逐产品自设（业务语义见根 §2.4）。**回填口径**：迁移 `0012` 仅把场外 QDII 的 `nav_lag_days` 置 1，**港互认基金需由界面/CLI 手工设为 1**——运行期不按产品类型自动映射。
 
 * **资产分类五维度字典**（#128）：`asset_classification` 是正交维度值字典，五个维度 asset\_class（股票/债券/商品/现金，维持 4 类，REITs/另类按需再加）/region/style/size/segment（股票行业·债券期限·商品品种共用一维），产品以 5 个 FK 列挂维度值；字典种子单一事实来源为 `app/constants/asset_dimensions.py`（迁移与 `backend/tests/seed_base.py` 种子共用）。**维度值按需扩展（YAGNI），不为假想需求预留空值**；**asset\_class 的 `sort_order` 即前端饼图/分区色板序位，变更即改色**。分类信息仅读侧派生、快照表无分类列；前端二级分组默认股票→region、债券/商品→segment、现金平铺，可经组合级 `portfolio.display_config`（#144）按大类覆盖：JSON 列仅存显式覆盖项（NULL=默认），校验以 `asset_class_dimension_rule` 规则矩阵为准（无规则行的大类如现金不可配），大类一级分区不可变；PUT 显式传 null 或空对象 {} 清空（{} 归一为 NULL 入库）、不传不修改（哨兵区分，service 公开常量 UNSET）。
 
