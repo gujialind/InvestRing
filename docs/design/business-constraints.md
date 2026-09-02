@@ -1,10 +1,27 @@
 # 业务约束与边界速查
 
-> 规则本体见根 `AGENTS.md` §2-§3；错误码定义见 `app/services/exceptions.py`（机读契约 `ir schema`）。本文件只列**读代码不易拼出**的规则语义与易踩坑。
+> 规则本体见根 `AGENTS.md` §2；错误码定义见 `app/services/exceptions.py`（机读契约 `ir schema`）。本文件只列**读代码不易拼出**的规则语义、错误码触发条件与字段级清单。
+
+## 可用量口径
+
+冻结份额/现金必须**实时计算**，不能仅读快照 `frozen_shares` / `frozen_amount`。
+
+* **基金可用份额** = 最新快照份额 − SUM(pending 卖出) − SUM(快照未覆盖的 confirmed 卖出) + SUM(快照未覆盖的 confirmed 事件**负向** `shares_change`，`ex_date > 最新快照日` [≤ T])。
+  - 事件增量**只计平台级行**（`platform_code IS NOT NULL`）——基金级父记录持汇总值，父子同计会双算。
+  - **正向变动不计入**：入快照前保守低估，防事件被撤销后已放行的卖出成为事实超卖。
+* **投资人可用份额** = 最新快照份额 − SUM(pending 赎回) − SUM(快照未覆盖的 confirmed 赎回)。份额变动事件不并入——组合份额仅因申赎变化，事件作用于基金/平台维度、不改投资人份额账本。
+* **可用现金**两条口径的函数级表达式见 `backend/AGENTS.md` §1.3（`calculate_available_cash` / `compute_cash_balance`）。
+* 卖出/赎回输入份额**先量化到 2 位再与可用份额精确比较**（无容差），超出报 `INSUFFICIENT_SHARES`；买入/转移金额同理先量化再与可用现金精确比较，不足报 `INSUFFICIENT_CASH`。`skip_available_check` 仅限 auto\_confirm 路径。
 
 ## 申购赎回
 
 * 申购输入**金额**（份额 = 金额 / 申请日净值）；赎回输入**份额**（金额 = 份额 × 申请日净值）。
+
+* **确认日恒为申请日的下一交易日（T+1）**，与产品 `confirm_days` 无关（后者只作用于调仓）；pending 记录的 `confirm_date` 是预计确认日。
+
+* **首窗判定**：确认时申请日无快照**且**不存在 `confirm_date <= apply_date` 的 confirmed 申购（等价于申请日零持仓、净值结构性恒 1.0）→ 按 1.0000 计价；已有资金到账却无申请日快照 → `NAV_NOT_AVAILABLE`（禁止回退旧净值或当前净值）。
+
+* **乱序补录**：确认日早于组合 `started_at` → `CONFIRM_BEFORE_STARTED`（等于则放行）；乱序单 auto\_confirm 记 `auto_confirm_failed`，需手动按序处理。
 
 * 申请日必须晚于最新快照日（`DATE_BEFORE_SNAPSHOT`）。
 
@@ -16,13 +33,17 @@
 
 * **PUT 直改与创建同口径**（#182）：编辑 pending 交易时 buy 的 amount/actual\_amount 视为含费现金支出（`actual_amount` 优先），service 层联动重算净额列并镜像 CASH 腿；sell 有价格时与创建同口径（#190）：按新 shares/price/fee 重推导、显式金额仅作对账（场内超差拒绝、场外静默），无价格占位单仍输入为准；改金额/份额/日期实时校验可用量（加回自身 pending 旧值）、非交易日直接拒绝不静默滚交易日、自然键防重排除自身（无 `allow_duplicate`）；CASH 腿仅 notes 放行；校验全部通过前零写入。
 
-* **可用现金时点口径**：pending 卖出不增加可用现金；买入按扣款平台校验可用现金（根 §2.2），确认时不足同样拒绝（卖出确认对称校验份额；`skip_available_check` 仅限 auto\_confirm 路径）。
+* **跨平台现金腿**：基金买/卖可传 `cash_platform_code`（买 = 扣款平台、卖 = 到账平台；CLI `--cash-platform-code`），CASH 腿落在指定平台、**缺省同基金腿**；两腿仍同 `transfer_group` 原子翻转。
 
-* **确认取价**：`confirm_date` 创建时即按 `product.confirm_days` 设定（`confirm` 可传参覆盖，补录用）；场内用成交价（录入时必填）、场外严格用 T 日净值（含 QDII；未同步则拒绝，禁止向前查找；可传 `sync_nav`/`--sync-nav` 在 MISSING\_NAV 时自动回填净值并重试一次，#90）。场外确认可选传入价格，仅与 T 日净值做一致性校验（不一致 `PRICE_NAV_MISMATCH`），不覆盖净值。快照估值侧与此正交：按产品 `nav_lag_days` 取价（`0`=当日、`N`=前第 N 个交易日；场外 QDII / 互认基金置 1），详见根 §2.4。
+* **可用现金时点口径**：pending 卖出不增加可用现金；买入按扣款平台校验可用现金（根 §2.5），确认时不足同样拒绝（卖出确认对称校验份额；`skip_available_check` 仅限 auto\_confirm 路径）。
+
+* **确认取价**：`confirm_date` 创建时即按 `product.confirm_days` 设定（`confirm` 可传参覆盖，补录用）；场内用成交价（录入时必填）、场外严格用 T 日净值（含 QDII；未同步则拒绝，禁止向前查找；可传 `sync_nav`/`--sync-nav` 在 MISSING\_NAV 时自动回填净值并重试一次，#90）。场外确认可选传入价格，仅与 T 日净值做一致性校验（不一致 `PRICE_NAV_MISMATCH`），不覆盖净值。快照估值侧与此正交：按产品 `nav_lag_days` 取价（`0`=当日、`N`=前第 N 个交易日），详见根 §2.6。
 
 * 防重：同组合/产品/市场/平台/方向/交易日且金额（买）或份额（卖）相同的 pending/confirmed 交易，未传 `allow_duplicate` 报 `DUPLICATE_TRADE`（cancelled 不算）。
 
 * 仅给 product\_code 且一码多市场（LOF）须显式指定 market（`MARKET_AMBIGUOUS`，`details.available_markets` 列可选项）；场内 trade 不可 cancel。
+
+* `trade.transfer_group` NOT NULL；REST 直接创建 `product_code="CASH"` 的交易 → `CASH_TRADE_FORBIDDEN`。
 
 ## 份额变动事件
 
@@ -38,7 +59,33 @@
 
 ## 组合管理
 
-* 关闭/重开/删除投资人的生命周期保护见根 `AGENTS.md` §3.1（pending 交易阻断关闭、份额为零才能删投资人等）；持仓表禁止手动 CRUD（`POSITION_TABLE_PROTECTED`），现金修正走 `cash-position` 覆盖层（见下）。
+* 关闭/重开/删除投资人的生命周期保护见根 `AGENTS.md` §2.2/§2.3（`started_at` 语义、份额为零才能删投资人等）。
+
+* 存在 pending 申赎或 pending trade 时关闭 → `PENDING_TRANSACTIONS_EXIST`；已关闭再关 → `PORTFOLIO_ALREADY_CLOSED`；非 `closed` 调 reactivate → `PORTFOLIO_NOT_CLOSED`。
+
+* 持仓表禁止手动 CRUD（`POSITION_TABLE_PROTECTED`），现金修正走 `cash-position` 覆盖层（见下）。
+
+## 生命周期通用错误码
+
+* 已 confirmed 的 trade/subscription 直接 PUT → `CANNOT_MODIFY_CONFIRMED`；直接 DELETE → `CANNOT_DELETE_CONFIRMED`（须先 unconfirm）。
+
+* 场内 trade cancel → `CANNOT_CANCEL_EXCHANGE`。
+
+* unconfirm 时确认日（事件为 `ex_date`）及之后已有快照 → `SNAPSHOT_DEPENDENCY`。
+
+* 非交易日操作 → `NON_TRADING_DAY`。
+
+* 快照生成对 CASH `cash_amount < 0` 硬阻断 → `NEGATIVE_CASH`。
+
+## 量化产生点清单
+
+份额与金额统一 2 位小数、ROUND\_HALF\_UP、负数按绝对值对称；**量化只发生在下列产生点**，读取/累加路径不量化（规则本体见根 `AGENTS.md` §2.11）。
+
+* **份额产生点**（`quantize_shares`）：申购确认 `amount/nav`、调仓买入 `amount/price`、卖出与赎回的用户输入、份额事件的变动计算。
+
+* **金额产生点**（`quantize_amount`）：卖出与赎回确认 `shares×nav`、买入金额与手续费的用户输入、申赎金额、现金分红 `cash_change`、`forced_adjustment` 用户填写、`manual_market_value` 写入、现金转移金额、trade PUT 直改。
+
+* 估值口径（`market_value` / `total_value` / `unit_price`）保持 4 位、不进现金账本；DB 字段精度收紧留作后续迁移。
 
 ## 易错陷阱
 

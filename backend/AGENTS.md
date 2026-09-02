@@ -1,6 +1,6 @@
 # backend/AGENTS.md — 后端模块指南
 
-> 业务不变量/领域模型见根 `AGENTS.md`（§2-§3）；分层约定与架构见本文件 §1；**怎么跑、易踩坑**见 §2-§7。
+> 业务不变量/领域模型见根 `AGENTS.md` §2；错误码触发条件与字段级清单见 `docs/design/business-constraints.md`（**改 services/routers 前必读**）；分层约定与架构见本文件 §1；**怎么跑、易踩坑**见 §2-§7。
 
 ## 1. 架构
 
@@ -31,13 +31,34 @@
 
 业务核心集中在四个服务模块（函数级细节读源码）：
 
-* **`snapshot_service.py`**：快照生成/重算/校验；三表固定生成顺序（根 §2.1）；持仓增量累加与在途计算（根 §2.2）；级联回退与自动重确认（根 §3.4）。
+* **`snapshot_service.py`**：快照生成/重算/校验；三表固定生成顺序、级联回退与自动重确认（根 §2.6）；持仓增量累加与在途计算（根 §2.5）。入口：`generate_daily_snapshots`（单日生成）、`_delete_existing_snapshots`（删除 + 级联回退）、`recalculate_snapshots`（单一事务重算）、`auto_confirm_after_snapshot`（逐日重确认）。
+  - 单日生成的连续性校验（`SNAPSHOT_NOT_CONTINUOUS`）在**重算路径逐日重建时内部 bypass**；批量删除从最新日**倒序、逐日 commit**。
+  - 快照预校验（生成前提检查）对存在 `ex_date <= target_date` 的 pending 事件返回 **`failed`**（根 §2.6 只陈述「不存在会影响该日的 pending 记录」这一语义结论）。
+  - 取价实现为生成与预校验**共用同一函数**；`MISSING_NAV` 错误信息按 `[T=…]` / `[T-N=…]` 规则分组。
+  - 在途资金两类现金行**每日独立计算、不继承前日**。
+  - **可观测性**（#305）：重算 / catch-up / generate-next / 调度路径的响应（调度为任务日志）携带逐日 `auto_confirmed` 与 `warnings`，逐日错误条目含 `code`/`details`；auto_confirm 循环单条 DB 级失败经**连接级 savepoint** 隔离，不毒化 session、不产生级联误导性记录（连接级失效记 `SESSION_ABORTED` 后终止本段）。
 
-* **`position_service.py`**：可用现金/份额实时计算（根 §2.2/§2.3）；现金重估走 `manual_market_value` 覆盖层，绝不直写 `portfolio_position`。
+* **`position_service.py`**：可用现金/份额实时计算（根 §2.5/§2.3）；现金重估走 `manual_market_value` 覆盖层，绝不直写 `portfolio_position`。两条现金口径的函数级表达式：
 
-* **`trade_service.py`**：调仓创建/确认/取消；配对 CASH 腿与 transfer\_group 同步（根 §2.2/§3.3）。
+  ```
+  compute_cash_balance(T)：全量历史口径 = SUM(confirmed CASH trades WHERE confirm_date <= T)
+                                       + SUM(confirmed events WHERE ex_date <= T, cash_change != 0)；无快照时降级用
 
-* **`subscription_service.py`**：申赎创建/确认；首次申购净值 1.0000 并激活组合（根 §2.4/§3.1）。
+  calculate_available_cash(T?) = 最新快照日 portfolio_position 的 CASH cash_amount（基线）
+                               + SUM(confirmed CASH buys  WHERE confirm_date > 快照日 [AND confirm_date <= T])
+                               − SUM(confirmed CASH sells WHERE confirm_date > 快照日 [AND trade_date <= T])
+                               − SUM(pending CASH sells [WHERE trade_date <= T])
+                               + SUM(confirmed event cash_change WHERE ex_date > 快照日 [AND ex_date <= T])
+  ```
+
+  T（`as_of_date`）为空时不设上限。可用现金基线只取 `product_code == "CASH" and shares is None` 的行，在途行不计入。
+
+* **`trade_service.py`**：调仓创建/确认/取消（根 §2.5/§2.7）。配对腿同步的单一实现是 `sync_transfer_group`——只同步 `trade_date`/`status`/金额，**不传播 `confirm_date`**。
+  - `cash_transfers.py` 以 `cross_day` 字段（`schemas/cash_transfer.py`）区分当天完成与跨天到账；跨天判断（`list_cash_transfers`）**以 buy 腿为准**——`buy.status != "confirmed"` 或 `buy.confirm_date > buy.trade_date`；`confirm_cash_transfer` 确认组内所有仍为 pending 的 CASH 腿。
+
+* **`subscription_service.py`**：申赎创建/确认；首次申购净值 1.0000 并激活组合（根 §2.8/§2.2）。
+  - 申赎 `confirm_date` 恒取 `get_next_trading_day(apply_date, days=1)`；unconfirm 时**重算期望确认日而非置 None**，保持 pending 记录 `confirm_date` 非空，避免快照校验 `confirm_date <= target` 因 SQL NULL 比较漏检。
+  - **负现金防护重构**（#203）：#180 在申购 unconfirm 前的现金守卫已移除（该守卫曾阻断快照删除级联、异常被吞后产生孤儿记录），改由两处消费点防线拦截（根 §2.7）；存量负现金脏数据经快照 status 端点的 `negative_cash_platforms` 暴露，供运维处置。
 
 其余模块中需记住的设计点：`snapshot_recalc_job.py`（#89 异步重算：复用 sync\_job 表 + 线程池，同类型单 active 锁，终态经 `GET /api/sync-jobs/{id}` 轮询）；`product_service.py::calculate_confirm_days` 为确认天数单一实现。其他服务职责读各文件 docstring。
 
@@ -54,6 +75,8 @@
 * 外键删除行为均为 **RESTRICT**，通过业务流程（关闭/停用）管理生命周期，保留历史数据。
 
 * **虚拟产品**（#93）：除 `CASH`（生产为部署期种子落库）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向。维度标签（#128）：CASH 产品 `asset_class_code=ASSET_CASH`、其余四维 NULL；IN\_TRANSIT 五维全 NULL。
+
+* `is_qdii` 已降级为**纯展示标签**（除创建时推导 `confirm_days` 默认值外不参与任何业务分支）；滞后估值一律由 `nav_lag_days` 驱动。迁移 `0012` 仅回填场外 QDII，**港互认基金需由界面/CLI 手工设为 1**。
 
 * **资产分类五维度字典**（#128）：`asset_classification` 是正交维度值字典，五个维度 asset\_class（股票/债券/商品/现金，维持 4 类，REITs/另类按需再加）/region/style/size/segment（股票行业·债券期限·商品品种共用一维），产品以 5 个 FK 列挂维度值；字典种子单一事实来源为 `app/constants/asset_dimensions.py`（迁移与 `backend/tests/seed_base.py` 种子共用）。**维度值按需扩展（YAGNI），不为假想需求预留空值**；**asset\_class 的 `sort_order` 即前端饼图/分区色板序位，变更即改色**。分类信息仅读侧派生、快照表无分类列；前端二级分组默认股票→region、债券/商品→segment、现金平铺，可经组合级 `portfolio.display_config`（#144）按大类覆盖：JSON 列仅存显式覆盖项（NULL=默认），校验以 `asset_class_dimension_rule` 规则矩阵为准（无规则行的大类如现金不可配），大类一级分区不可变；PUT 显式传 null 或空对象 {} 清空（{} 归一为 NULL 入库）、不传不修改（哨兵区分，service 公开常量 UNSET）。
 
