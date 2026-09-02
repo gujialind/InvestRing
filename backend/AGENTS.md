@@ -31,13 +31,15 @@
 
 业务核心集中在四个服务模块（函数级细节读源码）：
 
-* **`snapshot_service.py`**：快照生成/重算/校验；三表固定生成顺序（根 §2.1）；持仓增量累加与在途计算（根 §2.2）；级联回退与自动重确认（根 §3.4）。
+* **`snapshot_service.py`**：快照生成/重算/校验；三表固定生成顺序（根 §2.4）；持仓增量累加与在途计算（根 §2.5）；级联回退与自动重确认（根 §3.6）。实现要点：① 持仓为**增量累加**——前日 CASH 基线 + 窗口内 confirmed CASH trades + event `cash_change` 增量 + `manual_market_value` 绝对覆盖；② 生成与预校验**共用同一取价实现**，`MISSING_NAV` 错误信息按 `[T=…]` / `[T-N=…]` 规则分组；③ 连续性校验（根 §2.4）只在单日入口生效，重算路径逐日重建时内部 bypass；④ 批量删除从最新日倒序、逐日 commit。
 
-* **`position_service.py`**：可用现金/份额实时计算（根 §2.2/§2.3）；现金重估走 `manual_market_value` 覆盖层，绝不直写 `portfolio_position`。
+* **`position_service.py`**：可用现金/份额实时计算（根 §2.6）；现金重估走 `manual_market_value` 覆盖层，绝不直写 `portfolio_position`。
 
-* **`trade_service.py`**：调仓创建/确认/取消；配对 CASH 腿与 transfer\_group 同步（根 §2.2/§3.3）。
+* **`trade_service.py`**：调仓创建/确认/取消；配对 CASH 腿与 transfer\_group 同步（根 §2.5/§3.4）。
 
-* **`subscription_service.py`**：申赎创建/确认；首次申购净值 1.0000 并激活组合（根 §2.4/§3.1）。
+* **`subscription_service.py`**：申赎创建/确认；首次申购净值 1.0000 并激活组合（根 §2.2/§3.2/§3.3）。
+
+**快照链可观测性**（#305）：重算 / catch-up / generate-next / 调度路径的响应（调度为任务日志）携带逐日 `auto_confirmed` 与 `warnings`，逐日错误条目含 `code`/`details`；auto\_confirm 循环单条 DB 级失败经**连接级 savepoint** 隔离，不毒化 session、不产生级联误导性记录（连接级失效记 `SESSION_ABORTED` 后终止本段）。存量负现金脏数据经快照 status 端点 `negative_cash_platforms` 暴露，交运维处置。
 
 其余模块中需记住的设计点：`snapshot_recalc_job.py`（#89 异步重算：复用 sync\_job 表 + 线程池，同类型单 active 锁，终态经 `GET /api/sync-jobs/{id}` 轮询）；`product_service.py::calculate_confirm_days` 为确认天数单一实现。其他服务职责读各文件 docstring。
 
@@ -52,6 +54,10 @@
 * `share_change_event` 双日期分级：`ex_date`（除息日，应用日）+ `entitlement_date`（权益登记日，基数日），要求 `ex_date > entitlement_date` 且均为交易日；`parent_event_id` 为基金级拆分子记录自引用。
 
 * 外键删除行为均为 **RESTRICT**，通过业务流程（关闭/停用）管理生命周期，保留历史数据。
+
+* **`nav_lag_days` 回填口径**：迁移 `0012` 只回填场外 QDII（置 1），香港互认基金需由界面/CLI 手工设为 1。
+
+* **DB 字段精度尚未收紧**到 2 位（留作后续迁移）：金额/份额的 2 位口径全靠 service 产生点量化保证（根 §2.7），指望 DB 约束兜底会漏。
 
 * **虚拟产品**（#93）：除 `CASH`（生产为部署期种子落库）外，迁移 0006 另种子 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL`，与 CASH 同构（`market=""`、`product_type="IN_TRANSIT"`、`confirm_days=0`）；以 `product_code` 区分方向。维度标签（#128）：CASH 产品 `asset_class_code=ASSET_CASH`、其余四维 NULL；IN\_TRANSIT 五维全 NULL。
 

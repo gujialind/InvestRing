@@ -228,7 +228,7 @@ def sync_price_data(
 
 
 def _mark_failed(db: Session, product: Product, msg: str):
-    # 不 commit（AGENTS.md §4.1）：sync_product_prices 捕获异常后返回 success=False
+    # 不 commit（backend/AGENTS.md §1.1）：sync_product_prices 捕获异常后返回 success=False
     # 而非上抛，失败标记经调用方正常路径 commit 持久化
     product.data_source_status = "failed"
     product.sync_error = msg[:1000] if msg else msg

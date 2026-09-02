@@ -1,5 +1,5 @@
 # ============================================================================
-# 单元测试：service 层不 commit（issue #58，AGENTS.md §4.1）
+# 单元测试：service 层不 commit（issue #58，backend/AGENTS.md §1.1）
 # ============================================================================
 # 断言以下 service 函数全程不调用 db.commit()（事务边界交调用方）：
 # - snapshot_service.generate_daily_snapshots / recalculate_snapshots
@@ -34,7 +34,7 @@ NEXT_DAY = date(2025, 6, 9)  # 下一交易日（周一）
 def _forbid_commit(monkeypatch, db):
     """将会话 commit 替换为断言失败，捕捉 service 层的违规提交"""
     def _fail(*args, **kwargs):
-        raise AssertionError("service 层不得调用 db.commit()（AGENTS.md §4.1）")
+        raise AssertionError("service 层不得调用 db.commit()（backend/AGENTS.md §1.1）")
     monkeypatch.setattr(db, "commit", _fail)
 
 

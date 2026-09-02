@@ -5,7 +5,7 @@
 - submit_snapshot_recalc_job：落 job 记录（job_type=snapshot_recalc）并提交后台线程，
   立即返回 job_id，客户端经 GET /api/sync-jobs/{id} 轮询终态，消除 HTTP 超时后
   「已提交成功 or 已整体回滚」不可判定的问题。
-- 后台执行体自持 SessionLocal（AGENTS.md §4.1 分层例外），保持 recalculate_snapshots
+- 后台执行体自持 SessionLocal（backend/AGENTS.md §1.1 分层例外），保持 recalculate_snapshots
   的单一事务语义：无 errors 统一 commit、任一日失败整体 rollback。
 
 锁语义：snapshot_recalc 与价格同步任务互不阻塞，各自单 active 锁。
