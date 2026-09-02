@@ -1,8 +1,24 @@
-# frontend/AGENTS.md — 前端模块操作指南
+# frontend/AGENTS.md — 前端模块指南
 
-> 双端路由/Proxy 约定与组件复用三层模型见根 `AGENTS.md` §5；视觉规范（语义色/涨跌色/图表色/数字格式）见 `docs/design/visual-spec.md`——**写前端代码前必读**。本文件只写怎么跑、怎么验。
+> 视觉规范（语义色/涨跌色/图表色/数字格式）见 `docs/design/visual-spec.md`——**写前端代码前必读**。
 
-## 质量门禁
+## 1. 架构
+
+技术栈版本以 `frontend/package.json` 为准（Next.js + React + Tailwind + shadcn/ui + Zustand + react-query；E2E 用 Playwright）。
+
+### 1.1 双端路由与 Proxy
+
+* 移动端 `/m/` 前缀、PC 端根路径；`src/proxy.ts`（Next 16 起由 `middleware.ts` 更名）按 User-Agent 自动重定向；未登录（无 `token` cookie）重定向到对应登录页。页面清单直接看 `src/app/**/page.tsx`；移动端多为薄壳页，套 `MobileLayout` 后渲染共享内容组件。
+
+### 1.2 组件复用
+
+* 复用三层：完全共享（`hooks/`、`stores/`、`components/ui/`、`types/`）→ 共享业务组件（`components/shared/`，以 `variant: "desktop" | "mobile"` + `basePath` 适配双端）→ 端侧独立（`components/mobile/`、`desktop/`、`layout/`、`charts/`）。
+
+* API 层 `src/lib/api/` 按域拆分、经 `index.ts` barrel 统一导出（`@/lib/api`）；`next.config.js` 将 `/api/:path*` rewrite 到 `API_BASE_URL`（默认 localhost:8000）。
+
+***
+
+## 2. 质量门禁
 
 ```bash
 ../scripts/verify-frontend.sh        # 推送前本地门禁（与 CI frontend-check 同口径）
@@ -11,7 +27,7 @@
 
 等价于 `npm run lint` + `npx tsc --noEmit` + `npm run test` + `npm run build`；构建期强制 0 error。
 
-## 单元测试（Vitest，issue #253）
+## 3. 单元测试（Vitest，issue #253）
 
 ```bash
 npm run test         # vitest run（全量，<10s）
@@ -22,7 +38,7 @@ npm run test:watch   # watch 模式
 - 约定：测试与源码 colocated（`src/lib/*.test.ts`），显式 `import { describe, it, expect } from "vitest"`（未开 globals）；alias `@` 在 `vitest.config.ts` 手动维护。
 - 注意：`src/lib/api/` 是纯类型化 axios 薄封装（无数据转换逻辑），不在单测范围；新增 lib 纯函数应同步补测试。
 
-## E2E（Playwright）
+## 4. E2E（Playwright）
 
 ```bash
 python3 backend/scripts/run_e2e_backend.py   # 1. 起本地后端（自动种子，监听 :8000）
@@ -38,8 +54,3 @@ npm run test:e2e                             # 3. 跑测试
 - **优雅 skip 惯例**：缺业务数据的用例 `test.skip` 而非失败（如无 pending 交易、无快照）；**新增 spec 遵循同一惯例**，但注意——若种子退化（如无组合），用例会在 CI 静默全 skip、覆盖无声蒸发，改种子时对照 `e2e/*.spec.ts` 头部「数据说明」注释。
 - `auth.spec.ts` 三用例必须通过（登录是硬依赖）；platform-select-search 部分用例还需 ≥2 平台/≥2 投资人/产品。
 - projects：setup / chromium（桌面）/ mobile（iPhone 13 webkit）；部分用例是端专属（另一端内 skip，属预期）。
-
-## 其他
-
-- `/api/:path*` 经 `next.config.js` rewrite 到 `API_BASE_URL`（默认 localhost:8000）。
-- 页面清单直接看 `src/app/**/page.tsx`；移动端多为薄壳页套 `MobileLayout`。
