@@ -73,10 +73,11 @@ draft ──首次申购确认──▶ active ──close──▶ closed ─�
 | --- | --- | --- |
 | 价格来源 | 收盘价（调仓录入时必填） | 单位净值（T 日；未同步则拒绝，禁止向前回退） |
 | `confirm_days`（确认间隔） | 恒 0（校验强制） | 缺省推导：`CN_OTC` 1、QDII 2、`HK_MUTUAL` 1 |
-| `nav_lag_days`（快照估值滞后） | 恒 0（校验强制） | 默认 0；QDII 由迁移 0012 回填 1，港互认需手工置 1 |
+| `nav_lag_days`（快照估值滞后） | 强制 0（`validate_nav_lag_days`） | **逐产品自设、不由类型/市场推导**（`product.nav_lag_days`，默认 0）；QDII/港互认惯例置 1（QDII 迁移 0012 回填、港互认手工） |
 | 可否 cancel | 否 | 是 |
 | 数据源 | tushare / akshare | tushare 不支持 `HK_MUTUAL`，走 akshare |
 
+* **`nav_lag_days` 是 `product` 表的独立列**（NOT NULL、默认 0）：快照估值滞后**逐产品单独设置、不由产品类型/市场推导**（`is_qdii` 仅为展示标签，取价见 §2.6），与按 `market`+`is_qdii` **推导**的 `confirm_days` 是两套机制。唯一硬约束：场内 `CN_EXCHANGE` 经 `validate_nav_lag_days` 强制为 0；QDII/港互认置 1 是惯例与迁移 0012 回填的结果，非按类型自动映射。
 * **一码多市场**：LOF 在场内场外各是一条独立产品记录，业务操作只给 `product_code` 时必须显式指定 `market`。
 * **虚拟产品**：`CASH` 与 `IN_TRANSIT_BUY` / `IN_TRANSIT_SELL` 与基金同构（`market=""`、`confirm_days=0`），不可直接交易，只由业务流程生成（§2.5）。
 * **五维分类**：产品挂 asset_class / region / style / size / segment 五个正交维度值，「必填/禁止」语义由 DB 两张规则表驱动（详见 `backend/AGENTS.md` §1.4）。分类信息只在读侧派生、**快照表无分类列**——不要在写侧或快照链路引入 `asset_type` 冗余（#128）。
