@@ -6,7 +6,7 @@
 
 冻结份额/现金必须**实时计算**，不能仅读快照 `frozen_shares` / `frozen_amount`。
 
-* **基金可用份额** = 最新快照份额 − SUM(pending 卖出) − SUM(快照未覆盖的 confirmed 卖出) + SUM(快照未覆盖的 confirmed 事件**负向** `shares_change`，`ex_date > 最新快照日` [≤ T])。
+* **基金可用份额**（#277）= 最新快照份额 − SUM(pending 卖出) − SUM(快照未覆盖的 confirmed 卖出) + SUM(快照未覆盖的 confirmed 事件**负向** `shares_change`，`ex_date > 最新快照日` [≤ T])。
   - 事件增量**只计平台级行**（`platform_code IS NOT NULL`）——基金级父记录持汇总值，父子同计会双算。
   - **正向变动不计入**：入快照前保守低估，防事件被撤销后已放行的卖出成为事实超卖。
 * **投资人可用份额** = 最新快照份额 − SUM(pending 赎回) − SUM(快照未覆盖的 confirmed 赎回)。份额变动事件不并入——组合份额仅因申赎变化，事件作用于基金/平台维度、不改投资人份额账本。

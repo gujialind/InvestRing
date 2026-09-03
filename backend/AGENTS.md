@@ -33,6 +33,8 @@
 
 * **`snapshot_service.py`**：快照生成/重算/校验；三表固定生成顺序、级联回退与自动重确认（根 §2.6）；持仓增量累加与在途计算（根 §2.5）。入口：`generate_daily_snapshots`（单日生成）、`_delete_existing_snapshots`（删除 + 级联回退）、`recalculate_snapshots`（单一事务重算）、`auto_confirm_after_snapshot`（逐日重确认）。
   - 单日生成的连续性校验（`SNAPSHOT_NOT_CONTINUOUS`）在**重算路径逐日重建时内部 bypass**；批量删除从最新日**倒序、逐日 commit**。
+  - 级联回退（`_cascade_unconfirm_*`）的日期键：申赎按 `apply_date == D`、事件按 `entitlement_date == D`（`ex_date == D` 但 `entitlement_date < D` 的事件基数快照仍在，保持 confirmed、重建时被重新应用）；**交易不级联**——其取价依赖产品行情而非组合快照。
+  - `auto_confirm_after_snapshot(D)` 确认口径：`apply_date <= D` 的 pending 申赎、`confirm_date == 下一交易日(D)` 的 pending 交易、`ex_date == 下一交易日(D)` 的 pending 事件（仅父/独立记录）；跨天转移两腿均 pending 时同组确认。
   - 快照预校验（生成前提检查）对存在 `ex_date <= target_date` 的 pending 事件返回 **`failed`**（根 §2.6 只陈述「不存在会影响该日的 pending 记录」这一语义结论）。
   - 取价实现为生成与预校验**共用同一函数**；`MISSING_NAV` 错误信息按 `[T=…]` / `[T-N=…]` 规则分组。
   - **可观测性**（#305）：重算 / catch-up / generate-next / 调度路径的响应（调度为任务日志）携带逐日 `auto_confirmed` 与 `warnings`，逐日错误条目含 `code`/`details`；auto_confirm 循环单条 DB 级失败经**连接级 savepoint** 隔离，不毒化 session、不产生级联误导性记录（连接级失效记 `SESSION_ABORTED` 后终止本段）。
