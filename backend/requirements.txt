@@ -36,7 +36,7 @@ tushare==1.4.29
 # 破环镜像构建（issue #170 冒烟门禁发现，#196 引入 akshare 后构建即断）
 akshare==1.18.94
 lxml==6.1.2
-simplejson==4.1.1
+simplejson==4.1.2
 
 # uvicorn dependency
 click==8.4.2
