@@ -1,6 +1,8 @@
 # CI E2E 种子入口（issue #222）：替代已退役的 scripts/init_data.py。
 # 种子体与 pytest 同源（tests/seed_base.py）：维度字典/适用关系/平台/产品/
-# 日历/draft 组合 E2E_PORT/ADMIN(admin@2026)/VIEWER。
+# 日历/draft 组合 E2E_PORT/ADMIN(admin@2026)/VIEWER；E2E 专属活跃组合
+# E2E_ACTIVE（issue #354，含申购/交易/快照/pending 交易）由 seed_e2e_active
+# 追加，仅 E2E 消费方调用、不进 pytest session 种子。
 #
 # 用法（须先设置 DATABASE_URL，指向 CI 的 ir_e2e 库）：
 #   DATABASE_URL=mysql+pymysql://... python scripts/seed_e2e.py
@@ -16,11 +18,12 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 from app.database import SessionLocal  # noqa: E402
-from tests.seed_base import seed_base_data  # noqa: E402
+from tests.seed_base import seed_base_data, seed_e2e_active  # noqa: E402
 
 db = SessionLocal()
 try:
     seed_base_data(db)
+    seed_e2e_active(db)
     print(f"E2E 种子完成（目标库：{os.environ['DATABASE_URL'].split('@')[-1]}）")
 finally:
     db.close()

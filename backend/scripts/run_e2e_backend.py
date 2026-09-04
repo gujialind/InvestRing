@@ -24,11 +24,12 @@ if os.path.exists(E2E_DB_PATH):
 
 from app.main import app  # noqa: E402  （import 期完成 create_all）
 from app.database import SessionLocal  # noqa: E402
-from tests.seed_base import seed_base_data  # noqa: E402
+from tests.seed_base import seed_base_data, seed_e2e_active  # noqa: E402
 
 db = SessionLocal()
 try:
     seed_base_data(db)
+    seed_e2e_active(db)
 finally:
     db.close()
 
