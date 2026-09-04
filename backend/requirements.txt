@@ -13,7 +13,7 @@ python-multipart==0.0.32  # issue #252: PYSEC-2026-3037/3036/3040 修复版（30
 pymysql==1.2.0  # issue #252: PYSEC-2026-502 修复版
 
 # Data
-pandas==3.0.2
+pandas==3.0.5
 numpy==2.5.2
 python-dateutil==2.9.0.post0
 
