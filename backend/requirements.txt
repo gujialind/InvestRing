@@ -19,7 +19,7 @@ python-dateutil==2.9.0.post0
 
 # HTTP & Network
 httpx==0.28.1
-requests==2.33.1
+requests==2.34.2
 urllib3==2.7.0  # issue #252: PYSEC-2026-142/141 修复版
 certifi==2026.7.22
 
