@@ -3,7 +3,7 @@
 
 从 routers/tasks.py 提取的任务执行逻辑，供 CLI 和 router 共用。
 
-事务边界说明（AGENTS.md §4.1 的编排层例外）：
+事务边界说明（backend/AGENTS.md「分层目录与职责」节的编排层例外）：
 本模块是长批处理任务的编排层，多日快照回补/逐产品远程同步需保留部分成功，
 故保留有意的 checkpoint 提交（逐日/逐产品 commit）；单次性原子操作
 （如 cleanup_old_logs）则不 commit，交调用方。
@@ -34,7 +34,7 @@ def cleanup_old_logs(db: Session) -> dict:
     - 净值同步明细：保留 90 天
     - 系统错误日志：保留 30 天
 
-    不 commit（AGENTS.md §4.1），事务边界交调用方（router tasks）。
+    不 commit（backend/AGENTS.md「分层目录与职责」节），事务边界交调用方（router tasks）。
     """
     from app.models.login_log import LoginLog
     from app.models.audit_log import AuditLog

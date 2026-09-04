@@ -5,7 +5,7 @@
 三张快照表按固定顺序生成：portfolio_position → portfolio_value_snapshot → investor_holding
 
 注意：catch_up_snapshots / generate_next_snapshot 属编排层函数（issue #84），
-采用逐日 checkpoint commit/rollback，是 AGENTS.md §4.1「service 不 commit」
+采用逐日 checkpoint commit/rollback，是 backend/AGENTS.md「分层目录与职责」节「service 不 commit」
 的编排层例外（与 task_runner._generate_snapshots_for_date 语义一致）：
 多日回补中已完成的日子须保留，失败日仅回滚当日。
 """
@@ -240,7 +240,7 @@ def generate_daily_snapshots(
         BusinessError: SNAPSHOT_NOT_CONTINUOUS——目标日与已有快照不连续
 
     Note:
-        本函数不 commit/rollback（AGENTS.md §4.1，事务边界交调用方），
+        本函数不 commit/rollback（backend/AGENTS.md「分层目录与职责」节，事务边界交调用方），
         仅 flush 保证同一事务内后续读取（如重算次日循环、auto_confirm）可见。
     """
     # 1. 前置校验
@@ -350,7 +350,7 @@ def recalculate_snapshots(
         重算结果
 
     Note:
-        本函数全程不 commit/rollback（issue #58，AGENTS.md §4.1）：
+        本函数全程不 commit/rollback（issue #58，backend/AGENTS.md「分层目录与职责」节）：
         删旧快照、级联回退、重建、auto_confirm 全部停留在同一事务内，
         由调用方在无 errors 时统一 commit、有 errors 时统一 rollback，
         对外表现为「要么完整成功，要么无变化」。
@@ -504,7 +504,7 @@ def catch_up_snapshots(
     从最新快照日的下一交易日起，逐交易日追平快照至 to_date（含）。
 
     每日 generate_daily_snapshots + auto_confirm_after_snapshot + commit
-    （编排层 checkpoint，AGENTS.md §4.1 例外）；单日失败 rollback 当日并停止，
+    （编排层 checkpoint，backend/AGENTS.md「分层目录与职责」节的例外）；单日失败 rollback 当日并停止，
     已成功的日子保留，结果附 failed_date 与 error。
 
     Raises:
@@ -604,7 +604,7 @@ def generate_next_snapshot(
     """
     生成最新快照日的下一个交易日快照（单日顺延）。
 
-    生成 + auto_confirm 后即 commit（编排层 checkpoint，AGENTS.md §4.1 例外）。
+    生成 + auto_confirm 后即 commit（编排层 checkpoint，backend/AGENTS.md「分层目录与职责」节的例外）。
 
     Raises:
         NotFoundError: PORTFOLIO_NOT_FOUND——组合不存在
@@ -661,7 +661,7 @@ def list_portfolio_snapshots(
     （与 market_data_service.get_nav_coverage 同模式）。
     返回 {"items": [PortfolioValueSnapshot...], "total": int}，
     total 为 limit 截断前的过滤后计数（total > len(items) 即被截断）。
-    不 commit、不抛 HTTPException（分层约定 §4.1）。
+    不 commit、不抛 HTTPException（分层约定见 backend/AGENTS.md「分层目录与职责」节）。
     """
     if start_date and end_date and start_date > end_date:
         raise BusinessError(
@@ -781,7 +781,7 @@ def _is_trading_day(db: Session, target_date: date) -> bool:
 
 def _validate_snapshot_continuity(db: Session, portfolio_code: str, target_date: date):
     """
-    校验快照连续性（AGENTS.md §2.1）：
+    校验快照连续性（根 AGENTS.md「快照」节）：
     - 无快照时（首次生成）不限制；
     - target_date == 最新快照日：允许（重建最新一日，无空洞、无下游依赖）；
     - target_date == 最新快照日的下一个交易日：允许（正常顺延）；

@@ -114,7 +114,7 @@ def sync_trading_calendar(
     """
     try:
         result = sync_service(db=db, year=request.year)
-        # service 不 commit（AGENTS.md §4.1），事务边界在 router
+        # service 不 commit（backend/AGENTS.md「分层目录与职责」节），事务边界在 router
         db.commit()
         return TradingCalendarSyncResponse(
             synced_count=result["synced_count"],

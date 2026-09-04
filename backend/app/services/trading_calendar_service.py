@@ -29,7 +29,7 @@ def sync_trading_calendar(db: Session, year: int) -> Dict[str, Any]:
         TushareAPIError: API 调用失败
 
     Note:
-        本函数不 commit（AGENTS.md §4.1），事务边界交调用方。
+        本函数不 commit（backend/AGENTS.md「分层目录与职责」节），事务边界交调用方。
     """
     # 从 Tushare 获取交易日历数据
     calendar_data = get_trade_calendar(year)

@@ -49,7 +49,7 @@ class TushareAPIError(Exception):
 
 
 def _rate_limit_sleep():
-    """每次 pro.xxx() 调用前 sleep，per-API-call 粒度（满足 §7.4 ≥0.3s）"""
+    """每次 pro.xxx() 调用前 sleep，per-API-call 粒度（sleep 时长由 settings.tushare_rate_interval 控制，满足 Tushare 官方限频）"""
     time.sleep(get_settings().tushare_rate_interval)
 
 
