@@ -12,8 +12,11 @@
  *   - 落库口径：创建后列表「金额」列显示净额；编辑 Dialog 预填双维度、差恰为手续费；
  *   - 卖出方向金额为纯派生量（#190）：只读展示毛额/实际到账，未填价格不展示。
  *
- * 数据说明：依赖首个组合（种子 E2E_PORT）+ 平台/产品数据；缺失时按惯例优雅
- * skip。种子零现金而买入创建按扣款平台校验可用现金，落库用例先经 API
+ * 数据说明：组合经 helpers 按 code 直达种子 draft 组合 E2E_PORT（#354），缺组合
+ * 即硬失败、不 skip；平台/产品数据缺失时仍优雅 skip。本 spec 结构性绑定 E2E_PORT
+ * 而非 E2E_ACTIVE：落库用例（用例 7）依赖零快照组合的 1.0000 首购窗口经 API
+ * 「申购+确认」注入现金，在已有快照的 E2E_ACTIVE 上会 NAV_NOT_AVAILABLE。
+ * 种子零现金而买入创建按扣款平台校验可用现金，落库用例先经 API
  * 「申购+确认」向所选平台注入现金（申购确认日 T+1，申请日取交易日前一工作日，
  * 种子日历工作日即交易日；首购按净值 1.0 确认，残留申购不清理、重复注入无害）。
  * 落库用例真实创建一笔买入并在用例内删除清理；创建前另经 API 清除同自然键
@@ -23,52 +26,21 @@
  * 同构），mobile project 自动覆盖，无需单独用例。
  */
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import {
+  E2E_PORT,
+  authHeaders,
+  collectPageErrors,
+  dialogByTitle,
+  gotoPortfolioSubpage,
+} from './helpers';
 
-/**
- * 收集页面未捕获异常（客户端崩溃防线），用例末尾断言为空。
- * 豁免 Next.js standalone/mobile 的 RSC `_rsc` prefetch 被 middleware 拦下的
- * 框架级 `access control` 噪音，与 product-select-market.spec.ts 同口径。
- */
-function collectPageErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => {
-    const msg = e.message;
-    if (/access control checks/.test(msg) && /_rsc=/.test(msg)) return;
-    errors.push(msg);
-  });
-  return errors;
-}
-
-/** 进入组合列表，返回首个组合详情页路径（无组合数据优雅 skip） */
-async function firstPortfolioHref(page: Page): Promise<string> {
-  await page.goto('/portfolio');
-  const firstDetailLink = page.locator('a[href*="/portfolio/"]').first();
-  try {
-    await firstDetailLink.waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    test.skip(true, '环境中没有组合数据');
-  }
-  const href = await firstDetailLink.getAttribute('href');
-  if (!href) throw new Error('组合详情链接缺少 href');
-  return href;
-}
-
-/** 按弹窗标题定位业务 Dialog（Popover 弹层同样带 role=dialog，需用文案区分） */
-function dialogByTitle(page: Page, title: string | RegExp): Locator {
-  return page.locator('[role="dialog"]').filter({ hasText: title }).first();
-}
-
-/** 进入首个组合的调仓交易页并打开「提交交易」Dialog（附带组合 code 供 API 注入现金） */
+/** 进入 E2E_PORT 调仓交易页并打开「提交交易」Dialog（附带组合 code 供 API 注入现金） */
 async function openTradeDialog(page: Page): Promise<{ dlg: Locator; portfolioCode: string }> {
-  const href = await firstPortfolioHref(page);
-  // href 形如 /portfolio/{code}（mobile 为 /m/portfolio/{code}），组合 code 为末段
-  const portfolioCode = href.split('/').filter(Boolean).pop() ?? '';
-  await page.goto(`${href}/trades`);
-  await page.getByRole('button', { name: '提交交易' }).first().waitFor({ timeout: 15_000 });
+  await gotoPortfolioSubpage(page, E2E_PORT, 'trades');
   await page.getByRole('button', { name: '提交交易' }).first().click();
   const dlg = dialogByTitle(page, '提交交易');
   await dlg.waitFor();
-  return { dlg, portfolioCode };
+  return { dlg, portfolioCode: E2E_PORT };
 }
 
 /** 选中首个产品（可搜索下拉，无产品数据优雅 skip），返回所选 code/market */
@@ -118,16 +90,6 @@ function toISODate(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${m}-${day}`;
-}
-
-/**
- * 后端仅认 Authorization: Bearer 头（token 存 localStorage，无 cookie 回退），
- * page.request 不会自动附带，须从页面 localStorage 显式读取后传递
- */
-async function authHeaders(page: Page): Promise<{ Authorization: string }> {
-  const token = await page.evaluate(() => window.localStorage.getItem('token'));
-  expect(token, '页面 localStorage 中缺少登录 token，无法调用后端 API').toBeTruthy();
-  return { Authorization: `Bearer ${token}` };
 }
 
 /**

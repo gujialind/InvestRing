@@ -235,10 +235,11 @@ jobs:
   # 后端跑在 MySQL 8.4 上（对齐 backend-test-mysql 的"对齐生产 RDS"哲学）。
   #
   # 运行前提（勿删）：
-  #   - E2E 登录用例依赖 ADMIN/admin@2026 用户，业务冒烟用例依赖 draft 组合
-  #     E2E_PORT（无组合时 spec 优雅 skip、覆盖静默蒸发），两者均由
-  #     scripts/seed_e2e.py 种子产生（种子体与 pytest 同源：tests/seed_base.py），
-  #     删除 seed 步骤登录必挂
+  #   - E2E 登录用例依赖 ADMIN/admin@2026 用户，业务 spec 经 e2e/helpers.ts 按 code
+  #     直达两个种子组合：draft E2E_PORT（表单交互/首购激活）+ active E2E_ACTIVE
+  #     （#354：快照/持仓/编辑交易，消除旧「无组合即静默全 skip、覆盖蒸发」），
+  #     均由 scripts/seed_e2e.py 种子产生（种子体与 pytest 同源：tests/seed_base.py），
+  #     删除 seed 步骤登录必挂、业务 spec 因缺组合硬失败
   #   - 前端 next.config.js 将 /api/* rewrite 到 localhost:8000，故需真实后端
   frontend-e2e:
     name: "Frontend E2E"
@@ -296,8 +297,9 @@ jobs:
           python -c "from app.database import engine, Base; import app.models; Base.metadata.create_all(bind=engine)"
           alembic upgrade head
 
-      # 种子 ADMIN/admin@2026 + draft 组合 E2E_PORT（E2E 登录与业务冒烟依赖，勿删；
-      # 种子体与 pytest 同源：backend/tests/seed_base.py，issue #222）
+      # 种子 ADMIN/admin@2026 + draft 组合 E2E_PORT + active 组合 E2E_ACTIVE
+      # （E2E 登录与业务 spec 按 code 直达依赖，勿删；种子体与 pytest 同源：
+      # backend/tests/seed_base.py，issue #222 / #354）
       - name: Seed E2E base data
         working-directory: backend
         env:

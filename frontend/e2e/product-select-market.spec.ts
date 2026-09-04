@@ -28,59 +28,22 @@
  * page 级 role=listbox 定位（Select portal 到 body）。市场 Badge / 回显文本
  * 断言保留——那是用户可见契约，不是实现耦合。
  *
- * 数据说明：依赖 seed_base.py 的 161017.SZ/161017.OF LOF 双市场种子（#259）；
- * 无种子/无组合数据时优雅 skip，不在 CI 造数据。双端复跑：TradesContent 为共享
- * 组件（「提交交易」Dialog 双端同构），mobile project 自动覆盖，无需单独用例。
+ * 数据说明：组合经 helpers 按 code 直达种子 draft 组合 E2E_PORT（#354），缺组合
+ * 即硬失败、不 skip；产品断言依赖 seed_base.py 的 161017.SZ/161017.OF LOF 双市场
+ * 种子（#259），无该种子时优雅 skip（条件性数据），不在 CI 造数据。双端复跑：
+ * TradesContent 为共享组件（「提交交易」Dialog 双端同构），mobile project 自动覆盖。
  */
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { E2E_PORT, collectPageErrors, dialogByTitle, gotoPortfolioSubpage } from './helpers';
 
 /** LOF 双市场种子常量（与 backend/tests/seed_base.py 的 #259 种子一致） */
 const LOF_NAME = '富国中证500指数增强(LOF)A';
 const LOF_SZ = { code: '161017.SZ', market: 'CN_EXCHANGE', marketName: 'A股场内' };
 const LOF_OTC = { code: '161017.OF', market: 'CN_OTC', marketName: '内地场外' };
 
-/**
- * 收集页面未捕获异常（客户端崩溃防线），用例末尾断言为空。
- * 豁免 Next.js standalone/mobile 的 RSC `_rsc` prefetch 被 middleware 拦下的
- * 框架级 `access control` 噪音（`/m/portfolio/..._rsc=... due to access control checks`）。
- * 该报错由移动端路由重定向 + RSC prefetch 触发，页面功能与渲染均正常
- * （本仓库 mobile project 导航至组合详情页时必然出现），非产品 bug；其余错误照常严格断言。
- */
-function collectPageErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => {
-    const msg = e.message;
-    // 仅豁免确认无害的 Next.js RSC 移动端访问控制噪音；其余（真实 JS 崩溃/异常）保留
-    if (/access control checks/.test(msg) && /_rsc=/.test(msg)) return;
-    errors.push(msg);
-  });
-  return errors;
-}
-
-/** 进入组合列表，返回首个组合详情页路径（mobile project 经 middleware 重定向拿到 /m 前缀路径） */
-async function firstPortfolioHref(page: Page): Promise<string> {
-  await page.goto('/portfolio');
-  const firstDetailLink = page.locator('a[href*="/portfolio/"]').first();
-  try {
-    await firstDetailLink.waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    test.skip(true, '环境中没有组合数据');
-  }
-  const href = await firstDetailLink.getAttribute('href');
-  if (!href) throw new Error('组合详情链接缺少 href');
-  return href;
-}
-
-/** 按弹窗标题定位业务 Dialog（Popover 弹层同样带 role=dialog，需用文案区分） */
-function dialogByTitle(page: Page, title: string | RegExp): Locator {
-  return page.locator('[role="dialog"]').filter({ hasText: title }).first();
-}
-
-/** 进入首个组合的调仓交易页并打开「提交交易」Dialog（双端共享，无需按 project 区分） */
+/** 进入 E2E_PORT 调仓交易页并打开「提交交易」Dialog（双端共享，无需按 project 区分） */
 async function openSubmitTradeDialog(page: Page): Promise<Locator> {
-  const href = await firstPortfolioHref(page);
-  await page.goto(`${href}/trades`);
-  await page.getByRole('button', { name: '提交交易' }).first().waitFor({ timeout: 15_000 });
+  await gotoPortfolioSubpage(page, E2E_PORT, 'trades');
   await page.getByRole('button', { name: '提交交易' }).first().click();
   const dlg = dialogByTitle(page, '提交交易');
   await dlg.waitFor();
