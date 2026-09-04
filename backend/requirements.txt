@@ -39,7 +39,7 @@ lxml==6.1.2
 simplejson==4.1.2
 
 # uvicorn dependency
-click==8.4.2
+click==8.5.0
 
 # Transitive dependencies（显式钉住 fastapi 的传递依赖，issue #314）
 # 钉版原因：fastapi 仅声明 starlette>=0.46.0（无上界），故其版本由每次构建时 pip 现场解析决定、
