@@ -18,77 +18,37 @@
  * 选项行 data-code 属性读取，不依赖 Tailwind 工具类与 lucide 图标类名；
  * 触发按钮回显文本断言保留——那是用户可见契约，不是实现耦合。
  *
- * 数据说明：搜索词不写死——打开弹层读取第一个平台选项推导；无组合/平台/
- * 投资人数据时按 regression.spec.ts 惯例优雅 skip，不在 CI 造数据。
+ * 数据说明：组合经 helpers 按 code 直达种子 draft 组合 E2E_PORT（#354），缺组合
+ * 即硬失败、不 skip；搜索词不写死——打开弹层读取第一个平台选项推导；平台数 < 2、
+ * 无平台数据等条件性数据仍优雅 skip，不在 CI 造数据。
  */
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import {
+  E2E_PORT,
+  collectPageErrors,
+  dialogByTitle,
+  gotoPortfolioSubpage,
+  portfolioPath,
+} from './helpers';
 
-/**
- * 收集页面未捕获异常（客户端崩溃防线），用例末尾断言为空。
- * 豁免 Next.js standalone/mobile 的 RSC `_rsc` prefetch 被重定向层拦下的
- * 框架级 `access control` 噪音（`/m/...?_rsc=... due to access control checks`），
- * 与 product-select-market.spec.ts 同口径：页面功能与渲染均正常，非产品 bug；
- * 其余错误照常严格断言。
- */
-function collectPageErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => {
-    const msg = e.message;
-    // 仅豁免确认无害的 Next.js RSC 移动端访问控制噪音；其余（真实 JS 崩溃/异常）保留
-    if (/access control checks/.test(msg) && /_rsc=/.test(msg)) return;
-    errors.push(msg);
-  });
-  return errors;
-}
-
-/** 进入组合列表，返回首个组合详情页路径（mobile project 经 middleware 重定向拿到 /m 前缀路径） */
-async function firstPortfolioHref(page: Page): Promise<string> {
-  await page.goto('/portfolio');
-  const firstDetailLink = page.locator('a[href*="/portfolio/"]').first();
-  try {
-    await firstDetailLink.waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    test.skip(true, '环境中没有组合数据');
-  }
-  const href = await firstDetailLink.getAttribute('href');
-  if (!href) throw new Error('组合详情链接缺少 href');
-  return href;
-}
-
-/** 进入首个组合的调仓交易页（等待客户端渲染信号：提交交易按钮） */
+/** 进入 E2E_PORT 调仓交易页（桌面渲染信号：提交交易按钮） */
 async function gotoTradesPage(page: Page): Promise<void> {
-  const href = await firstPortfolioHref(page);
-  await page.goto(`${href}/trades`);
-  await page.getByRole('button', { name: '提交交易' }).first().waitFor({ timeout: 15_000 });
+  await gotoPortfolioSubpage(page, E2E_PORT, 'trades');
 }
 
-/** 进入首个组合的申赎页（draft 组合触发按钮文案为「首次申购激活」） */
+/** 进入 E2E_PORT 申赎页（draft 组合触发按钮文案为「首次申购激活」） */
 async function gotoSubscriptionsPage(page: Page): Promise<void> {
-  const href = await firstPortfolioHref(page);
-  await page.goto(`${href}/subscriptions`);
-  await page
-    .getByRole('button', { name: /提交申请|首次申购激活/ })
-    .first()
-    .waitFor({ timeout: 15_000 });
+  await gotoPortfolioSubpage(page, E2E_PORT, 'subscriptions');
 }
 
-/** 进入首个组合的持仓页（桌面端；移动端无「现金转移」入口，调用方需 skip mobile） */
+/** 进入 E2E_PORT 持仓页（桌面端；移动端无「更新非净值资产」入口，调用方需 skip mobile） */
 async function gotoPositionsPage(page: Page): Promise<void> {
-  const href = await firstPortfolioHref(page);
-  await page.goto(`${href}/positions`);
-  await page.getByRole('button', { name: '更新非净值资产' }).waitFor({ timeout: 15_000 });
+  await gotoPortfolioSubpage(page, E2E_PORT, 'positions');
 }
 
-/** 进入首个组合的份额变动事件页（等待客户端渲染信号：新建事件按钮） */
+/** 进入 E2E_PORT 份额变动事件页（渲染信号：新建事件按钮） */
 async function gotoShareChangeEventsPage(page: Page): Promise<void> {
-  const href = await firstPortfolioHref(page);
-  await page.goto(`${href}/share-change-events`);
-  await page.getByRole('button', { name: '新建事件' }).waitFor({ timeout: 15_000 });
-}
-
-/** 按弹窗标题定位业务 Dialog（Popover 弹层同样带 role=dialog，需用文案区分） */
-function dialogByTitle(page: Page, title: string | RegExp): Locator {
-  return page.locator('[role="dialog"]').filter({ hasText: title }).first();
+  await gotoPortfolioSubpage(page, E2E_PORT, 'share-change-events');
 }
 
 /**
@@ -181,7 +141,6 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     // 「不含」侧：默认（全部平台）进页面，列表请求不带 platform_code。
     // useTradeList staleTime=30s——选平台再切回「全部平台」会命中 fresh 缓存不发请求，
     // 故「不含」断言锚定进页面的初始请求，而非切回后的请求
-    const href = await firstPortfolioHref(page);
     const initialResp = page.waitForResponse(
       (r) =>
         r.request().method() === 'GET' &&
@@ -189,7 +148,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
         !r.url().includes('platform_code='),
       { timeout: 15_000 }
     );
-    await page.goto(`${href}/trades`);
+    await page.goto(portfolioPath(E2E_PORT, 'trades'));
     await page.getByRole('button', { name: '提交交易' }).first().waitFor({ timeout: 15_000 });
     await initialResp;
 
@@ -424,10 +383,9 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
   test('移动端：更新非净值资产与筛选面板的平台选择框可搜索', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile', '仅移动端项目');
     const errors = collectPageErrors(page);
-    const href = await firstPortfolioHref(page);
 
     // /m/portfolio/{code}/positions → 「更新非净值资产」（纯图标触发器）→ 平台搜索点选
-    await page.goto(`${href}/positions`);
+    await page.goto(portfolioPath(E2E_PORT, 'positions'));
     await expect(page).toHaveURL(/\/m\/portfolio\//);
     const refreshTrigger = page.getByTestId('cash-update-trigger');
     await refreshTrigger.waitFor({ timeout: 15_000 });
@@ -444,7 +402,7 @@ test.describe('平台选择框搜索（防 #177 回归）', () => {
     await dlg.getByRole('button', { name: '取消' }).click();
 
     // trades 移动页筛选面板（覆盖 shared 组件 mobile variant）：展开「筛选」→ 平台控件可搜索
-    await page.goto(`${href}/trades`);
+    await page.goto(portfolioPath(E2E_PORT, 'trades'));
     await page.getByRole('button', { name: '提交交易' }).first().waitFor({ timeout: 15_000 });
     await page.getByRole('button', { name: '筛选' }).click();
     await platformTrigger(page, '全部平台').click();

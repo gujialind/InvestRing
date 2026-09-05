@@ -7,48 +7,19 @@
  * 修复（方案 C）：DialogContent 经 context 暴露 DOM 节点，PopoverContent 在 Dialog 内时
  * 把弹层 Portal 注入 DialogContent。本文件守护该行为不再复发。
  *
- * 数据说明：快照页四个弹窗的「选日写入 + 按钮启用」断言不依赖业务数据，
- * CI 种子库（seed_e2e.py 的 draft 组合 E2E_PORT）即可跑；编辑交易用例依赖 pending 交易，
- * 无数据时优雅 skip（与 regression.spec.ts 同一惯例）。
+ * 数据说明：全部用例经 helpers.ts 按组合 code 直达种子活跃组合 E2E_ACTIVE
+ * （#354），不再依赖列表 .first() 的无序命中。E2E_ACTIVE 是种子契约：缺组合即
+ * 硬失败，不再优雅 skip。编辑交易用例（用例 5/8）依赖 D4 那笔 pending 场内买入，
+ * 故禁止对 E2E_ACTIVE 跑 recalculate/catch-up/generate-next——auto_confirm 会吃掉
+ * 该 pending 交易、破坏「编辑按钮可见」契约。用例 4 用 dry_run 探针（零副作用）
+ * 取真实 count 后对 UI 做精确单分支断言，不再 OR 弱断言。
  */
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { E2E_ACTIVE, authHeaders, dialogByTitle, gotoPortfolioSubpage } from './helpers';
 
 /** 日历中「当月 18 号」按钮（data-day=yyyy-MM-18，当月视图内唯一） */
 const DAY_18 = 'button.rdp-day_button[data-day$="-18"]';
 const DAY_17 = 'button.rdp-day_button[data-day$="-17"]';
-
-/** 进入组合列表，返回首个组合快照页 URL（桌面 /portfolio、移动 /m/portfolio 自适应） */
-async function gotoSnapshotsPage(page: Page): Promise<void> {
-  await page.goto('/portfolio');
-  const firstDetailLink = page.locator('a[href*="/portfolio/"]').first();
-  try {
-    await firstDetailLink.waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    test.skip(true, '环境中没有组合数据');
-  }
-  const href = await firstDetailLink.getAttribute('href');
-  await page.goto(`${href}/snapshots`);
-  await page.getByRole('button', { name: '追平至日期' }).waitFor({ timeout: 15_000 });
-}
-
-/** 进入首个组合的交易页 */
-async function gotoTradesPage(page: Page): Promise<void> {
-  await page.goto('/portfolio');
-  const firstDetailLink = page.locator('a[href*="/portfolio/"]').first();
-  try {
-    await firstDetailLink.waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    test.skip(true, '环境中没有组合数据');
-  }
-  const href = await firstDetailLink.getAttribute('href');
-  await page.goto(`${href}/trades`);
-  await page.getByRole('button', { name: '提交交易' }).first().waitFor({ timeout: 15_000 });
-}
-
-/** 按弹窗标题定位 Dialog（Popover 弹层同样带 role=dialog，需用文案区分） */
-function dialogByTitle(page: Page, title: string | RegExp): Locator {
-  return page.locator('[role="dialog"]').filter({ hasText: title }).first();
-}
 
 /** DatePicker trigger：占位文案或已选日期 */
 function pickerTrigger(dlg: Locator, extra?: RegExp): Locator {
@@ -69,7 +40,7 @@ async function pickDay(page: Page, dlg: Locator, daySelector: string, trigger?: 
 test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
   // ---- 用例 1：追平至日期 → 选日写入、「开始追平」启用（issue 原断言 1）----
   test('追平快照弹窗：选日写入且「开始追平」启用', async ({ page }) => {
-    await gotoSnapshotsPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'snapshots');
     await page.getByRole('button', { name: '追平至日期' }).click();
     const dlg = dialogByTitle(page, '追平快照');
     await dlg.waitFor();
@@ -82,7 +53,7 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
 
   // ---- 用例 2：单日生成 → 选日写入、「预检验证」启用（issue 原断言 2）----
   test('单日生成弹窗：选日写入且「预检验证」启用', async ({ page }) => {
-    await gotoSnapshotsPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'snapshots');
     await page.getByRole('button', { name: '单日生成' }).click();
     const dlg = dialogByTitle(page, '生成单日快照');
     await dlg.waitFor();
@@ -96,7 +67,7 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
   // ---- 用例 3：区间重算 → 起止两日期写入、勾选确认后「提交重算任务」启用
   //      （issue 原断言 3 + 症状 2「Dialog 保留但日期不写入」修复实证）----
   test('区间重算弹窗：起止两日期写入、勾选后「提交重算任务」启用', async ({ page }) => {
-    await gotoSnapshotsPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'snapshots');
     await page.getByRole('button', { name: '区间重算' }).click();
     const dlg = dialogByTitle(page, '区间重算快照');
     await dlg.waitFor();
@@ -116,31 +87,43 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
 
   // ---- 用例 4：批量删除 → 起始日期写入、可触发 dry-run 预览（issue 原断言 4）----
   test('批量删除弹窗：起始日期写入、dry-run 预览可触发', async ({ page }) => {
-    await gotoSnapshotsPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'snapshots');
     await page.getByRole('button', { name: '批量删除' }).click();
     const dlg = dialogByTitle(page, '批量删除快照');
     await dlg.waitFor();
 
     await pickDay(page, dlg, DAY_17, pickerTrigger(dlg, /选择起始日期/));
     await expect(dlg).toBeVisible();
-    await expect(dlg.getByRole('button', { name: /20\d{2}-\d{2}-17/ })).toBeVisible();
+    const trigger = dlg.getByRole('button', { name: /20\d{2}-\d{2}-17/ });
+    await expect(trigger).toBeVisible();
+
+    // 收紧（#354）：旧断言 OR 两分支恒过、无判别力。改为回读 trigger 实际选中的起始日，
+    // 经 API dry_run（零副作用、并发安全）取同一 from_date 的真实快照数，再断言 UI 精确
+    // 命中对应单分支——UI 与后端就同一日期达成一致才算预览契约成立。
+    const fromDate = (await trigger.innerText()).trim().match(/\d{4}-\d{2}-\d{2}/)![0];
+    const headers = await authHeaders(page);
+    const probe = await page.request.delete(
+      `/api/snapshots/${E2E_ACTIVE}/bulk/${fromDate}?dry_run=true`,
+      { headers },
+    );
+    expect(probe.ok(), `dry_run 预览探针失败 ${probe.status()}`).toBeTruthy();
+    const { count } = (await probe.json()) as { count: number };
 
     await dlg.getByRole('button', { name: '预览影响' }).click();
-    // dry-run 两种合法终态：有快照列清单 / 无快照提示（CI 种子库无快照）
-    await expect(
-      dlg.getByText(/将删除 \d+ 张快照|该日期及之后无快照可删除/)
-    ).toBeVisible({ timeout: 10_000 });
+    if (count > 0) {
+      await expect(dlg.getByText(`将删除 ${count} 张快照`)).toBeVisible({ timeout: 10_000 });
+    } else {
+      await expect(dlg.getByText('该日期及之后无快照可删除')).toBeVisible({ timeout: 10_000 });
+    }
   });
 
   // ---- 用例 5：编辑交易弹窗（pending 交易）选日写入（issue 原断言 5）----
   test('编辑交易弹窗：交易日期选日写入', async ({ page }) => {
-    await gotoTradesPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'trades');
+    // E2E_ACTIVE 种子契约：D4 有一笔 pending 场内买入（编辑按钮在结对主行=基金腿，
+    // CASH 子行无），trade_date > 最新快照日且落在「近1年」过滤窗内 → 必现，缺即硬失败
     const editBtn = page.locator('button[title="编辑"]').first();
-    try {
-      await editBtn.waitFor({ state: 'visible', timeout: 8_000 });
-    } catch {
-      test.skip(true, '环境中无 pending 交易可编辑');
-    }
+    await expect(editBtn).toBeVisible({ timeout: 10_000 });
     await editBtn.click();
     const dlg = dialogByTitle(page, '编辑交易');
     await dlg.waitFor();
@@ -156,7 +139,7 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
   test('modal={false} 弹窗：提交交易/申购/事件/现金修正/转移选日写入', async ({ page }, testInfo) => {
     const isMobile = testInfo.project.name === 'mobile';
     // 提交交易（TradesContent L575）
-    await gotoTradesPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'trades');
     await page.getByRole('button', { name: '提交交易' }).first().click();
     let dlg = dialogByTitle(page, '提交交易');
     await dlg.waitFor();
@@ -167,7 +150,7 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
 
     // 申购（SubscriptionsContent L376）
     await page.goto(page.url().replace(/\/trades.*$/, '/subscriptions'));
-    await page.getByRole('button', { name: /提交申请|首次申购激活/ }).click();
+    await page.getByRole('button', { name: /提交申请|首次申购激活/ }).first().click();
     dlg = dialogByTitle(page, /提交申请|首次申购激活/);
     await dlg.waitFor();
     trig = await pickDay(page, dlg, DAY_18);
@@ -229,7 +212,7 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
   // 共用单实例，该条件达成，下面按逐层语义守护。
   test('键盘层级：Esc 逐层关闭弹层、Tab 焦点不逃逸', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '移动端无物理键盘语义，仅桌面项目断言');
-    await gotoSnapshotsPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'snapshots');
     await page.getByRole('button', { name: '追平至日期' }).click();
     let dlg = dialogByTitle(page, '追平快照');
     await dlg.waitFor();
@@ -271,7 +254,7 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
   // ---- 用例 10：弹窗外回归——筛选栏 DateRangePicker 交互不变（issue 原断言 8，
   //      context 为空时保持 body Portal 默认行为）----
   test('弹窗外 DateRangePicker（交易页筛选栏）区间选择不回归', async ({ page }, testInfo) => {
-    await gotoTradesPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'trades');
     // 移动端筛选栏默认折叠（TradesContent L752：「筛选」按钮展开）
     if (testInfo.project.name === 'mobile') {
       await page.getByRole('button', { name: '筛选' }).click();
@@ -300,7 +283,7 @@ test.describe('弹窗内 DatePicker（防 #191 复发）', () => {
 test.describe('弹窗内 DatePicker 移动端（防 #191 复发）', () => {
   test('移动端快照页四弹窗选日写入', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile', '仅移动端项目');
-    await gotoSnapshotsPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'snapshots');
     await expect(page).toHaveURL(/\/m\/portfolio\//);
 
     for (const [triggerName, title, daySel, extra] of [
@@ -331,7 +314,7 @@ test.describe('弹窗内 DatePicker 矮视口（评审新增）', () => {
     await page.setViewportSize(isMobile ? { width: 390, height: 700 } : { width: 800, height: 500 });
     const viewportH = isMobile ? 700 : 500;
 
-    await gotoSnapshotsPage(page);
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'snapshots');
     const dialogs: Array<[string, string, string]> = [
       ['追平至日期', '追平快照', '开始追平'],
       ['单日生成', '生成单日快照', '预检验证'],
@@ -358,16 +341,12 @@ test.describe('弹窗内 DatePicker 矮视口（评审新增）', () => {
       else await page.waitForTimeout(300);
     }
 
-    // 编辑交易弹窗（字段最多的弹窗）
-    await page.goto(page.url().replace(/\/snapshots.*$/, '/trades'));
+    // 编辑交易弹窗（字段最多的弹窗）：E2E_ACTIVE 有 D4 pending 场内买入 → 编辑按钮必现。
+    // 断言内容超高时经 DialogContent 内层滚动容器可达（#191 高度兜底），滚动到位后执行
+    // 按钮落在视口内。
+    await gotoPortfolioSubpage(page, E2E_ACTIVE, 'trades');
     const editBtn = page.locator('button[title="编辑"]').first();
-    try {
-      await editBtn.waitFor({ state: 'visible', timeout: 8_000 });
-    } catch {
-      test.skip(true, '环境中无 pending 交易可编辑（编辑弹窗矮视口断言跳过）');
-    }
-    // 编辑交易弹窗（字段最多的弹窗）：内容超高时经 DialogContent 内层滚动容器
-    // 可达（#191 高度兜底），滚动到位后执行按钮应落在视口内
+    await expect(editBtn).toBeVisible({ timeout: 10_000 });
     await editBtn.click();
     const dlg = dialogByTitle(page, '编辑交易');
     await dlg.waitFor();

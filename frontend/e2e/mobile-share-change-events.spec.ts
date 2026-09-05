@@ -1,39 +1,25 @@
 /**
  * 前端 E2E 测试：移动端份额变动事件页（#276）
  *
- * 数据说明：种子环境不保证存在份额变动事件数据——列表断言兼容空态
- * （「暂无份额变动事件」），组合数据缺失时整组优雅 skip。
- * 仅 mobile project 有意义：/m 路由由 middleware 按 UA 重定向。
+ * 数据说明：组合经 helpers 按 code 直达种子 draft 组合 E2E_PORT（#354），缺组合
+ * 即硬失败、不 skip；份额变动事件数据种子不保证存在——列表断言兼容空态
+ * （「暂无份额变动事件」），用例 4 经 REST 造一条 pending 事件（无产品/平台
+ * 数据时优雅 skip）。仅 mobile project 有意义：/m 路由由 middleware 按 UA 重定向。
  */
 import { test, expect, type Page } from '@playwright/test';
+import { E2E_PORT, authHeaders, collectPageErrors, dialogByTitle, gotoPortfolioDetail } from './helpers';
 
-/** 进入首个组合的移动端详情页，返回组合 code */
+/** 进入 E2E_PORT 移动端详情页（经 middleware 重定向到 /m），返回组合 code */
 async function gotoMobilePortfolioDetail(page: Page): Promise<string> {
-  await page.goto('/portfolio');
-  const firstDetailLink = page.locator('a[href*="/portfolio/"]').first();
-  try {
-    await firstDetailLink.waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    test.skip(true, '环境中没有组合数据');
-  }
-  const href = await firstDetailLink.getAttribute('href');
-  const code = href!.split('/').filter(Boolean).pop()!;
-  await page.goto(`/m/portfolio/${code}`);
+  await gotoPortfolioDetail(page, E2E_PORT);
   await expect(page.getByRole('heading', { name: '管理' })).toBeVisible({ timeout: 15_000 });
-  return code;
+  return E2E_PORT;
 }
 
 test.describe('移动端份额变动事件页（#276）', () => {
   test('管理列表入口跳转并渲染列表/筛选', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile', '移动端入口断言仅针对移动项目');
-    const errors: string[] = [];
-    page.on('pageerror', (e) => {
-      const msg = e.message;
-      // 豁免 Next.js standalone/mobile 的 RSC `_rsc` prefetch 被 middleware 拦下的
-      // 框架级 `access control` 噪音（同 product-select-market / platform-select-search spec 口径）
-      if (/access control checks/.test(msg) && /_rsc=/.test(msg)) return;
-      errors.push(msg);
-    });
+    const errors = collectPageErrors(page);
 
     const code = await gotoMobilePortfolioDetail(page);
     // 入口：页尾「管理」列表第 5 项
@@ -72,7 +58,7 @@ test.describe('移动端份额变动事件页（#276）', () => {
     await page.getByRole('button', { name: '新建事件' }).waitFor({ timeout: 15_000 });
 
     await page.getByRole('button', { name: '新建事件' }).click();
-    const dlg = page.locator('[role="dialog"]').filter({ hasText: '新建份额变动事件' }).first();
+    const dlg = dialogByTitle(page, '新建份额变动事件');
     await expect(dlg).toBeVisible();
     // 现金分红默认类型：每份分红金额字段存在
     await expect(dlg.getByText('每份分红金额（元）')).toBeVisible();
@@ -85,9 +71,7 @@ test.describe('移动端份额变动事件页（#276）', () => {
 
     // API 造数：种子不保证有事件数据，经 REST 造一条 pending 现金分红事件；
     // 双日期取种子日历内固定交易日（2025-2026 工作日，见 seed_base）
-    const token = await page.evaluate(() => localStorage.getItem('token'));
-    if (!token) test.skip(true, '无法获取登录 token');
-    const headers = { Authorization: `Bearer ${token}` };
+    const headers = await authHeaders(page);
 
     const products = await (await page.request.get('/api/products?page_size=1', { headers })).json();
     const platforms = await (await page.request.get('/api/platforms?page_size=1', { headers })).json();
@@ -123,7 +107,7 @@ test.describe('移动端份额变动事件页（#276）', () => {
 
       // pending 父记录有编辑入口
       await row.locator('button[title="编辑"]').click();
-      const dlg = page.locator('[role="dialog"]').filter({ hasText: '编辑份额变动事件' }).first();
+      const dlg = dialogByTitle(page, '编辑份额变动事件');
       await expect(dlg).toBeVisible();
       // 只读摘要含事件类型
       await expect(dlg.getByText('现金分红').first()).toBeVisible();

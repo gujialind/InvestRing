@@ -4,29 +4,13 @@
  * 本文件针对排查报告中已修复的 P0 问题设立回归防线，
  * 每个用例注明其防止复发的具体问题。
  */
-import { test, expect, type Page, type Locator } from '@playwright/test';
-
-/**
- * 进入组合列表并返回首个组合详情链接。
- * 组合列表为客户端 fetch，需等待渲染完成再判定空数据，
- * 否则首帧无链接会误判「没有组合数据」而错误 skip。
- */
-async function gotoFirstPortfolio(page: Page): Promise<Locator> {
-  await page.goto('/portfolio');
-  const firstDetailLink = page.locator('a[href^="/portfolio/"]').first();
-  try {
-    await firstDetailLink.waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    test.skip(true, '环境中没有组合数据');
-  }
-  return firstDetailLink;
-}
+import { test, expect } from '@playwright/test';
+import { E2E_ACTIVE, E2E_PORT, collectPageErrors, gotoPortfolioDetail, gotoPortfolioSubpage } from './helpers';
 
 test.describe('页面渲染回归（防 P0 复发）', () => {
   // 防 P0-2：taskApi.list 返回分页对象却按数组处理，导致 tasks.map is not a function 白屏
   test('任务管理页应正常渲染，不出现客户端崩溃', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('pageerror', (e) => errors.push(e.message));
+    const errors = collectPageErrors(page);
 
     await page.goto('/settings/tasks');
 
@@ -47,8 +31,7 @@ test.describe('页面渲染回归（防 P0 复发）', () => {
 
   // 防 P0-5：前端曾提供后端不存在的 DELETE /portfolios/{code}（405）
   test('组合详情页不应出现删除组合入口', async ({ page }) => {
-    const firstDetailLink = await gotoFirstPortfolio(page);
-    await firstDetailLink.click();
+    await gotoPortfolioDetail(page, E2E_PORT);
     await expect(page.getByRole('button', { name: '删除组合' })).toHaveCount(0);
   });
 });
@@ -88,10 +71,8 @@ test.describe('DateRangePicker 矮视口回归（防 #161 复发）', () => {
   test('600px 视口下日期区间弹层「确定」按钮应在视口内可达', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile', '矮视口断言仅针对桌面项目');
 
-    const firstDetailLink = await gotoFirstPortfolio(page);
-    // 详情页无「调仓交易」导航链接，从详情链接提取 code 直达 trades 子页（数据无关）
-    const href = await firstDetailLink.getAttribute('href');
-    await page.goto(`${href}/trades`);
+    // 数据无关：任意组合的 trades 子页筛选栏都有 DateRangePicker，用 E2E_PORT 直达
+    await gotoPortfolioSubpage(page, E2E_PORT, 'trades');
 
     // DateRangePicker 触发器：默认区间「近1年」，按钮文案为 yyyy-MM-dd ~ yyyy-MM-dd
     await page.getByRole('button').filter({ hasText: '~' }).first().click();
@@ -115,21 +96,16 @@ test.describe('持仓明细维度二级分组（防 #109 / #114 复发，#128 �
   // data-testid="asset-group-header" 挂在所有 chip 行上
   // #128：分组数据源从 asset_name 换成维度 name（股票→region、债券/商品→segment）
   test('子分组头合计金额应等于名下各行市值之和（含单行分组）', async ({ page }) => {
-    const firstDetailLink = await gotoFirstPortfolio(page);
-    await firstDetailLink.click();
-    // 无快照/持仓数据的组合（如 draft）不渲染持仓明细区，此时无从断言，优雅 skip
-    try {
-      await page.getByText('持仓明细').waitFor({ state: 'visible', timeout: 10_000 });
-    } catch {
-      test.skip(true, '环境中组合无持仓明细数据（无快照/持仓）');
-    }
+    // E2E_ACTIVE 种子契约：2 日快照 + 510300.SH 持仓 → 持仓明细区必渲染（不再优雅 skip）。
+    // 移动端经 middleware 重定向到 /m 详情页，PositionSections 为双端共享组件，故本
+    // 用例在 mobile project 同样真跑（旧 `href^="/portfolio/"` 定位曾使其在移动端恒 skip）。
+    await gotoPortfolioDetail(page, E2E_ACTIVE);
+    await expect(page.getByText('持仓明细')).toBeVisible({ timeout: 10_000 });
 
     const headers = page.locator('[data-testid="asset-group-header"]');
     const headerCount = await headers.count();
-    test.skip(
-      headerCount === 0,
-      '环境中无满足子分组 chip 渲染条件（组名与大类不同名）的数据'
-    );
+    // 510300.SH=ASSET_STOCK 按 region 分组、组名与大类「股票」不同名 → 子分组 chip 必渲染
+    expect(headerCount, 'E2E_ACTIVE 持仓应渲染出至少一个子分组头').toBeGreaterThanOrEqual(1);
 
     // 金额均为「x,xxx.xx 元」格式，取文本内首个两位小数数字
     const firstAmount = (text: string) =>

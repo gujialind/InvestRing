@@ -123,7 +123,19 @@ cd backend && pytest tests -q
 
 ## 3. 种子数据（单一事实来源）
 
-`tests/seed_base.py::seed_base_data(db)`：维度字典、适用关系、4 平台、7 产品、2025-2026 工作日日历、draft 组合 `E2E_PORT`、ADMIN/admin@2026、VIEWER/viewer123。三处消费：pytest（conftest）、CI E2E（`scripts/seed_e2e.py`）、本地 E2E（`scripts/run_e2e_backend.py`）。改种子只改这一处。**前端 E2E 业务冒烟依赖 `E2E_PORT` 存在（无组合时 spec 静默 skip），勿删。**
+`tests/seed_base.py` 提供两个入口，改种子只改这一处：
+
+* **`seed_base_data(db)`**——基础数据：维度字典、适用关系、4 平台、9 产品（3 虚拟 + 6 业务）、2025-2026 工作日日历、draft 组合 `E2E_PORT`（零交易零快照）、ADMIN/admin@2026、VIEWER/viewer123。**三处消费**：pytest（conftest `_seed_base_data`）、CI E2E（`scripts/seed_e2e.py`）、本地 E2E（`scripts/run_e2e_backend.py`）。
+* **`seed_e2e_active(db)`**——E2E 专属活跃组合 `E2E_ACTIVE`（#354）。**仅两处 E2E 脚本在 `seed_base_data` 之后调用，不进 pytest session 种子**：其业务交易/申购/价格数据会泄漏进按「全局账本」精确断言的存量后端测试（`test_filter_by_status`/`test_sort_apply_date_desc`/`test_trades` 系列/价格 upsert 计数），且后端 pytest 本就不需要它。
+
+**前端 E2E 依赖两个组合的形态契约**（spec 经 `frontend/e2e/helpers.ts` 按 code 直达，缺组合或形态退化会硬失败，不再优雅 skip），勿删勿改形态：
+
+* `E2E_PORT`：draft、零交易/申赎/快照——platform-select-search、trade-buy-amount-linkage（用例 7 依赖零快照的 1.0000 首购窗口）等 spec 的目标。
+* `E2E_ACTIVE`：动态日期编排——锚定 `date.today()` 回溯 4 个交易日 D1<D2<D3<D4：D1 申购（ADMIN/HBZQ，10 万）→ D2 确认（首窗净值 1.0000、组合转 active）+ 场内买入 510300.SH 并确认（成交价 4.0000，不依赖行情同步）+ 首快照（首快照日 == 最早 confirm_date，#180）→ D3 第二快照（价 4.2000，连续原则）→ D4 pending 场内买入（8,200 元，供编辑类用例；trade_date > 最新快照日且落在前端「近1年」默认过滤窗内，故必须动态日期）。业务数据走 service 层造（复用 CASH 配对腿/激活状态机/快照三表全部不变量），仅 Portfolio/PriceRecord 直接 ORM；整段单事务末尾一次 commit，幂等守卫 =「组合已存在则跳过」。**create_trade 后必须 `db.flush()` 再 confirm**——否则基金腿 id=None，`sync_transfer_group` 定位不到配对 CASH 腿，CASH 腿滞留 pending 使快照预校验失败。**禁止对 `E2E_ACTIVE` 跑 recalculate/catch-up/generate-next**：auto_confirm 会确认 D4 pending 交易，破坏编辑契约。
+
+日历**未随本次扩展**（仍止 2026-12-31）：`test_trading_day`/`test_snapshot_service` 用 2027、2030 作「未同步」哨兵日期，扩展日历即打破它们，属另一耦合议题。`seed_e2e_active` 的动态日期依赖日历覆盖 today 及前 4 个交易日，越界抛 `RuntimeError` 响亮失败（非静默）——临近 2026 年底需一并处理日历终点与哨兵测试。
+
+契约由 `tests/integration/test_seed_contract.py` 锁死（纯查询断言，E2E_ACTIVE 用 function 级 fixture 现造），改种子形态先改契约测试。
 
 ## 4. 本地启动
 
