@@ -7,7 +7,7 @@
 #   ./install.sh --ref dev                         # 指定分支/tag/commit
 #   ./install.sh --base-url https://ir.example.com # 顺便写入服务端地址
 #
-#   curl -LsSf https://raw.githubusercontent.com/gujialind/InvestRing/main/ir-cli/install.sh \
+#   curl -LsSf https://raw.githubusercontent.com/gujialind/investring/main/ir-cli/install.sh \
 #     | bash -s -- --repo gitee --ref dev --base-url https://ir.example.com
 #
 # 升级 = 重跑本脚本（--force --reinstall 会强制拉取仓库最新提交）。
@@ -37,7 +37,7 @@ AT_REF=""
 [[ -n "$REF" ]] && AT_REF="@${REF}"
 
 case "$REPO" in
-    github) GIT_URL="git+ssh://git@github.com/gujialind/InvestRing.git${AT_REF}#subdirectory=ir-cli" ;;
+    github) GIT_URL="git+ssh://git@github.com/gujialind/investring.git${AT_REF}#subdirectory=ir-cli" ;;
     gitee)  GIT_URL="git+ssh://git@gitee.com/collyns_Gu/invest-ring.git${AT_REF}#subdirectory=ir-cli" ;;
     git+*)
         # 完整 URL 由调用方自带 @ref，不另行拼接，避免产生双 @
