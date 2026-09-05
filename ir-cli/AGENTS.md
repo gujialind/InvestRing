@@ -22,3 +22,7 @@ CI 的 `cli-contract-check` job 还校验 `backend/openapi.json` 本身无漂移
 ## 3. 契约语义
 
 `ir schema` 输出含响应字段契约（`commands.<group>.<sub>.output.fields`，`*` 前缀=默认摘要字段、`?` 后缀=可空）与 `--index` 极简索引模式；改命令输出字段时同步更新 `utils.py` 的 SUMMARY_FIELDS 再重新生成。
+
+## 4. 版本
+
+`pyproject.toml` 的 version（`ir --version` 经 `importlib.metadata` 读取）由发布流程从仓库根 `VERSION` 同步，勿手改（见 `docs/reference/versioning.md`）。

@@ -409,11 +409,11 @@ export default function SettingsContent() {
             <CardContent className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">系统版本</span>
-                <span>v1.0.0</span>
+                <span>v{process.env.NEXT_PUBLIC_APP_VERSION}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">前端框架</span>
-                <span>Next.js 15</span>
+                <span>Next.js 16</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">后端框架</span>
