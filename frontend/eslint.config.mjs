@@ -132,6 +132,13 @@ const eslintConfig = [
       "no-restricted-imports": "off",
     },
   },
+  // Node 配置文件为 CJS 语境，require 属正当用法（#375：next.config.js 读 package.json version 注入 NEXT_PUBLIC_APP_VERSION）。
+  {
+    files: ["next.config.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   // 任意值护栏豁免（visual-spec §1.5 登记；豁免文件仍受调色板拦截）。
   // 永久：shadcn 基件 vendor 源码，保持与上游同步。
   {

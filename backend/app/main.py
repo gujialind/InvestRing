@@ -1,4 +1,6 @@
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -35,10 +37,22 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
+def _resolve_version() -> str:
+    """项目版本单一来源 = 仓库根 VERSION 文件（#375）；APP_VERSION 环境变量优先，供运行期覆盖。"""
+    env_version = os.environ.get("APP_VERSION")
+    if env_version:
+        return env_version
+    for parent in Path(__file__).resolve().parents:
+        version_file = parent / "VERSION"
+        if version_file.is_file():
+            return version_file.read_text(encoding="utf-8").strip()
+    return "0.0.0"
+
+
 app = FastAPI(
     title="InvestRing API",
     description="资产组合管理系统 API",
-    version="1.0.0",
+    version=_resolve_version(),
     lifespan=lifespan,
 )
 

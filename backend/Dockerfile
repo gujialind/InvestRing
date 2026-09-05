@@ -54,6 +54,9 @@ COPY --from=deps /install /usr/local
 # 复制后端应用代码
 COPY backend/ .
 
+# 项目版本单一来源（#375）：app.main._resolve_version 逐级向上查找读取
+COPY VERSION ./
+
 # 设置 Python 环境变量
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
