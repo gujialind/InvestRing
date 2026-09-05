@@ -44,19 +44,25 @@
 
 `vX.Y.Z` 与 `deploy/*` 标签指向同一 commit，镜像同时携带 `:vX.Y.Z` 与 `:sha7`，从版本号可完整追溯上线日期。
 
-## 4. 发布流程
+## 4. 发布流程（两阶段：发布 PR → 打 tag）
+
+main 的 ruleset 要求一切改动经 PR 且 CI OK（**直接推送会被拒绝，无 admin 豁免**），而 `v` 标签必须落在 main tip（PR 以 merge-commit 合并）deploy.yml 才能识别「被部署 commit 的语义版本」，故发布分两阶段：
 
 ```bash
-python3 scripts/release.py --suggest           # 1. 看建议的 bump 类型（只读）
-python3 scripts/release.py patch --dry-run     # 2. 预览全部改动 + CHANGELOG 草稿（不落盘）
-python3 scripts/release.py patch               # 3. 真跑；推送前交互确认（非交互加 --yes）
+python3 scripts/release.py --suggest           # 0. 看建议的 bump 类型（只读）
+python3 scripts/release.py patch --dry-run     # 1. 预览全部改动 + CHANGELOG 草稿（不落盘）
+python3 scripts/release.py patch               # 2. 阶段一：release/vX.Y.Z 分支提交 + 推送 + 创建 PR
+                                               #    （推送前交互确认；非交互加 --yes；--fixes N 关联 issue）
+#    发布 PR 等 CI OK 后按常规合并（merge-commit）
+python3 scripts/release.py tag v0.1.1          # 3. 阶段二：在 origin/main tip 打附注标签并推送
 ```
 
-* **前提**：main 分支、工作区干净、与 origin/main 同步；钉版契约环境 `.venv-openapi/` 存在（缺失时脚本给出重建命令：`python3 -m venv .venv-openapi && .venv-openapi/bin/pip install -r backend/requirements.txt`）。
-* **脚本原子完成**：同步 5 处版本文件（含 package-lock 两处）→ 进程内重导出 `openapi.json` → `check_openapi.py` + `gen_response_fields.py --check` 验证 → CHANGELOG 顶部插入新条目 → 单 commit `chore(release): vX.Y.Z` → 附注标签 `vX.Y.Z` → 推送 main + tag。
-* **发布提交不经 PR、直接在 main 上打**：仓库以 merge-commit 合并 PR，`v` 标签必须落在 main tip 上，deploy.yml 才能识别「被部署 commit 的语义版本」并给镜像追加 `:vX.Y.Z`；owner 权限直接推送 main（ruleset 对 admin 豁免）。
+* **前提**（阶段一）：main 分支、工作区干净、与 origin/main 同步；钉版契约环境 `.venv-openapi/` 存在（缺失时脚本给出重建命令：`python3 -m venv .venv-openapi && .venv-openapi/bin/pip install -r backend/requirements.txt`）。
+* **阶段一原子完成**：同步 5 处版本文件（含 package-lock 两处；读写保留原行尾，CRLF 文件不翻转）→ 进程内重导出 `openapi.json` → `check_openapi.py` + `gen_response_fields.py --check` 验证 → CHANGELOG 顶部插入新条目 → 在 `release/vX.Y.Z` 分支单 commit `chore(release): vX.Y.Z` → 推送分支并创建发布 PR（有 `gh` CLI 时自动建）。
+* **阶段二校验后打 tag**：`origin/main` 的 VERSION 与目标一致、近 20 条历史含该 `chore(release)` 提交、标签不存在，然后在 `origin/main` tip `git tag -a` 并推送。
+* **tag 时序**：阶段二应在 PR 合并后**立即**运行——deploy 要等 CI（约 8-10 分钟）通过后才构建镜像，构建时才 `git fetch --tags` 检测语义标签，窗口充裕。若错过（镜像未带 `:vX.Y.Z`），重跑该 commit 的 CI run（`gh run rerun`）即可重新触发 deploy 补上。
 * **节奏**：手动触发；功能里程碑收口发 MINOR，一批修复后可批量发 PATCH，不要求每次合入都发版。
-* **失败恢复**：commit 前失败 → `git restore --staged . && git restore .`；commit 后推送前失败 → `git reset --hard origin/main` 并 `git tag -d vX.Y.Z`。
+* **失败恢复**：阶段一 commit 前失败 → `git restore --staged . && git restore .`（仍在 release 分支，清理后切回 main 删分支）；commit 后未推送 → `git switch main && git branch -D release/vX.Y.Z`；PR 已合并未打 tag → 直接运行阶段二。
 * 首次发布用 `--initial v0.1.0`（基线摘要条目，此前历史不逐条回溯）。
 
 ## 5. 镜像与部署标签
