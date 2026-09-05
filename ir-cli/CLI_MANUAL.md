@@ -23,17 +23,17 @@
 ./ir-cli/install.sh --ref dev --base-url https://ir.example.com
 
 # curl 一键安装
-curl -LsSf https://raw.githubusercontent.com/gujialind/InvestRing/main/ir-cli/install.sh | bash -s -- --repo gitee --base-url https://ir.example.com
+curl -LsSf https://raw.githubusercontent.com/gujialind/investring/main/ir-cli/install.sh | bash -s -- --repo gitee --base-url https://ir.example.com
 ```
 
 **方式二：pip / uv 手动安装**
 
 ```bash
 # uv（推荐）
-uv tool install "git+ssh://git@github.com/gujialind/InvestRing.git#subdirectory=ir-cli"
+uv tool install "git+ssh://git@github.com/gujialind/investring.git#subdirectory=ir-cli"
 
 # pip
-pip install "git+ssh://git@github.com/gujialind/InvestRing.git#subdirectory=ir-cli"
+pip install "git+ssh://git@github.com/gujialind/investring.git#subdirectory=ir-cli"
 ```
 
 安装后 `ir` 命令注册到 PATH 中。升级 = 重跑安装脚本（`--force --reinstall`）。
