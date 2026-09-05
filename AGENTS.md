@@ -207,6 +207,8 @@ draft ──首次申购确认──▶ active ──close──▶ closed ─�
 
 * 使用 PR 模板 `.github/PULL_REQUEST_TEMPLATE.md`。
 
+* **改 PR base 不触发 CI**：`on: pull_request` 默认只订阅 opened/synchronize/reopened，retarget（`edited` 事件）后 checks 为空、required check `CI OK` 永远无法满足；须 close/reopen PR 或推新 commit 重新触发（#377 实踩）。
+
 ### 3.4 commit 信息
 
 * Conventional Commits 风格：`fix:` / `feat:` / `docs:` / `refactor:` / `chore:`，附简短说明并尽量带 issue 号（如 `fix(snapshot): 快照净值严格匹配 (#96)`）。
